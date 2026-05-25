@@ -256,6 +256,37 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_simulated_bets_one_normal_per_candidate
 ON simulated_bets(candidate_id)
 WHERE candidate_id IS NOT NULL AND status <> 'duplicate_void';
 
+WITH logical AS (
+  SELECT
+    sb.id,
+    row_number() OVER (
+      PARTITION BY cb.event_id, cb.market_id, cb.outcome_id
+      ORDER BY sb.created_at ASC, sb.id ASC
+    ) AS duplicate_rank
+  FROM simulated_bets sb
+  JOIN candidate_bets cb ON cb.id = sb.candidate_id
+  WHERE sb.status <> 'duplicate_void'
+    AND cb.event_id IS NOT NULL
+    AND cb.market_id IS NOT NULL
+    AND cb.outcome_id IS NOT NULL
+)
+UPDATE simulated_bets sb
+SET status = 'duplicate_void',
+    settled_at = COALESCE(sb.settled_at, now()),
+    simulated_return = COALESCE(sb.simulated_return, sb.hypothetical_stake),
+    profit_loss = COALESCE(sb.profit_loss, 0),
+    settlement_payload = sb.settlement_payload || jsonb_build_object(
+      'duplicate_logical_selection_void',
+      jsonb_build_object(
+        'reason', 'duplicate paper placement for event/market/outcome',
+        'deduped_at', now(),
+        'paper_only', true
+      )
+    )
+FROM logical
+WHERE sb.id = logical.id
+  AND logical.duplicate_rank > 1;
+
 CREATE TABLE IF NOT EXISTS settlement_observations (
   id text PRIMARY KEY,
   simulated_bet_id text REFERENCES simulated_bets(id) ON DELETE CASCADE,
@@ -1192,6 +1223,9 @@ impl Store {
         if let Some(existing) = self.simulated_bet_by_candidate(candidate_id).await? {
             return Ok(existing);
         }
+        if let Some(existing) = self.simulated_bet_by_logical_selection(&candidate).await? {
+            return Ok(existing);
+        }
         let id = new_id();
         let payload =
             json!({"candidate": candidate, "paper_only": true, "strategy_id": "poc_ranker_v1"});
@@ -1204,7 +1238,7 @@ impl Store {
                   strategy_id, settlement_payload, payload
                 )
                 VALUES ($1,$2,($3::float8)::numeric,($4::float8)::numeric,$5,$6,$7,$8)
-                ON CONFLICT (candidate_id) WHERE status <> 'duplicate_void' DO NOTHING
+                ON CONFLICT DO NOTHING
                 "#,
                 &[
                     &id,
@@ -1222,6 +1256,7 @@ impl Store {
             return self
                 .simulated_bet_by_candidate(candidate_id)
                 .await?
+                .or(self.simulated_bet_by_logical_selection(&candidate).await?)
                 .ok_or_else(|| {
                     anyhow!("simulated bet insert skipped but existing row was not found")
                 });
@@ -1343,12 +1378,21 @@ impl Store {
                 WHERE NOT EXISTS (
                   SELECT 1 FROM simulated_bets WHERE candidate_id = $2 AND status <> 'duplicate_void'
                 )
+                AND NOT EXISTS (
+                  SELECT 1
+                  FROM simulated_bets sb
+                  JOIN candidate_bets existing ON existing.id = sb.candidate_id
+                  WHERE existing.event_id = $10
+                    AND existing.market_id = $11
+                    AND existing.outcome_id = $12
+                    AND sb.status <> 'duplicate_void'
+                )
                 AND (
                   SELECT COALESCE(sum(hypothetical_stake), 0)
                   FROM simulated_bets
                   WHERE status IN ('open', 'awaiting_result', 'unresolved')
                 ) + ($3::float8)::numeric <= ($9::float8)::numeric
-                ON CONFLICT (candidate_id) WHERE status <> 'duplicate_void' DO NOTHING
+                ON CONFLICT DO NOTHING
                 "#,
                 &[
                         &id,
@@ -1360,6 +1404,9 @@ impl Store {
                     &json!({}),
                     &payload,
                     &max_open_exposure,
+                    &candidate.event_id,
+                    &candidate.market_id,
+                    &candidate.outcome_id,
                 ],
             )
                 .await?;
@@ -1409,6 +1456,43 @@ impl Store {
                 LIMIT 1
                 "#,
                 &[&candidate_id],
+            )
+            .await?;
+        Ok(row.map(|row| simulated_bet_from_row(&row)))
+    }
+
+    async fn simulated_bet_by_logical_selection(
+        &self,
+        candidate: &CandidateBet,
+    ) -> anyhow::Result<Option<SimulatedBet>> {
+        let (Some(event_id), Some(market_id), Some(outcome_id)) = (
+            candidate.event_id.as_deref(),
+            candidate.market_id.as_deref(),
+            candidate.outcome_id.as_deref(),
+        ) else {
+            return Ok(None);
+        };
+        let client = self.connect().await?;
+        let row = client
+            .query_opt(
+                r#"
+                SELECT sb.id, sb.candidate_id, sb.created_at,
+                       sb.hypothetical_stake::float8 AS hypothetical_stake,
+                       sb.observed_decimal_odds::float8 AS observed_decimal_odds,
+                       sb.status, sb.strategy_id, sb.settled_at,
+                       sb.simulated_return::float8 AS simulated_return,
+                       sb.profit_loss::float8 AS profit_loss,
+                       sb.settlement_payload, sb.payload
+                FROM simulated_bets sb
+                JOIN candidate_bets cb ON cb.id = sb.candidate_id
+                WHERE cb.event_id = $1
+                  AND cb.market_id = $2
+                  AND cb.outcome_id = $3
+                  AND sb.status <> 'duplicate_void'
+                ORDER BY sb.created_at ASC
+                LIMIT 1
+                "#,
+                &[&event_id, &market_id, &outcome_id],
             )
             .await?;
         Ok(row.map(|row| simulated_bet_from_row(&row)))
