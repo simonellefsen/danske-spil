@@ -63,6 +63,17 @@ impl GamblerService {
         .await?;
         let mut candidates = build_candidates(&snapshot, 40);
         let snapshot_id = self.store.save_snapshot(&snapshot, &mut candidates).await?;
+        let (strategy_proposal, strategy_proposal_error) = match self
+            .store
+            .ensure_scan_strategy_proposal(&snapshot_id, &candidates)
+            .await
+        {
+            Ok(proposal) => (proposal, None),
+            Err(error) => {
+                tracing::warn!(%error, snapshot_id = %snapshot_id, "strategy proposal creation failed");
+                (None, Some(error.to_string()))
+            }
+        };
         self.store
             .record_audit(
                 "scan_completed",
@@ -76,9 +87,13 @@ impl GamblerService {
             )
             .await
             .ok();
-        Ok(
-            json!({"snapshot_id": snapshot_id, "candidate_count": candidates.len(), "snapshot": snapshot}),
-        )
+        Ok(json!({
+            "snapshot_id": snapshot_id,
+            "candidate_count": candidates.len(),
+            "strategy_proposal": strategy_proposal,
+            "strategy_proposal_error": strategy_proposal_error,
+            "snapshot": snapshot
+        }))
     }
 }
 

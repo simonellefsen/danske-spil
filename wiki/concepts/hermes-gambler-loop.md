@@ -49,6 +49,14 @@ sequenceDiagram
   G->>DB: Use promoted baseline in simulation
 ```
 
+## Current POC
+
+- `strategy_baselines` stores the active paper-only `poc_ranker_v1` baseline.
+- `strategy_experiments` stores one-variable proposals with evidence.
+- `web_review_events` stores operator lifecycle actions.
+- Scan-derived proposals can lower `max_decimal_odds` from `8.0` to `6.0` when long-price candidate risk is high, or exclude specialized markets while settlement and feature coverage are still limited.
+- Promotion creates a new paper-only baseline version; it does not enable real-money placement.
+
 ## Related
 
 - [browser automation investigation](browser-automation-investigation.md)

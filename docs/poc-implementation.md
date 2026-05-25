@@ -120,6 +120,23 @@ Coverage is available at:
 GET /api/intelligence/coverage
 ```
 
+## Strategy Baseline And Experiment POC
+
+The service persists a paper-only `poc_ranker_v1` baseline and one-variable strategy experiment proposals:
+
+- Active baseline state lives in `strategy_baselines`.
+- Scan-derived proposals live in `strategy_experiments`.
+- Operator actions live in `web_review_events`.
+- The web UI shows proposal status and lets the operator approve, reject, activate, or promote proposals.
+
+The current automatic proposals are deliberately conservative. If a scan produces enough long-price candidate risk, the service proposes lowering `max_decimal_odds` from `8.0` to `6.0`. If specialized-market exposure is more visible, the service proposes excluding those market kinds until settlement and feature coverage are stronger. The proposal is evidence for review, not an autonomous behavior change.
+
+Strategy state is available at:
+
+```text
+GET /api/strategy
+```
+
 ## Safety Boundary
 
 Do not click odds or `Tilføj kupon` during POC runs. The POC should only read navigation, DOM, and content-service data.

@@ -63,6 +63,15 @@ pub fn render_index(base_path: &str) -> String {
                         }
                     }
                     section {
+                        h2 { "Strategy experiments" }
+                        table {
+                            thead { tr {
+                                th { "Status" } th { "Variable" } th { "Change" } th { "Evidence" } th {}
+                            } }
+                            tbody { id: "experiments" }
+                        }
+                    }
+                    section {
                         h2 { "Hermes view" }
                         pre { id: "hermes", "No reflections yet." }
                     }
@@ -270,6 +279,56 @@ function renderIntelligence(coverage) {
     $("intelligence").innerHTML = `<tr><td colspan="5" class="muted">No feature snapshots yet. Run a scan.</td></tr>`;
   }
 }
+function renderStrategy(strategy) {
+  const experiments = strategy.experiments || [];
+  $("experiments").innerHTML = experiments.map((item) => {
+    const evidence = item.evidence || {};
+    const change = `${JSON.stringify(item.baseline_value)} -> ${JSON.stringify(item.proposed_value)}`;
+    const evidenceParts = [];
+    if (evidence.long_price_candidate_count !== undefined) {
+      evidenceParts.push(`${evidence.long_price_candidate_count} long-price`);
+    }
+    if (evidence.specialized_market_candidate_count !== undefined) {
+      evidenceParts.push(`${evidence.specialized_market_candidate_count} specialized`);
+    }
+    const evidenceText = evidenceParts.length ? evidenceParts.join(", ") : `${evidence.candidate_count ?? "-"} candidates`;
+    const canApprove = item.status === "proposed";
+    const canActivate = item.status === "approved_for_replay";
+    const canPromote = item.status === "active_simulation";
+    return `
+      <tr>
+        <td>${esc(item.status)}</td>
+        <td>${esc(item.variable_name)}<br><span class="label">${esc(item.title)}</span></td>
+        <td>${esc(change)}</td>
+        <td>${esc(evidenceText)}<br><span class="label">${esc(evidence.snapshot_id || "")}</span></td>
+        <td>
+          <div class="actions">
+            <button data-exp="${item.id}" data-action="approve" ${!canApprove ? "disabled" : ""}>Approve</button>
+            <button data-exp="${item.id}" data-action="reject" ${!canApprove ? "disabled" : ""}>Reject</button>
+            <button data-exp="${item.id}" data-action="activate" ${!canActivate ? "disabled" : ""}>Activate</button>
+            <button data-exp="${item.id}" data-action="promote" ${!canPromote ? "disabled" : ""}>Promote</button>
+          </div>
+        </td>
+      </tr>
+    `;
+  }).join("");
+  if (!experiments.length) {
+    $("experiments").innerHTML = `<tr><td colspan="5" class="muted">No experiment proposals yet. Run a scan.</td></tr>`;
+  }
+  document.querySelectorAll("[data-exp]").forEach((button) => {
+    button.addEventListener("click", async () => {
+      await json(api("/api/strategy/experiment/review"), {
+        method: "POST",
+        body: JSON.stringify({
+          experiment_id: button.dataset.exp,
+          action: button.dataset.action,
+          notes: "operator web-ui action"
+        })
+      });
+      await load();
+    });
+  });
+}
 async function load() {
   const status = await json(api("/api/status"));
   $("mode").textContent = status.mode;
@@ -290,6 +349,7 @@ async function load() {
   const intelligence = await json(api("/api/intelligence/coverage"));
   renderIntelligence(intelligence);
   const hermes = await json(api("/api/hermes"));
+  renderStrategy(hermes.strategy || {});
   $("hermes").textContent = JSON.stringify(hermes, null, 2);
 }
 $("scan").addEventListener("click", async () => {

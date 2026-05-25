@@ -86,6 +86,43 @@ Examples that do not fit:
 - Change both Oddset market filters and Tips coupon construction.
 - Change model prompt, bankroll policy, and event universe in one proposal.
 
+## Current POC State
+
+The Rust service now persists the first strategy-learning state directly in Postgres:
+
+- `strategy_baselines`: active paper-only baseline configuration for `poc_ranker_v1`.
+- `strategy_experiments`: one-variable proposals with hypothesis, baseline value, proposed value, status, and evidence.
+- `web_review_events`: operator review actions for proposals.
+
+The initial baseline is:
+
+```json
+{
+  "max_decimal_odds": 8.0,
+  "min_confidence": 0.10,
+  "excluded_market_kinds": [],
+  "allow_live_markets": false,
+  "paper_only": true,
+  "one_variable_only": true
+}
+```
+
+After scans, the POC can propose a conservative one-variable experiment when the candidate set contains enough risk evidence. Current proposal types are:
+
+- Long-price exposure: `max_decimal_odds: 8.0 -> 6.0`.
+- Specialized-market exposure: `excluded_market_kinds: [] -> ["goal", "corners", "half_time", "period_or_quarter", "set_or_game"]`.
+
+This does not change live behavior automatically. It stays in `proposed` until an operator reviews it in the web UI.
+
+API endpoints:
+
+```text
+GET  /api/strategy
+POST /api/strategy/experiment/review
+```
+
+Allowed review actions are `approve`, `reject`, `activate`, `promote`, and `rollback`. Promotion creates a new active baseline version, but it remains paper-only and does not enable real-money placement.
+
 ## Safe MCP Tool Surface
 
 Initial tools should be read-mostly:

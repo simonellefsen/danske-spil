@@ -129,8 +129,25 @@ async fn get_handler(State(state): State<Arc<AppState>>, uri: OriginalUri) -> Re
                 Ok(coverage) => Json(coverage).into_response(),
                 Err(error) => error_response(StatusCode::INTERNAL_SERVER_ERROR, error),
             }
-        }
+        },
         "/api/hermes" => match state.service.store().hermes_reflections(25).await {
+            Ok(reflections) => match state.service.store().strategy_state().await {
+                Ok(strategy) => Json(json!({
+                    "mode": "poc_view",
+                    "summary": "Hermes integration is read-only in this POC. Reflections and one-variable experiment proposals are loaded from Postgres.",
+                    "reflections": reflections,
+                    "strategy": strategy
+                }))
+                .into_response(),
+                Err(error) => error_response(StatusCode::INTERNAL_SERVER_ERROR, error),
+            },
+            Err(error) => error_response(StatusCode::INTERNAL_SERVER_ERROR, error),
+        },
+        "/api/strategy" => match state.service.store().strategy_state().await {
+            Ok(strategy) => Json(strategy).into_response(),
+            Err(error) => error_response(StatusCode::INTERNAL_SERVER_ERROR, error),
+        },
+        "/api/hermes/reflections" => match state.service.store().hermes_reflections(25).await {
             Ok(reflections) => Json(json!({
                 "mode": "poc_view",
                 "summary": "Hermes integration is read-only in this POC. Reflections are loaded from Postgres when available.",
@@ -225,6 +242,40 @@ async fn post_handler(
                         .record_audit(
                             "paper_bet_settled",
                             json!({"bet_id": item.id, "status": item.status, "source": source}),
+                        )
+                        .await
+                        .ok();
+                    Json(json!({"item": item})).into_response()
+                }
+                Err(error) => error_response(StatusCode::BAD_REQUEST, error),
+            }
+        }
+        "/api/strategy/experiment/review" => {
+            let experiment_id = payload
+                .get("experiment_id")
+                .and_then(Value::as_str)
+                .unwrap_or_default();
+            let action = payload
+                .get("action")
+                .and_then(Value::as_str)
+                .unwrap_or_default();
+            let notes = payload
+                .get("notes")
+                .and_then(Value::as_str)
+                .unwrap_or_default();
+            match state
+                .service
+                .store()
+                .review_strategy_experiment(experiment_id, action, notes)
+                .await
+            {
+                Ok(item) => {
+                    state
+                        .service
+                        .store()
+                        .record_audit(
+                            "strategy_experiment_reviewed",
+                            json!({"experiment_id": item.get("id"), "status": item.get("status")}),
                         )
                         .await
                         .ok();

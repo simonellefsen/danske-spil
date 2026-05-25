@@ -223,6 +223,64 @@ CREATE TABLE IF NOT EXISTS hermes_reflections (
   status text NOT NULL DEFAULT 'proposed'
 );
 
+CREATE TABLE IF NOT EXISTS strategy_baselines (
+  id text PRIMARY KEY,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  strategy_id text NOT NULL UNIQUE,
+  version integer NOT NULL,
+  status text NOT NULL,
+  active boolean NOT NULL DEFAULT false,
+  config jsonb NOT NULL,
+  promoted_from_experiment_id text,
+  notes text
+);
+
+CREATE TABLE IF NOT EXISTS strategy_experiments (
+  id text PRIMARY KEY,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  updated_at timestamptz NOT NULL DEFAULT now(),
+  title text NOT NULL,
+  hypothesis text NOT NULL,
+  variable_name text NOT NULL,
+  baseline_value jsonb NOT NULL,
+  proposed_value jsonb NOT NULL,
+  baseline_strategy_id text NOT NULL,
+  status text NOT NULL DEFAULT 'proposed',
+  evidence jsonb NOT NULL,
+  decision_payload jsonb NOT NULL DEFAULT '{}'::jsonb
+);
+
+CREATE TABLE IF NOT EXISTS web_review_events (
+  id text PRIMARY KEY,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  subject_type text NOT NULL,
+  subject_id text NOT NULL,
+  action text NOT NULL,
+  notes text,
+  payload jsonb NOT NULL DEFAULT '{}'::jsonb
+);
+
+INSERT INTO strategy_baselines (
+  id, strategy_id, version, status, active, config, notes
+)
+VALUES (
+  'poc_ranker_v1_baseline',
+  'poc_ranker_v1',
+  1,
+  'active',
+  true,
+  '{
+    "max_decimal_odds": 8.0,
+    "min_confidence": 0.10,
+    "excluded_market_kinds": [],
+    "allow_live_markets": false,
+    "paper_only": true,
+    "one_variable_only": true
+  }'::jsonb,
+  'Initial transparent heuristic baseline. Real-money placement is disabled.'
+)
+ON CONFLICT (strategy_id) DO NOTHING;
+
 CREATE INDEX IF NOT EXISTS idx_sport_events_sport_key ON sport_events(sport_key);
 CREATE INDEX IF NOT EXISTS idx_sport_events_start_time ON sport_events(start_time);
 CREATE INDEX IF NOT EXISTS idx_market_observations_snapshot ON market_observations(snapshot_id);
@@ -230,6 +288,7 @@ CREATE INDEX IF NOT EXISTS idx_market_observations_kind ON market_observations(m
 CREATE INDEX IF NOT EXISTS idx_outcome_observations_snapshot ON outcome_observations(snapshot_id);
 CREATE INDEX IF NOT EXISTS idx_feature_snapshots_snapshot ON feature_snapshots(snapshot_id);
 CREATE INDEX IF NOT EXISTS idx_feature_snapshots_sport_key ON feature_snapshots(sport_key);
+CREATE INDEX IF NOT EXISTS idx_strategy_experiments_status ON strategy_experiments(status);
 "#;
 
 #[derive(Clone)]
@@ -847,6 +906,359 @@ impl Store {
             .collect())
     }
 
+    pub async fn strategy_state(&self) -> anyhow::Result<Value> {
+        let client = self.connect().await?;
+        let baseline = client
+            .query_opt(
+                r#"
+                SELECT id, created_at, strategy_id, version, status, active, config,
+                       promoted_from_experiment_id, notes
+                FROM strategy_baselines
+                WHERE active = true
+                ORDER BY created_at DESC
+                LIMIT 1
+                "#,
+                &[],
+            )
+            .await?;
+        let experiments = client
+            .query(
+                r#"
+                SELECT id, created_at, updated_at, title, hypothesis, variable_name,
+                       baseline_value, proposed_value, baseline_strategy_id, status,
+                       evidence, decision_payload
+                FROM strategy_experiments
+                ORDER BY
+                  CASE status
+                    WHEN 'proposed' THEN 0
+                    WHEN 'approved_for_replay' THEN 1
+                    WHEN 'active_simulation' THEN 2
+                    WHEN 'promoted' THEN 3
+                    ELSE 4
+                  END,
+                  created_at DESC
+                LIMIT 25
+                "#,
+                &[],
+            )
+            .await?;
+        Ok(json!({
+            "active_baseline": baseline.map(|row| {
+                let created_at: DateTime<Utc> = row.get("created_at");
+                json!({
+                    "id": row.get::<_, String>("id"),
+                    "created_at": created_at,
+                    "strategy_id": row.get::<_, String>("strategy_id"),
+                    "version": row.get::<_, i32>("version"),
+                    "status": row.get::<_, String>("status"),
+                    "active": row.get::<_, bool>("active"),
+                    "config": row.get::<_, Value>("config"),
+                    "promoted_from_experiment_id": row.get::<_, Option<String>>("promoted_from_experiment_id"),
+                    "notes": row.get::<_, Option<String>>("notes")
+                })
+            }),
+            "experiments": experiments.iter().map(|row| {
+                let created_at: DateTime<Utc> = row.get("created_at");
+                let updated_at: DateTime<Utc> = row.get("updated_at");
+                json!({
+                    "id": row.get::<_, String>("id"),
+                    "created_at": created_at,
+                    "updated_at": updated_at,
+                    "title": row.get::<_, String>("title"),
+                    "hypothesis": row.get::<_, String>("hypothesis"),
+                    "variable_name": row.get::<_, String>("variable_name"),
+                    "baseline_value": row.get::<_, Value>("baseline_value"),
+                    "proposed_value": row.get::<_, Value>("proposed_value"),
+                    "baseline_strategy_id": row.get::<_, String>("baseline_strategy_id"),
+                    "status": row.get::<_, String>("status"),
+                    "evidence": row.get::<_, Value>("evidence"),
+                    "decision_payload": row.get::<_, Value>("decision_payload")
+                })
+            }).collect::<Vec<_>>()
+        }))
+    }
+
+    pub async fn ensure_scan_strategy_proposal(
+        &self,
+        snapshot_id: &str,
+        candidates: &[CandidateBet],
+    ) -> anyhow::Result<Option<Value>> {
+        let client = self.connect().await?;
+        let existing = client
+            .query_opt(
+                r#"
+                SELECT id, created_at, updated_at, title, hypothesis, variable_name,
+                       baseline_value, proposed_value, baseline_strategy_id, status,
+                       evidence, decision_payload
+                FROM strategy_experiments
+                WHERE status IN ('proposed', 'approved_for_replay', 'active_simulation')
+                ORDER BY created_at DESC
+                LIMIT 1
+                "#,
+                &[],
+            )
+            .await?;
+        if let Some(row) = existing {
+            return Ok(Some(strategy_experiment_from_row(&row)));
+        }
+
+        let long_price_candidates: Vec<&CandidateBet> = candidates
+            .iter()
+            .filter(|candidate| {
+                candidate.decimal_odds.unwrap_or_default() > 8.0
+                    || candidate
+                        .risk_flags
+                        .as_array()
+                        .into_iter()
+                        .flatten()
+                        .any(|flag| flag.as_str() == Some("long_price"))
+            })
+            .collect();
+        if long_price_candidates.len() >= 3 {
+            return self
+                .insert_strategy_experiment(
+                    snapshot_id,
+                    "Cap long-price candidates",
+                    "Reducing the maximum decimal odds considered by poc_ranker_v1 may lower noisy long-shot paper candidates until settlement history supports them.",
+                    "max_decimal_odds",
+                    json!(8.0),
+                    json!(6.0),
+                    candidates,
+                    &long_price_candidates,
+                    "long_price_candidate_count",
+                )
+                .await;
+        }
+
+        let specialized_candidates: Vec<&CandidateBet> = candidates
+            .iter()
+            .filter(|candidate| {
+                candidate
+                    .risk_flags
+                    .as_array()
+                    .into_iter()
+                    .flatten()
+                    .any(|flag| flag.as_str() == Some("specialized_market"))
+            })
+            .collect();
+        if specialized_candidates.len() >= 3 {
+            return self
+                .insert_strategy_experiment(
+                    snapshot_id,
+                    "Exclude specialized markets",
+                    "Temporarily excluding specialized markets may improve paper-simulation interpretability until market-specific settlement and feature coverage are stronger.",
+                    "excluded_market_kinds",
+                    json!([]),
+                    json!(["goal", "corners", "half_time", "period_or_quarter", "set_or_game"]),
+                    candidates,
+                    &specialized_candidates,
+                    "specialized_market_candidate_count",
+                )
+                .await;
+        }
+
+        Ok(None)
+    }
+
+    async fn insert_strategy_experiment(
+        &self,
+        snapshot_id: &str,
+        title: &str,
+        hypothesis: &str,
+        variable_name: &str,
+        baseline_value: Value,
+        proposed_value: Value,
+        candidates: &[CandidateBet],
+        evidence_candidates: &[&CandidateBet],
+        evidence_count_key: &str,
+    ) -> anyhow::Result<Option<Value>> {
+        if evidence_candidates.is_empty() {
+            return Ok(None);
+        }
+
+        let client = self.connect().await?;
+        let id = new_id();
+        let baseline_strategy_id = "poc_ranker_v1".to_string();
+        let status = "proposed".to_string();
+        let evidence = json!({
+            "source": "scan_candidate_risk_review",
+            "snapshot_id": snapshot_id,
+            "candidate_count": candidates.len(),
+            evidence_count_key: evidence_candidates.len(),
+            "examples": evidence_candidates.iter().take(5).map(|candidate| json!({
+                "candidate_id": candidate.id,
+                "sport_key": candidate.sport_key,
+                "event_name": candidate.event_name,
+                "market_name": candidate.market_name,
+                "outcome_name": candidate.outcome_name,
+                "decimal_odds": candidate.decimal_odds,
+                "score": candidate.score,
+                "risk_flags": candidate.risk_flags
+            })).collect::<Vec<_>>(),
+            "safety": {
+                "paper_only": true,
+                "one_variable_only": true,
+                "requires_operator_review": true,
+                "does_not_enable_real_money": true
+            }
+        });
+        client
+            .execute(
+                r#"
+                INSERT INTO strategy_experiments (
+                  id, title, hypothesis, variable_name, baseline_value, proposed_value,
+                  baseline_strategy_id, status, evidence
+                )
+                VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)
+                "#,
+                &[
+                    &id,
+                    &title,
+                    &hypothesis,
+                    &variable_name,
+                    &baseline_value,
+                    &proposed_value,
+                    &baseline_strategy_id,
+                    &status,
+                    &evidence,
+                ],
+            )
+            .await?;
+        self.record_audit(
+            "strategy_experiment_proposed",
+            json!({"experiment_id": id, "snapshot_id": snapshot_id, "variable_name": variable_name}),
+        )
+        .await
+        .ok();
+        self.strategy_state()
+            .await?
+            .get("experiments")
+            .and_then(Value::as_array)
+            .into_iter()
+            .flatten()
+            .find(|item| item.get("id").and_then(Value::as_str) == Some(id.as_str()))
+            .cloned()
+            .map(Some)
+            .ok_or_else(|| anyhow!("created strategy experiment not found"))
+    }
+
+    pub async fn review_strategy_experiment(
+        &self,
+        experiment_id: &str,
+        action: &str,
+        notes: &str,
+    ) -> anyhow::Result<Value> {
+        if experiment_id.is_empty() {
+            return Err(anyhow!("experiment_id is required"));
+        }
+        let status = match action {
+            "approve" => "approved_for_replay",
+            "reject" => "rejected",
+            "activate" => "active_simulation",
+            "promote" => "promoted",
+            "rollback" => "rolled_back",
+            _ => return Err(anyhow!("unsupported experiment review action: {action}")),
+        };
+        let mut client = self.connect().await?;
+        let transaction = client.transaction().await?;
+        let previous = transaction
+            .query_one(
+                "SELECT status, variable_name, proposed_value, baseline_strategy_id FROM strategy_experiments WHERE id = $1",
+                &[&experiment_id],
+            )
+            .await
+            .context("strategy experiment not found")?;
+        let previous_status: String = previous.get("status");
+        let variable_name: String = previous.get("variable_name");
+        let proposed_value: Value = previous.get("proposed_value");
+        let baseline_strategy_id: String = previous.get("baseline_strategy_id");
+        let decision_payload = json!({
+            "action": action,
+            "previous_status": previous_status,
+            "notes": notes,
+            "reviewed_at": Utc::now(),
+            "paper_only": true
+        });
+        transaction
+            .execute(
+                r#"
+                UPDATE strategy_experiments
+                SET status = $1,
+                    updated_at = now(),
+                    decision_payload = decision_payload || $2
+                WHERE id = $3
+                "#,
+                &[&status, &decision_payload, &experiment_id],
+            )
+            .await?;
+        transaction
+            .execute(
+                r#"
+                INSERT INTO web_review_events (id, subject_type, subject_id, action, notes, payload)
+                VALUES ($1,$2,$3,$4,$5,$6)
+                "#,
+                &[
+                    &new_id(),
+                    &"strategy_experiment",
+                    &experiment_id,
+                    &action,
+                    &notes,
+                    &decision_payload,
+                ],
+            )
+            .await?;
+        if action == "promote" {
+            let baseline = transaction
+                .query_one(
+                    "SELECT config, version FROM strategy_baselines WHERE strategy_id = $1 AND active = true LIMIT 1",
+                    &[&baseline_strategy_id],
+                )
+                .await?;
+            let mut config: Value = baseline.get("config");
+            let version: i32 = baseline.get("version");
+            if let Some(object) = config.as_object_mut() {
+                object.insert(variable_name.clone(), proposed_value.clone());
+            }
+            transaction
+                .execute(
+                    "UPDATE strategy_baselines SET active = false, status = 'superseded' WHERE strategy_id = $1 AND active = true",
+                    &[&baseline_strategy_id],
+                )
+                .await?;
+            transaction
+                .execute(
+                    r#"
+                    INSERT INTO strategy_baselines (
+                      id, strategy_id, version, status, active, config,
+                      promoted_from_experiment_id, notes
+                    )
+                    VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
+                    "#,
+                    &[
+                        &new_id(),
+                        &baseline_strategy_id,
+                        &(version + 1),
+                        &"active",
+                        &true,
+                        &config,
+                        &experiment_id,
+                        &notes,
+                    ],
+                )
+                .await?;
+        }
+        transaction.commit().await?;
+        self.strategy_state()
+            .await?
+            .get("experiments")
+            .and_then(Value::as_array)
+            .into_iter()
+            .flatten()
+            .find(|item| item.get("id").and_then(Value::as_str) == Some(experiment_id))
+            .cloned()
+            .ok_or_else(|| anyhow!("reviewed strategy experiment not found"))
+    }
+
     pub async fn record_audit(&self, event_type: &str, details: Value) -> anyhow::Result<()> {
         let client = self.connect().await?;
         client
@@ -1388,6 +1800,25 @@ fn simulated_bet_from_row(row: &Row) -> SimulatedBet {
         settlement_payload: row.get("settlement_payload"),
         payload: row.get("payload"),
     }
+}
+
+fn strategy_experiment_from_row(row: &Row) -> Value {
+    let created_at: DateTime<Utc> = row.get("created_at");
+    let updated_at: DateTime<Utc> = row.get("updated_at");
+    json!({
+        "id": row.get::<_, String>("id"),
+        "created_at": created_at,
+        "updated_at": updated_at,
+        "title": row.get::<_, String>("title"),
+        "hypothesis": row.get::<_, String>("hypothesis"),
+        "variable_name": row.get::<_, String>("variable_name"),
+        "baseline_value": row.get::<_, Value>("baseline_value"),
+        "proposed_value": row.get::<_, Value>("proposed_value"),
+        "baseline_strategy_id": row.get::<_, String>("baseline_strategy_id"),
+        "status": row.get::<_, String>("status"),
+        "evidence": row.get::<_, Value>("evidence"),
+        "decision_payload": row.get::<_, Value>("decision_payload")
+    })
 }
 
 pub fn new_id() -> String {
