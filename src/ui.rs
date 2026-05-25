@@ -17,6 +17,8 @@ pub fn render_index(base_path: &str) -> String {
                     div { class: "metric", div { class: "label", "Latest snapshot" } div { class: "value", id: "snapshot", "-" } }
                     div { class: "metric", div { class: "label", "Catalog events" } div { class: "value", id: "catalog-events", "-" } }
                     div { class: "metric", div { class: "label", "Feature snapshots" } div { class: "value", id: "feature-snapshots", "-" } }
+                    div { class: "metric", div { class: "label", "Strategy selected" } div { class: "value", id: "strategy-selected", "-" } }
+                    div { class: "metric", div { class: "label", "Strategy rejected" } div { class: "value", id: "strategy-rejected", "-" } }
                     div { class: "metric", div { class: "label", "Open exposure" } div { class: "value", id: "exposure", "-" } }
                     div { class: "metric", div { class: "label", "Paper P/L" } div { class: "value", id: "profit", "-" } }
                     div { class: "metric", div { class: "label", "Real-money placement" } div { class: "value danger", id: "placement", "disabled" } }
@@ -29,6 +31,15 @@ pub fn render_index(base_path: &str) -> String {
                                 th { "Sport" } th { "Event" } th { "Market" } th { "Outcome" } th { "Odds" } th { "Score" } th {}
                             } }
                             tbody { id: "candidates" }
+                        }
+                    }
+                    section {
+                        h2 { "Strategy decisions" }
+                        table {
+                            thead { tr {
+                                th { "Decision" } th { "Selection" } th { "Odds" } th { "Score" } th { "Reasons" }
+                            } }
+                            tbody { id: "strategy-decisions" }
                         }
                     }
                     section {
@@ -176,7 +187,7 @@ function renderRows(items) {
       <td>${esc(item.outcome_name)}</td>
       <td>${item.decimal_odds ?? ""}<br><span class="muted">imp ${pct(item.implied_probability)}</span></td>
       <td>${num(item.score)}<br><span class="muted">conf ${pct(item.confidence)}</span></td>
-      <td><button data-candidate="${item.id}">Paper</button></td>
+      <td><button data-candidate="${item.id}" ${item.status === "rejected" ? "disabled" : ""}>${item.status === "rejected" ? "Rejected" : "Paper"}</button></td>
     </tr>
   `).join("");
   document.querySelectorAll("[data-candidate]").forEach((button) => {
@@ -199,6 +210,30 @@ function renderRows(items) {
     rationale: items[0].rationale,
     feature_snapshot: items[0].feature_snapshot
   }, null, 2) : "No candidates yet.";
+}
+function renderStrategyDecisions(items) {
+  const selected = items.filter((item) => item.decision === "selected").length;
+  const rejected = items.filter((item) => item.decision === "rejected").length;
+  $("strategy-selected").textContent = String(selected);
+  $("strategy-rejected").textContent = String(rejected);
+  $("strategy-decisions").innerHTML = items.map((item) => {
+    const candidate = item.candidate || {};
+    const reasons = Array.isArray(item.rejection_reasons) && item.rejection_reasons.length
+      ? item.rejection_reasons.join(", ")
+      : "-";
+    return `
+      <tr>
+        <td><span class="pill">${esc(item.decision)}</span><br><span class="label">v${esc(item.strategy_version)}</span></td>
+        <td>${esc(candidate.event_name || "")}<br><span class="label">${esc(candidate.market_name || "")} / ${esc(candidate.outcome_name || "")}</span></td>
+        <td>${candidate.decimal_odds ?? "-"}</td>
+        <td>${num(item.score)}<br><span class="muted">conf ${pct(item.confidence)}</span></td>
+        <td>${esc(reasons)}</td>
+      </tr>
+    `;
+  }).join("");
+  if (!items.length) {
+    $("strategy-decisions").innerHTML = `<tr><td colspan="5" class="muted">No strategy decisions yet. Run a scan.</td></tr>`;
+  }
 }
 function renderLedger(items) {
   const candidateLabel = (item) => {
@@ -342,6 +377,8 @@ async function load() {
   $("profit").className = Number(summary.profit_loss || 0) >= 0 ? "value ok" : "value danger";
   const candidates = await json(api("/api/candidates"));
   renderRows(candidates.items || []);
+  const decisions = await json(api("/api/strategy/decisions"));
+  renderStrategyDecisions(decisions.items || []);
   const ledger = await json(api("/api/ledger"));
   renderLedger(ledger.items || []);
   const coverage = await json(api("/api/catalog/coverage"));

@@ -63,6 +63,22 @@ impl GamblerService {
         .await?;
         let mut candidates = build_candidates(&snapshot, 40);
         let snapshot_id = self.store.save_snapshot(&snapshot, &mut candidates).await?;
+        let strategy_decision_summary = match self
+            .store
+            .apply_active_strategy(&snapshot_id, &candidates)
+            .await
+        {
+            Ok(summary) => summary,
+            Err(error) => {
+                tracing::warn!(%error, snapshot_id = %snapshot_id, "strategy decision application failed");
+                json!({
+                    "snapshot_id": snapshot_id,
+                    "selected_count": 0,
+                    "rejected_count": 0,
+                    "error": error.to_string()
+                })
+            }
+        };
         let (strategy_proposal, strategy_proposal_error) = match self
             .store
             .ensure_scan_strategy_proposal(&snapshot_id, &candidates)
@@ -80,6 +96,7 @@ impl GamblerService {
                 json!({
                     "snapshot_id": snapshot_id,
                     "candidate_count": candidates.len(),
+                    "strategy_decision_summary": strategy_decision_summary,
                     "include_live": include_live,
                     "paper_only": true,
                     "runtime": "rust-dioxus"
@@ -90,6 +107,7 @@ impl GamblerService {
         Ok(json!({
             "snapshot_id": snapshot_id,
             "candidate_count": candidates.len(),
+            "strategy_decision_summary": strategy_decision_summary,
             "strategy_proposal": strategy_proposal,
             "strategy_proposal_error": strategy_proposal_error,
             "snapshot": snapshot

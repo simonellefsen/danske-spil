@@ -33,6 +33,7 @@ flowchart LR
 - Settlement should prefer Danske Spil settlement/result views when available, then official event sources, then documented third-party sources.
 - Ambiguous results stay unresolved or require operator review.
 - Performance metrics must clearly be labeled simulated.
+- Paper placement uses active strategy decisions; rejected candidates remain visible but cannot be simulated.
 
 ## Related
 

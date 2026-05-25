@@ -79,6 +79,7 @@ Current POC status:
 - Paper placements are stored in `simulated_bets` with immutable observed odds and stake.
 - Manual operator settlement can mark rows as won, lost, void, pushed, or unresolved through the API.
 - Manual settlement writes `settlement_observations` and computed simulated return/profit-loss.
+- Strategy selection is stored in `strategy_candidate_decisions`; rejected candidates are preserved for review but blocked from paper-ledger placement.
 - Automated result lookup is still pending and should use the source ordering above.
 
 ## Metrics

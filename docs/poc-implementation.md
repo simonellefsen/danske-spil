@@ -127,14 +127,23 @@ The service persists a paper-only `poc_ranker_v1` baseline and one-variable stra
 - Active baseline state lives in `strategy_baselines`.
 - Scan-derived proposals live in `strategy_experiments`.
 - Operator actions live in `web_review_events`.
+- Per-candidate baseline decisions live in `strategy_candidate_decisions`.
 - The web UI shows proposal status and lets the operator approve, reject, activate, or promote proposals.
 
 The current automatic proposals are deliberately conservative. If a scan produces enough long-price candidate risk, the service proposes lowering `max_decimal_odds` from `8.0` to `6.0`. If specialized-market exposure is more visible, the service proposes excluding those market kinds until settlement and feature coverage are stronger. The proposal is evidence for review, not an autonomous behavior change.
+
+Each scan also applies the active baseline to every generated candidate and records a paper-only decision:
+
+- `selected`: candidate is eligible for paper-ledger simulation.
+- `rejected`: candidate failed one or more active baseline gates, such as max odds, minimum confidence, excluded market kind, or live-market restriction.
+
+Rejected candidates cannot be added to the paper ledger through the API. This keeps manual simulation aligned with the active strategy while still preserving the rejected alternatives for review.
 
 Strategy state is available at:
 
 ```text
 GET /api/strategy
+GET /api/strategy/decisions
 ```
 
 ## Safety Boundary

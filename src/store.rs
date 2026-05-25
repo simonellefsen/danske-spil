@@ -2,7 +2,7 @@ use crate::models::{CandidateBet, HermesReflection, LedgerSummary, SimulatedBet}
 use anyhow::{anyhow, Context};
 use chrono::{DateTime, Utc};
 use serde_json::{json, Value};
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashSet};
 use tokio_postgres::{Client, NoTls, Row, Transaction};
 use uuid::Uuid;
 
@@ -226,7 +226,7 @@ CREATE TABLE IF NOT EXISTS hermes_reflections (
 CREATE TABLE IF NOT EXISTS strategy_baselines (
   id text PRIMARY KEY,
   created_at timestamptz NOT NULL DEFAULT now(),
-  strategy_id text NOT NULL UNIQUE,
+  strategy_id text NOT NULL,
   version integer NOT NULL,
   status text NOT NULL,
   active boolean NOT NULL DEFAULT false,
@@ -234,6 +234,8 @@ CREATE TABLE IF NOT EXISTS strategy_baselines (
   promoted_from_experiment_id text,
   notes text
 );
+
+ALTER TABLE strategy_baselines DROP CONSTRAINT IF EXISTS strategy_baselines_strategy_id_key;
 
 CREATE TABLE IF NOT EXISTS strategy_experiments (
   id text PRIMARY KEY,
@@ -260,6 +262,22 @@ CREATE TABLE IF NOT EXISTS web_review_events (
   payload jsonb NOT NULL DEFAULT '{}'::jsonb
 );
 
+CREATE TABLE IF NOT EXISTS strategy_candidate_decisions (
+  id text PRIMARY KEY,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  snapshot_id text REFERENCES odds_snapshots(id) ON DELETE CASCADE,
+  candidate_id text REFERENCES candidate_bets(id) ON DELETE CASCADE,
+  strategy_id text NOT NULL,
+  strategy_baseline_id text NOT NULL,
+  strategy_version integer NOT NULL,
+  decision text NOT NULL,
+  rejection_reasons jsonb NOT NULL DEFAULT '[]'::jsonb,
+  score numeric,
+  confidence numeric,
+  evidence jsonb NOT NULL,
+  UNIQUE (candidate_id, strategy_baseline_id)
+);
+
 INSERT INTO strategy_baselines (
   id, strategy_id, version, status, active, config, notes
 )
@@ -279,7 +297,7 @@ VALUES (
   }'::jsonb,
   'Initial transparent heuristic baseline. Real-money placement is disabled.'
 )
-ON CONFLICT (strategy_id) DO NOTHING;
+ON CONFLICT (id) DO NOTHING;
 
 CREATE INDEX IF NOT EXISTS idx_sport_events_sport_key ON sport_events(sport_key);
 CREATE INDEX IF NOT EXISTS idx_sport_events_start_time ON sport_events(start_time);
@@ -289,6 +307,9 @@ CREATE INDEX IF NOT EXISTS idx_outcome_observations_snapshot ON outcome_observat
 CREATE INDEX IF NOT EXISTS idx_feature_snapshots_snapshot ON feature_snapshots(snapshot_id);
 CREATE INDEX IF NOT EXISTS idx_feature_snapshots_sport_key ON feature_snapshots(sport_key);
 CREATE INDEX IF NOT EXISTS idx_strategy_experiments_status ON strategy_experiments(status);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_strategy_baselines_one_active ON strategy_baselines(strategy_id) WHERE active = true;
+CREATE INDEX IF NOT EXISTS idx_strategy_candidate_decisions_snapshot ON strategy_candidate_decisions(snapshot_id);
+CREATE INDEX IF NOT EXISTS idx_strategy_candidate_decisions_decision ON strategy_candidate_decisions(decision);
 "#;
 
 #[derive(Clone)]
@@ -508,6 +529,238 @@ impl Store {
         Ok(rows.iter().map(candidate_from_row).collect())
     }
 
+    pub async fn apply_active_strategy(
+        &self,
+        snapshot_id: &str,
+        candidates: &[CandidateBet],
+    ) -> anyhow::Result<Value> {
+        let mut client = self.connect().await?;
+        let baseline = client
+            .query_opt(
+                r#"
+                SELECT id, strategy_id, version, config
+                FROM strategy_baselines
+                WHERE active = true
+                ORDER BY created_at DESC
+                LIMIT 1
+                "#,
+                &[],
+            )
+            .await?;
+        let Some(baseline) = baseline else {
+            return Ok(json!({
+                "snapshot_id": snapshot_id,
+                "selected_count": 0,
+                "rejected_count": 0,
+                "skipped": true,
+                "reason": "no active strategy baseline"
+            }));
+        };
+
+        let baseline_id: String = baseline.get("id");
+        let strategy_id: String = baseline.get("strategy_id");
+        let strategy_version: i32 = baseline.get("version");
+        let config: Value = baseline.get("config");
+        let max_decimal_odds = config
+            .get("max_decimal_odds")
+            .and_then(Value::as_f64)
+            .unwrap_or(8.0);
+        let min_confidence = config
+            .get("min_confidence")
+            .and_then(Value::as_f64)
+            .unwrap_or(0.1);
+        let allow_live_markets = config
+            .get("allow_live_markets")
+            .and_then(Value::as_bool)
+            .unwrap_or(false);
+        let excluded_market_kinds: HashSet<String> = config
+            .get("excluded_market_kinds")
+            .and_then(Value::as_array)
+            .into_iter()
+            .flatten()
+            .filter_map(Value::as_str)
+            .map(str::to_string)
+            .collect();
+
+        let transaction = client.transaction().await?;
+        let mut selected_count = 0usize;
+        let mut rejected_count = 0usize;
+        let mut reason_counts = BTreeMap::<String, usize>::new();
+
+        for candidate in candidates {
+            let mut reasons = Vec::new();
+            match candidate.decimal_odds {
+                Some(odds) if odds > max_decimal_odds => reasons.push("above_max_decimal_odds"),
+                Some(_) => {}
+                None => reasons.push("missing_decimal_odds"),
+            }
+            if candidate.confidence.unwrap_or_default() < min_confidence {
+                reasons.push("below_min_confidence");
+            }
+            if candidate
+                .market_kind
+                .as_ref()
+                .is_some_and(|kind| excluded_market_kinds.contains(kind))
+            {
+                reasons.push("excluded_market_kind");
+            }
+            if !allow_live_markets
+                && candidate
+                    .feature_snapshot
+                    .get("live_now")
+                    .and_then(Value::as_bool)
+                    .unwrap_or(false)
+            {
+                reasons.push("live_market_disabled");
+            }
+
+            let decision = if reasons.is_empty() {
+                selected_count += 1;
+                "selected"
+            } else {
+                rejected_count += 1;
+                for reason in &reasons {
+                    *reason_counts.entry((*reason).to_string()).or_default() += 1;
+                }
+                "rejected"
+            };
+            let rejection_reasons = json!(reasons);
+            let evidence = json!({
+                "paper_only": true,
+                "strategy_config": config,
+                "candidate": {
+                    "sport_key": candidate.sport_key,
+                    "event_name": candidate.event_name,
+                    "competition": candidate.competition,
+                    "market_kind": candidate.market_kind,
+                    "market_name": candidate.market_name,
+                    "outcome_name": candidate.outcome_name,
+                    "decimal_odds": candidate.decimal_odds,
+                    "confidence": candidate.confidence,
+                    "score": candidate.score,
+                    "risk_flags": candidate.risk_flags
+                },
+                "feature_snapshot": candidate.feature_snapshot
+            });
+            transaction
+                .execute(
+                    r#"
+                    INSERT INTO strategy_candidate_decisions (
+                      id, snapshot_id, candidate_id, strategy_id, strategy_baseline_id,
+                      strategy_version, decision, rejection_reasons, score, confidence, evidence
+                    )
+                    VALUES (
+                      $1,$2,$3,$4,$5,$6,$7,$8,
+                      ($9::float8)::numeric,
+                      ($10::float8)::numeric,
+                      $11
+                    )
+                    ON CONFLICT (candidate_id, strategy_baseline_id) DO UPDATE
+                    SET decision = EXCLUDED.decision,
+                        rejection_reasons = EXCLUDED.rejection_reasons,
+                        score = EXCLUDED.score,
+                        confidence = EXCLUDED.confidence,
+                        evidence = EXCLUDED.evidence
+                    "#,
+                    &[
+                        &new_id(),
+                        &snapshot_id,
+                        &candidate.id,
+                        &strategy_id,
+                        &baseline_id,
+                        &strategy_version,
+                        &decision,
+                        &rejection_reasons,
+                        &candidate.score,
+                        &candidate.confidence,
+                        &evidence,
+                    ],
+                )
+                .await?;
+            transaction
+                .execute(
+                    "UPDATE candidate_bets SET status = $1 WHERE id = $2",
+                    &[&decision, &candidate.id],
+                )
+                .await?;
+        }
+        transaction.commit().await?;
+
+        Ok(json!({
+            "snapshot_id": snapshot_id,
+            "strategy_id": strategy_id,
+            "strategy_baseline_id": baseline_id,
+            "strategy_version": strategy_version,
+            "selected_count": selected_count,
+            "rejected_count": rejected_count,
+            "rejection_reason_counts": reason_counts,
+            "paper_only": true
+        }))
+    }
+
+    pub async fn strategy_decisions(&self, limit: i64) -> anyhow::Result<Value> {
+        let client = self.connect().await?;
+        let rows = client
+            .query(
+                r#"
+                SELECT
+                  d.id,
+                  d.created_at,
+                  d.snapshot_id,
+                  d.candidate_id,
+                  d.strategy_id,
+                  d.strategy_baseline_id,
+                  d.strategy_version,
+                  d.decision,
+                  d.rejection_reasons,
+                  d.score::float8 AS score,
+                  d.confidence::float8 AS confidence,
+                  d.evidence,
+                  cb.sport_key,
+                  cb.event_name,
+                  cb.competition,
+                  cb.market_kind,
+                  cb.market_name,
+                  cb.outcome_name,
+                  cb.decimal_odds::float8 AS decimal_odds
+                FROM strategy_candidate_decisions d
+                LEFT JOIN candidate_bets cb ON cb.id = d.candidate_id
+                ORDER BY d.created_at DESC, d.score DESC NULLS LAST
+                LIMIT $1
+                "#,
+                &[&limit],
+            )
+            .await?;
+        Ok(json!({
+            "items": rows.iter().map(|row| {
+                let created_at: DateTime<Utc> = row.get("created_at");
+                json!({
+                    "id": row.get::<_, String>("id"),
+                    "created_at": created_at,
+                    "snapshot_id": row.get::<_, Option<String>>("snapshot_id"),
+                    "candidate_id": row.get::<_, Option<String>>("candidate_id"),
+                    "strategy_id": row.get::<_, String>("strategy_id"),
+                    "strategy_baseline_id": row.get::<_, String>("strategy_baseline_id"),
+                    "strategy_version": row.get::<_, i32>("strategy_version"),
+                    "decision": row.get::<_, String>("decision"),
+                    "rejection_reasons": row.get::<_, Value>("rejection_reasons"),
+                    "score": row.get::<_, Option<f64>>("score"),
+                    "confidence": row.get::<_, Option<f64>>("confidence"),
+                    "evidence": row.get::<_, Value>("evidence"),
+                    "candidate": {
+                        "sport_key": row.get::<_, Option<String>>("sport_key"),
+                        "event_name": row.get::<_, Option<String>>("event_name"),
+                        "competition": row.get::<_, Option<String>>("competition"),
+                        "market_kind": row.get::<_, Option<String>>("market_kind"),
+                        "market_name": row.get::<_, Option<String>>("market_name"),
+                        "outcome_name": row.get::<_, Option<String>>("outcome_name"),
+                        "decimal_odds": row.get::<_, Option<f64>>("decimal_odds")
+                    }
+                })
+            }).collect::<Vec<_>>()
+        }))
+    }
+
     pub async fn simulate_bet(
         &self,
         candidate_id: &str,
@@ -519,6 +772,11 @@ impl Store {
             .into_iter()
             .find(|candidate| candidate.id == candidate_id)
             .ok_or_else(|| anyhow!("candidate not found: {candidate_id}"))?;
+        if candidate.status == "rejected" {
+            return Err(anyhow!(
+                "candidate rejected by active strategy and cannot be paper-ledgered: {candidate_id}"
+            ));
+        }
         let id = new_id();
         let payload =
             json!({"candidate": candidate, "paper_only": true, "strategy_id": "poc_ranker_v1"});
