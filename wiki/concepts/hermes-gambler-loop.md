@@ -16,7 +16,7 @@ The safe loop separates observation, strategy learning, and human approval.
 
 ## Responsibilities
 
-- `gambler` observes Oddset/Tips state, stores snapshots, prepares candidate coupons, records simulated placements, and reconciles final outcomes.
+- `gambler` observes Oddset/Tips state, ingests sports intelligence, stores snapshots, prepares candidate coupons, records simulated placements, and reconciles final outcomes.
 - `gambler-mcp` exposes only sanitized read-mostly context to Hermes.
 - Hermes writes reflections and one-variable experiment proposals.
 - The operator approves, rejects, or promotes experiments.
@@ -42,7 +42,7 @@ sequenceDiagram
   participant H as Hermes
   participant O as Operator
 
-  G->>DB: Store odds, coupons, candidates, simulated placements, outcomes
+  G->>DB: Store sports features, odds, coupons, candidates, simulated placements, outcomes
   H->>DB: Read sanitized context through MCP
   H->>DB: Write reflection or proposal
   O->>DB: Approve/reject/promote

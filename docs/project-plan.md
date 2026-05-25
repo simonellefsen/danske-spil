@@ -43,6 +43,7 @@ Deliverables:
 - Hermes/gambler goal contract and experiment rules.
 - Web UI requirements for reasoning, candidate review, and Hermes lifecycle visibility.
 - Simulation ledger requirements for paper bet placement, exposure, and outcome reconciliation.
+- Sports data intelligence requirements for stats, trends, weather, seasonality, and news.
 
 Exit criteria:
 
@@ -72,6 +73,7 @@ Scope:
 - Persist odds snapshots, Tips coupons, event metadata, candidate selections, browser-session metadata, and audit events.
 - Persist simulated bet placements and coupon placements as immutable paper-ledger records.
 - Persist settlement lookups and final win/loss grading for each simulated bet.
+- Persist sports intelligence inputs for the initial focus sports: football/soccer, tennis, basketball, Formula 1, golf, and cycling.
 - Add deduplication and timestamps so strategy learning can replay observations.
 - Store no credentials, cookies, MitID data, or raw personally identifying account payloads in Postgres.
 - Store structured decision traces that explain candidate selection without storing private model scratchpads or secrets.
@@ -87,6 +89,20 @@ Candidate tables:
 - `simulated_coupon_legs`
 - `settlement_observations`
 - `settlement_sources`
+- `sports`
+- `leagues`
+- `seasons`
+- `teams`
+- `players`
+- `sport_events`
+- `participant_stats`
+- `team_stats`
+- `weather_observations`
+- `news_items`
+- `trend_signals`
+- `seasonality_profiles`
+- `injury_reports`
+- `rankings_snapshots`
 - `dom_observations`
 - `browser_session_audit`
 - `selection_reasoning_traces`
@@ -101,6 +117,8 @@ Scope:
 
 - Implement `gambler` as a service that can collect read-only market state, build candidate coupons, score them, and expose sanitized context.
 - Implement scanner loops for Oddset and Tips that monitor configured products, events, markets, coupons, odds changes, and disabled/suspended states.
+- Implement data-ingestion loops for relevant leagues, teams, players, drivers, golfers, riders, and events in the initial sports scope.
+- Normalize stats, weather, news, trend, and seasonality inputs into Postgres with source provenance and timestamps.
 - Implement a simulation ledger that records when the system would have taken a bet, at what observed odds, with what hypothetical stake, and under which strategy baseline.
 - Implement a settlement worker that later looks up final outcomes, grades simulated bets and coupon legs, and records simulated P/L.
 - Expose a web UI for operator visibility into candidates, odds, reasoning, safety gates, and Hermes state.
@@ -141,6 +159,7 @@ Scope:
 Scope:
 
 - Build a simulation loop from odds snapshots, candidate bets, simulated placements, and settlement observations.
+- Join candidate decisions to the relevant historical stats, form, news, weather, rankings, and seasonality features available at decision time.
 - Treat simulated placements as immutable: later odds changes should create observations, not rewrite the simulated entry price.
 - Reconcile event outcomes from the most authoritative available source, preferably Danske Spil settlement/result pages when available, and fall back only to documented external result sources.
 - Compute simulated stake, return, profit/loss, hit rate, calibration, drawdown, and coupon-level performance.
@@ -161,6 +180,7 @@ Possible scope after review:
 ## Backlog
 
 - Confirm whether Danske Spil offers any official API, affiliate feed, or export surface for odds/history.
+- Identify licensed or otherwise permissible data sources for each sport and record source reliability in Postgres.
 - Decide whether `gambler` runtime should be Python-first for browser automation or Rust-first for deployment simplicity.
 - Choose the web UI stack after the first data model is stable.
 - Design the first Postgres schema migration.

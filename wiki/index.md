@@ -18,6 +18,7 @@ Future Codex and Hermes sessions should read this file first for project-history
 - [concepts/hermes-gambler-loop](concepts/hermes-gambler-loop.md) - Safe learning loop for `gambler` and Hermes.
 - [concepts/gambler-web-ui](concepts/gambler-web-ui.md) - Operator dashboard for reasoning, candidate review, and Hermes state.
 - [concepts/simulation-ledger](concepts/simulation-ledger.md) - Paper placements, outcome lookup, settlement, and simulated performance.
+- [concepts/sports-data-intelligence](concepts/sports-data-intelligence.md) - Stats, trends, weather, news, seasonality, and feature snapshots.
 - [concepts/browser-automation-investigation](concepts/browser-automation-investigation.md) - How browser investigation should be run.
 
 ## Source Notes

@@ -10,6 +10,7 @@ The initial project goal is to understand the site, maintain a durable LLM wiki,
 - `.env.local` is ignored and must hold credentials locally.
 - The proposed `gambler` agent may observe, model, and prepare candidate coupons.
 - `gambler` should scan and monitor markets, simulate bet placement, keep a ledger, and reconcile final outcomes.
+- `gambler` should enrich decisions with sport stats, trends, weather, seasonality, and news stored in Postgres.
 - The proposed `gambler` web UI should show candidate odds, structured reasoning, risk checks, and review state.
 - The proposed Hermes Agent loop may reflect and propose one-variable strategy experiments.
 - No agent may submit real-money bets until a separate compliance and human-approval gate is explicitly accepted.
@@ -20,6 +21,7 @@ The initial project goal is to understand the site, maintain a durable LLM wiki,
 - [Compliance and safety](/Users/lindau/codex/danske-spil/docs/compliance-and-safety.md)
 - [Browser investigation](/Users/lindau/codex/danske-spil/docs/browser-investigation.md)
 - [Gambler web UI](/Users/lindau/codex/danske-spil/docs/web-ui.md)
+- [Sports data intelligence](/Users/lindau/codex/danske-spil/docs/data-intelligence.md)
 - [Simulation ledger](/Users/lindau/codex/danske-spil/docs/simulation-ledger.md)
 - [Hermes and gambler loop](/Users/lindau/codex/danske-spil/docs/hermes-agent.md)
 - [Kubernetes architecture](/Users/lindau/codex/danske-spil/docs/kubernetes-architecture.md)

@@ -19,6 +19,7 @@ The odds-selection view should show:
 - Current market and coupon observations.
 - Candidate bets and candidate Tips coupons.
 - Open simulated placements and settled paper results.
+- Relevant sport stats, trends, weather, seasonality, news, and availability signals used in the decision.
 - Selected odds, estimated probability, implied probability, estimated edge, confidence, and stake suggestion when staking is enabled.
 - Rejected alternatives and the reason they were rejected.
 - Responsible-gambling checks, local stake limits, and terms/safety gates.
@@ -93,6 +94,7 @@ Initial tools should be read-mostly:
 - `get_recent_odds_snapshots`
 - `get_recent_tips_coupons`
 - `get_candidate_bets`
+- `get_sports_feature_context`
 - `get_simulated_ledger`
 - `get_settlement_observations`
 - `list_reflections`

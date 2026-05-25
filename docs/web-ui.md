@@ -14,6 +14,7 @@ The UI is not a marketing site. It is an operational dashboard for repeated revi
 
 - Browser observation health.
 - Last successful Oddset and Tips snapshots.
+- Sports intelligence ingestion health by sport and source.
 - Candidate count by product, market, confidence, and status.
 - Open simulated placements, unresolved settlements, and settled paper results.
 - Active local limits and whether real-money placement is disabled.
@@ -27,7 +28,8 @@ For each candidate bet or coupon, show:
 - Event, market, selection, available odds, and observed timestamp.
 - Implied probability and estimated probability.
 - Estimated edge and confidence.
-- Evidence inputs, such as market movement, team/news notes, model features, and historical calibration.
+- Evidence inputs, such as market movement, sport stats, team/player news, weather, seasonality, model features, and historical calibration.
+- Missing or stale data warnings for stats, weather, news, rankings, and availability signals.
 - Rejected alternatives and rejection reasons.
 - Risk checks: duplicate exposure, stake limits, loss-cooldown, odds staleness, responsible-gambling flags, and terms/safety gate.
 - Recommendation state: observed, candidate, rejected, needs review, approved for simulation, or promoted baseline.
@@ -63,6 +65,8 @@ The Hermes view should show:
 The audit view should show immutable events:
 
 - Browser observations.
+- Sports data ingestion runs.
+- Feature snapshot creation.
 - Candidate creation.
 - Simulated placement creation.
 - Settlement lookup and grading.
@@ -78,6 +82,13 @@ The UI should read from normalized application state rather than browser interna
 
 Candidate tables:
 
+- `sports`
+- `competitions`
+- `teams`
+- `players`
+- `sport_events`
+- `feature_snapshots`
+- `source_registry`
 - `odds_snapshots`
 - `tips_coupons`
 - `candidate_bets`

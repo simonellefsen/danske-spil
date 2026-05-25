@@ -15,8 +15,8 @@ The `gambler` web UI is the operator-facing surface for understanding what the s
 
 ## Required Views
 
-- Overview: observation health, recent snapshots, active limits, and warnings.
-- Odds Reasoning: candidates, selected odds, scoring inputs, confidence, rejected alternatives, and safety gates.
+- Overview: observation health, sports-data ingestion health, recent snapshots, active limits, and warnings.
+- Odds Reasoning: candidates, selected odds, scoring inputs, sport stats/news/weather features, confidence, rejected alternatives, and safety gates.
 - Coupons: proposed legs, combined odds, exposure, uncertainty, simulation-ledger status, and disabled submission state.
 - Hermes: reflections, one-variable experiment proposals, lifecycle state, evidence, and active baseline context.
 - Audit: immutable observation, reasoning, safety, review, and experiment events.

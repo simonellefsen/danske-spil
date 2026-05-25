@@ -22,6 +22,7 @@ wiki/
 - Stable DOM/navigation models.
 - Web UI decisions and operator-review flows.
 - Simulation ledger, settlement, and performance methodology.
+- Sports intelligence ingestion, feature snapshots, and source policies.
 - Strategy hypotheses and rejected ideas.
 - Hermes reflections and one-variable experiment summaries.
 - Kubernetes and operations runbooks.

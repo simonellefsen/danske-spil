@@ -29,3 +29,9 @@ Append-only timeline for project wiki maintenance. Use headings with the format 
 - Added a dedicated simulation ledger requirement for `gambler`.
 - Clarified that the system should scan and monitor markets, create immutable paper placements, and reconcile final outcomes.
 - Added settlement lookup expectations, grading states, and simulated performance metrics.
+
+## [2026-05-25] planning | Sports data intelligence
+
+- Added the sports intelligence layer for stats, trends, weather, seasonality, news, and availability signals.
+- Set the initial sport scope to football/soccer, tennis, basketball, Formula 1, golf, and cycling.
+- Documented Postgres as the durable state store for normalized entities, source provenance, feature snapshots, and ingestion audit state.
