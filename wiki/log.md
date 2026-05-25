@@ -60,3 +60,9 @@ Append-only timeline for project wiki maintenance. Use headings with the format 
 - Added `poc_ranker_v1` candidate scoring fields: implied probability, model probability, expected value, confidence, score, risk flags, and feature snapshot.
 - Extended the simulation ledger with settlement metadata, simulated return, profit/loss, and settlement observations.
 - Added web UI metrics for open exposure and paper P/L plus manual paper-settlement controls.
+
+## [2026-05-25] implementation | Rust and Dioxus runtime migration
+
+- Reimplemented the active `gambler` POC as a Rust service with Axum, Dioxus SSR, Postgres state, and the read-only Danske Spil scanner.
+- Switched deployment to a single Rust binary that can run the API/Hermes web view or the scheduled worker loop.
+- Replaced the Python runtime container with a multi-stage Docker build and `scratch` final image.

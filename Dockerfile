@@ -1,17 +1,22 @@
-FROM python:3.12-slim
+FROM rust:1.87-alpine AS builder
 
-ENV PYTHONUNBUFFERED=1 \
-    PYTHONPATH=/app/src \
-    GAMBLER_HOST=0.0.0.0 \
-    GAMBLER_PORT=8080
+RUN apk add --no-cache musl-dev ca-certificates
 
 WORKDIR /app
 
-COPY requirements.txt ./
-RUN pip install --no-cache-dir -r requirements.txt
-
+COPY Cargo.toml Cargo.lock ./
 COPY src ./src
+
+RUN cargo build --release --locked
+
+FROM scratch
+
+ENV GAMBLER_HOST=0.0.0.0 \
+    GAMBLER_PORT=8080
+
+COPY --from=builder /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/ca-certificates.crt
+COPY --from=builder /app/target/release/danske-spil-gambler /gambler
 
 EXPOSE 8080
 
-CMD ["python", "-m", "gambler.app"]
+ENTRYPOINT ["/gambler"]

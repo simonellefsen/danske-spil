@@ -2,6 +2,8 @@
 
 This POC keeps the system non-mutating. It uses `agent-browser` for visual/DOM reconnaissance and a read-only content-service probe for structured odds data.
 
+The active app implementation is Rust. The HTTP API is served by Axum, the operator shell is rendered with Dioxus SSR, and the same binary runs either the API server or the scheduled worker loop.
+
 ## Agent Browser Setup
 
 Use a dedicated browser session:

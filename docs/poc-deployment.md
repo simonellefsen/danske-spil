@@ -2,6 +2,8 @@
 
 This deployment is local-only for Docker Desktop Kubernetes. It keeps `gambler` in observe-only mode and exposes only a ClusterIP service.
 
+The active runtime is a Rust binary. The Dockerfile builds it in a Rust builder stage and copies only the binary and CA bundle into a `scratch` final image.
+
 ## Components
 
 - `danske-spil-postgres`: CloudNativePG cluster with two instances.

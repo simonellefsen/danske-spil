@@ -6,9 +6,10 @@ The initial project goal is to understand the site, maintain a durable LLM wiki,
 
 ## Current Status
 
-- Documentation and wiki scaffold only.
+- Active POC implementation is Rust with a Dioxus-rendered web UI shell.
+- Runtime deployments use a multi-stage Docker build with a `scratch` final image.
 - `.env.local` is ignored and must hold credentials locally.
-- The proposed `gambler` agent may observe, model, and prepare candidate coupons.
+- The `gambler` agent may observe, model, and prepare candidate coupons.
 - `gambler` should scan and monitor markets, simulate bet placement, keep a ledger, and reconcile final outcomes.
 - `gambler` should enrich decisions with sport stats, trends, weather, seasonality, and news stored in Postgres.
 - The proposed `gambler` web UI should show candidate odds, structured reasoning, risk checks, and review state.
@@ -36,6 +37,14 @@ Use `rtk` for shell commands in this repository.
 
 ```bash
 rtk <command>
+```
+
+## Rust Checks
+
+```bash
+rtk cargo fmt
+rtk cargo check
+rtk cargo test
 ```
 
 ## Local Secrets
