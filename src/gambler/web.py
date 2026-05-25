@@ -88,6 +88,8 @@ INDEX_HTML = """<!doctype html>
   </main>
   <script>
     const $ = (id) => document.getElementById(id);
+    const appBase = document.body.dataset.basePath || "";
+    const api = (path) => `${appBase}${path}`;
     const json = (url, options) => fetch(url, options).then((r) => {
       if (!r.ok) throw new Error(`${r.status} ${r.statusText}`);
       return r.json();
@@ -105,7 +107,7 @@ INDEX_HTML = """<!doctype html>
       `).join("");
       document.querySelectorAll("[data-candidate]").forEach((button) => {
         button.addEventListener("click", async () => {
-          await json("/api/simulate", { method: "POST", body: JSON.stringify({ candidate_id: button.dataset.candidate }) });
+          await json(api("/api/simulate"), { method: "POST", body: JSON.stringify({ candidate_id: button.dataset.candidate }) });
           await load();
         });
       });
@@ -117,22 +119,22 @@ INDEX_HTML = """<!doctype html>
       `).join("");
     }
     async function load() {
-      const status = await json("/api/status");
+      const status = await json(api("/api/status"));
       $("mode").textContent = status.mode;
       $("database").textContent = status.database.connected ? "connected" : "degraded";
       $("database").className = status.database.connected ? "value ok" : "value danger";
       $("snapshot").textContent = status.latest_snapshot_id || "-";
       $("placement").textContent = status.allow_real_money_placement ? "enabled" : "disabled";
-      const candidates = await json("/api/candidates");
+      const candidates = await json(api("/api/candidates"));
       renderRows(candidates.items || []);
-      const ledger = await json("/api/ledger");
+      const ledger = await json(api("/api/ledger"));
       renderLedger(ledger.items || []);
-      const hermes = await json("/api/hermes");
+      const hermes = await json(api("/api/hermes"));
       $("hermes").textContent = JSON.stringify(hermes, null, 2);
     }
     $("scan").addEventListener("click", async () => {
       $("scan").disabled = true;
-      try { await json("/api/scan", { method: "POST" }); await load(); }
+      try { await json(api("/api/scan"), { method: "POST" }); await load(); }
       finally { $("scan").disabled = false; }
     });
     $("refresh").addEventListener("click", load);

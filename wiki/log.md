@@ -48,3 +48,9 @@ Append-only timeline for project wiki maintenance. Use headings with the format 
 - Added the first `gambler` API, web UI, scanner service, and paper-ledger flow.
 - Added Postgres schema initialization for odds snapshots, candidate bets, simulated bets, audit events, and Hermes reflections.
 - Added local Docker Desktop Kubernetes manifests for `gambler-api`, `gambler-worker`, `hermes-agent` POC, and a two-instance CNPG cluster.
+
+## [2026-05-25] infrastructure | ngrok shared path routing
+
+- Made the `gambler` UI base-path aware for `/danske-spil`.
+- Added internal ngrok agent endpoints for the `danske-spil` UI and the existing saxo daytrader UI.
+- Documented the shared ngrok hostname path-routing model.

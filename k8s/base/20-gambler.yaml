@@ -9,6 +9,7 @@ data:
   GAMBLER_SCAN_INTERVAL_SECONDS: "900"
   GAMBLER_SCAN_LIMIT: "2"
   GAMBLER_SCAN_MAX_MARKETS: "8"
+  GAMBLER_BASE_PATH: "/danske-spil"
   DATABASE_HOST: danske-spil-postgres-rw
   DATABASE_PORT: "5432"
   DATABASE_NAME: danske_spil

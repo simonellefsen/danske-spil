@@ -17,6 +17,7 @@ class Settings:
     component: str
     host: str
     port: int
+    base_path: str
     database_url: str | None
     observe_only: bool
     allow_real_money_placement: bool
@@ -47,6 +48,7 @@ def load_settings() -> Settings:
         component=os.getenv("APP_COMPONENT", "gambler-api"),
         host=os.getenv("GAMBLER_HOST", "0.0.0.0"),
         port=int(os.getenv("GAMBLER_PORT", "8080")),
+        base_path=os.getenv("GAMBLER_BASE_PATH", "").rstrip("/"),
         database_url=database_url,
         observe_only=_bool_env("GAMBLER_OBSERVE_ONLY", True),
         allow_real_money_placement=_bool_env("DANSKESPIL_ALLOW_REAL_MONEY_PLACEMENT", False),

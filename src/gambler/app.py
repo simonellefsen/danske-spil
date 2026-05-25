@@ -18,6 +18,14 @@ service = GamblerService(settings, Store(settings.database_url))
 class Handler(BaseHTTPRequestHandler):
     server_version = "gambler-poc/0.1"
 
+    def normalized_path(self) -> str:
+        path = self.path.split("?", 1)[0]
+        base_path = settings.base_path
+        if base_path and path.startswith(base_path):
+            stripped = path[len(base_path) :]
+            return stripped or "/"
+        return path
+
     def log_message(self, fmt: str, *args: Any) -> None:
         print(f"{self.address_string()} - {fmt % args}", flush=True)
 
@@ -36,7 +44,8 @@ class Handler(BaseHTTPRequestHandler):
         self.wfile.write(data)
 
     def send_html(self, body: str) -> None:
-        data = body.encode("utf-8")
+        rendered = body.replace("<body>", f'<body data-base-path="{settings.base_path}">')
+        data = rendered.encode("utf-8")
         self.send_response(HTTPStatus.OK)
         self.send_header("Content-Type", "text/html; charset=utf-8")
         self.send_header("Content-Length", str(len(data)))
@@ -45,21 +54,22 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_GET(self) -> None:
         try:
-            if self.path in {"/", "/index.html"}:
+            path = self.normalized_path()
+            if path in {"/", "/index.html"}:
                 self.send_html(INDEX_HTML)
-            elif self.path == "/healthz":
+            elif path == "/healthz":
                 self.send_json({"ok": True, "component": settings.component})
-            elif self.path == "/readyz":
+            elif path == "/readyz":
                 self.send_json({"ok": True, "database": service.store.status()})
-            elif self.path == "/api/status":
+            elif path == "/api/status":
                 self.send_json(service.status())
-            elif self.path == "/api/snapshots/latest":
+            elif path == "/api/snapshots/latest":
                 self.send_json({"item": service.store.latest_snapshot()})
-            elif self.path == "/api/candidates":
+            elif path == "/api/candidates":
                 self.send_json({"items": service.store.candidates(limit=50)})
-            elif self.path == "/api/ledger":
+            elif path == "/api/ledger":
                 self.send_json({"items": service.store.simulated_bets(limit=50)})
-            elif self.path == "/api/hermes":
+            elif path == "/api/hermes":
                 self.send_json(
                     {
                         "mode": "poc_view",
@@ -74,10 +84,11 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_POST(self) -> None:
         try:
-            if self.path == "/api/scan":
+            path = self.normalized_path()
+            if path == "/api/scan":
                 payload = self.read_json()
                 self.send_json(service.scan(include_live=bool(payload.get("include_live"))))
-            elif self.path == "/api/simulate":
+            elif path == "/api/simulate":
                 payload = self.read_json()
                 candidate_id = str(payload.get("candidate_id") or "")
                 stake = float(payload.get("stake") or settings.default_stake)

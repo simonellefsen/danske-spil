@@ -25,6 +25,7 @@ The initial project goal is to understand the site, maintain a durable LLM wiki,
 - [Simulation ledger](/Users/lindau/codex/danske-spil/docs/simulation-ledger.md)
 - [POC implementation notes](/Users/lindau/codex/danske-spil/docs/poc-implementation.md)
 - [POC deployment](/Users/lindau/codex/danske-spil/docs/poc-deployment.md)
+- [ngrok path routing](/Users/lindau/codex/danske-spil/docs/ngrok-path-routing.md)
 - [Hermes and gambler loop](/Users/lindau/codex/danske-spil/docs/hermes-agent.md)
 - [Kubernetes architecture](/Users/lindau/codex/danske-spil/docs/kubernetes-architecture.md)
 - [Project wiki](/Users/lindau/codex/danske-spil/wiki/index.md)
