@@ -129,6 +129,8 @@ Candidate tables:
 - `simulation_performance_daily`
 - `strategy_baselines`
 
+The POC keeps single-leg bets and multi-leg coupons in separate simulated-ledger tables. Shared metrics combine their open exposure, turnover, simulated return, profit/loss, hit rate, and average observed odds, while coupon rows keep leg-level evidence so a later settlement worker can grade each leg before calculating coupon-level return.
+
 ## Web UI Requirements
 
 The UI should show:

@@ -132,6 +132,10 @@ async fn get_handler(State(state): State<Arc<AppState>>, uri: OriginalUri) -> Re
             Ok(items) => Json(items).into_response(),
             Err(error) => error_response(StatusCode::INTERNAL_SERVER_ERROR, error),
         },
+        "/api/coupons/simulated" => match state.service.store().simulated_coupons(25).await {
+            Ok(items) => Json(items).into_response(),
+            Err(error) => error_response(StatusCode::INTERNAL_SERVER_ERROR, error),
+        },
         "/api/ledger" => match state.service.store().simulated_bets(50).await {
             Ok(items) => Json(json!({"items": items})).into_response(),
             Err(error) => error_response(StatusCode::INTERNAL_SERVER_ERROR, error),
@@ -315,6 +319,82 @@ async fn post_handler(
                         .await
                         .ok();
                     Json(summary).into_response()
+                }
+                Err(error) => error_response(StatusCode::BAD_REQUEST, error),
+            }
+        }
+        "/api/coupons/simulate" => {
+            let coupon_id = payload
+                .get("coupon_id")
+                .and_then(Value::as_str)
+                .unwrap_or_default();
+            let stake = payload
+                .get("stake")
+                .and_then(Value::as_f64)
+                .unwrap_or(state.settings.default_stake);
+            match state
+                .service
+                .store()
+                .simulate_coupon(
+                    coupon_id,
+                    stake,
+                    state.settings.auto_paper_max_open_exposure,
+                )
+                .await
+            {
+                Ok(item) => {
+                    state
+                        .service
+                        .store()
+                        .record_audit(
+                            "paper_coupon_created",
+                            json!({"coupon_id": coupon_id, "stake": stake}),
+                        )
+                        .await
+                        .ok();
+                    (StatusCode::CREATED, Json(json!({"item": item}))).into_response()
+                }
+                Err(error) => error_response(StatusCode::BAD_REQUEST, error),
+            }
+        }
+        "/api/coupons/settle" => {
+            let coupon_id = payload
+                .get("coupon_id")
+                .and_then(Value::as_str)
+                .unwrap_or_default();
+            let result = payload
+                .get("result")
+                .and_then(Value::as_str)
+                .unwrap_or_default();
+            let source = payload
+                .get("source")
+                .and_then(Value::as_str)
+                .unwrap_or("manual_operator_review");
+            let confidence = payload
+                .get("confidence")
+                .and_then(Value::as_f64)
+                .unwrap_or(1.0);
+            let notes = payload
+                .get("notes")
+                .and_then(Value::as_str)
+                .unwrap_or_default();
+            match state
+                .service
+                .store()
+                .settle_simulated_coupon(coupon_id, result, source, confidence, notes)
+                .await
+            {
+                Ok(item) => {
+                    state
+                        .service
+                        .store()
+                        .record_audit(
+                            "paper_coupon_settled",
+                            json!({"coupon_id": coupon_id, "status": item.get("status"), "source": source}),
+                        )
+                        .await
+                        .ok();
+                    Json(json!({"item": item})).into_response()
                 }
                 Err(error) => error_response(StatusCode::BAD_REQUEST, error),
             }

@@ -227,6 +227,44 @@ ALTER TABLE simulated_bets ADD COLUMN IF NOT EXISTS simulated_return numeric;
 ALTER TABLE simulated_bets ADD COLUMN IF NOT EXISTS profit_loss numeric;
 ALTER TABLE simulated_bets ADD COLUMN IF NOT EXISTS settlement_payload jsonb NOT NULL DEFAULT '{}'::jsonb;
 
+CREATE TABLE IF NOT EXISTS simulated_coupons (
+  id text PRIMARY KEY,
+  coupon_id text REFERENCES candidate_coupons(id),
+  created_at timestamptz NOT NULL DEFAULT now(),
+  hypothetical_stake numeric NOT NULL,
+  observed_combined_decimal_odds numeric,
+  status text NOT NULL DEFAULT 'open',
+  strategy_id text NOT NULL DEFAULT 'poc_ranker_v1',
+  settled_at timestamptz,
+  simulated_return numeric,
+  profit_loss numeric,
+  settlement_payload jsonb NOT NULL DEFAULT '{}'::jsonb,
+  payload jsonb NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS simulated_coupon_legs (
+  id text PRIMARY KEY,
+  simulated_coupon_id text NOT NULL REFERENCES simulated_coupons(id) ON DELETE CASCADE,
+  candidate_id text REFERENCES candidate_bets(id),
+  leg_index integer NOT NULL,
+  observed_decimal_odds numeric,
+  status text NOT NULL DEFAULT 'open',
+  settlement_payload jsonb NOT NULL DEFAULT '{}'::jsonb,
+  payload jsonb NOT NULL DEFAULT '{}'::jsonb,
+  UNIQUE (simulated_coupon_id, leg_index),
+  UNIQUE (simulated_coupon_id, candidate_id)
+);
+
+ALTER TABLE simulated_coupons ADD COLUMN IF NOT EXISTS strategy_id text NOT NULL DEFAULT 'poc_ranker_v1';
+ALTER TABLE simulated_coupons ADD COLUMN IF NOT EXISTS settled_at timestamptz;
+ALTER TABLE simulated_coupons ADD COLUMN IF NOT EXISTS simulated_return numeric;
+ALTER TABLE simulated_coupons ADD COLUMN IF NOT EXISTS profit_loss numeric;
+ALTER TABLE simulated_coupons ADD COLUMN IF NOT EXISTS settlement_payload jsonb NOT NULL DEFAULT '{}'::jsonb;
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_simulated_coupons_one_normal_per_coupon
+ON simulated_coupons(coupon_id)
+WHERE coupon_id IS NOT NULL AND status <> 'duplicate_void';
+
 WITH ranked AS (
   SELECT
     id,
@@ -290,12 +328,15 @@ WHERE sb.id = logical.id
 CREATE TABLE IF NOT EXISTS settlement_observations (
   id text PRIMARY KEY,
   simulated_bet_id text REFERENCES simulated_bets(id) ON DELETE CASCADE,
+  simulated_coupon_id text REFERENCES simulated_coupons(id) ON DELETE CASCADE,
   created_at timestamptz NOT NULL DEFAULT now(),
   source text NOT NULL,
   observed_result text NOT NULL,
   confidence numeric NOT NULL,
   payload jsonb NOT NULL
 );
+
+ALTER TABLE settlement_observations ADD COLUMN IF NOT EXISTS simulated_coupon_id text REFERENCES simulated_coupons(id) ON DELETE CASCADE;
 
 CREATE TABLE IF NOT EXISTS audit_events (
   id text PRIMARY KEY,
@@ -1201,6 +1242,224 @@ impl Store {
         }))
     }
 
+    pub async fn simulated_coupons(&self, limit: i64) -> anyhow::Result<Value> {
+        let client = self.connect().await?;
+        let rows = client
+            .query(
+                r#"
+                SELECT
+                  sc.id, sc.coupon_id, sc.created_at,
+                  sc.hypothetical_stake::float8 AS hypothetical_stake,
+                  sc.observed_combined_decimal_odds::float8 AS observed_combined_decimal_odds,
+                  sc.status, sc.strategy_id, sc.settled_at,
+                  sc.simulated_return::float8 AS simulated_return,
+                  sc.profit_loss::float8 AS profit_loss,
+                  sc.settlement_payload, sc.payload,
+                  COALESCE(
+                    jsonb_agg(
+                      jsonb_build_object(
+                        'candidate_id', scl.candidate_id,
+                        'leg_index', scl.leg_index,
+                        'observed_decimal_odds', scl.observed_decimal_odds::float8,
+                        'status', scl.status,
+                        'settlement_payload', scl.settlement_payload,
+                        'payload', scl.payload
+                      )
+                      ORDER BY scl.leg_index
+                    ) FILTER (WHERE scl.id IS NOT NULL),
+                    '[]'::jsonb
+                  ) AS legs
+                FROM simulated_coupons sc
+                LEFT JOIN simulated_coupon_legs scl ON scl.simulated_coupon_id = sc.id
+                GROUP BY sc.id
+                ORDER BY sc.created_at DESC
+                LIMIT $1
+                "#,
+                &[&limit],
+            )
+            .await?;
+        Ok(json!({
+            "paper_only": true,
+            "items": rows.iter().map(|row| {
+                let created_at: DateTime<Utc> = row.get("created_at");
+                let settled_at: Option<DateTime<Utc>> = row.get("settled_at");
+                json!({
+                    "id": row.get::<_, String>("id"),
+                    "coupon_id": row.get::<_, Option<String>>("coupon_id"),
+                    "created_at": created_at,
+                    "hypothetical_stake": row.get::<_, f64>("hypothetical_stake"),
+                    "observed_combined_decimal_odds": row.get::<_, Option<f64>>("observed_combined_decimal_odds"),
+                    "status": row.get::<_, String>("status"),
+                    "strategy_id": row.get::<_, String>("strategy_id"),
+                    "settled_at": settled_at,
+                    "simulated_return": row.get::<_, Option<f64>>("simulated_return"),
+                    "profit_loss": row.get::<_, Option<f64>>("profit_loss"),
+                    "settlement_payload": row.get::<_, Value>("settlement_payload"),
+                    "payload": row.get::<_, Value>("payload"),
+                    "legs": row.get::<_, Value>("legs")
+                })
+            }).collect::<Vec<_>>()
+        }))
+    }
+
+    pub async fn simulate_coupon(
+        &self,
+        coupon_id: &str,
+        stake: f64,
+        max_open_exposure: f64,
+    ) -> anyhow::Result<Value> {
+        if coupon_id.is_empty() {
+            return Err(anyhow!("coupon_id is required"));
+        }
+        if stake <= 0.0 {
+            return Err(anyhow!("stake must be positive"));
+        }
+        if let Some(existing) = self.simulated_coupon_by_coupon_id(coupon_id).await? {
+            return Ok(existing);
+        }
+        let open_exposure = self.open_exposure().await?;
+        if open_exposure + stake > max_open_exposure {
+            return Err(anyhow!(
+                "open exposure cap reached: current {open_exposure}, stake {stake}, max {max_open_exposure}"
+            ));
+        }
+
+        let coupon = self
+            .candidate_coupon_by_id(coupon_id)
+            .await?
+            .ok_or_else(|| anyhow!("candidate coupon not found: {coupon_id}"))?;
+        let status = coupon
+            .get("status")
+            .and_then(Value::as_str)
+            .unwrap_or_default();
+        if status == "rejected" {
+            return Err(anyhow!(
+                "rejected coupon cannot be paper-ledgered: {coupon_id}"
+            ));
+        }
+        let legs = coupon
+            .get("legs")
+            .and_then(Value::as_array)
+            .cloned()
+            .unwrap_or_default();
+        if legs.len() < 2 {
+            return Err(anyhow!("coupon must have at least two legs: {coupon_id}"));
+        }
+        let combined_decimal_odds = coupon.get("combined_decimal_odds").and_then(Value::as_f64);
+        let strategy_id = coupon
+            .get("strategy_id")
+            .and_then(Value::as_str)
+            .unwrap_or("poc_ranker_v1")
+            .to_string();
+        let simulated_coupon_id = new_id();
+        let payload = json!({
+            "coupon": coupon,
+            "paper_only": true,
+            "source": "operator_coupon_simulation",
+            "safety": "Real-money placement is disabled; this only writes a simulated coupon ledger row."
+        });
+
+        let mut client = self.connect().await?;
+        let transaction = client.transaction().await?;
+        let affected = transaction
+            .execute(
+                r#"
+                INSERT INTO simulated_coupons (
+                  id, coupon_id, hypothetical_stake, observed_combined_decimal_odds,
+                  status, strategy_id, settlement_payload, payload
+                )
+                VALUES ($1,$2,($3::float8)::numeric,($4::float8)::numeric,$5,$6,$7,$8)
+                ON CONFLICT DO NOTHING
+                "#,
+                &[
+                    &simulated_coupon_id,
+                    &coupon_id,
+                    &stake,
+                    &combined_decimal_odds,
+                    &"open",
+                    &strategy_id,
+                    &json!({}),
+                    &payload,
+                ],
+            )
+            .await?;
+        if affected > 0 {
+            for leg in legs {
+                let candidate_id = leg
+                    .get("candidate_id")
+                    .and_then(Value::as_str)
+                    .map(str::to_string);
+                let leg_index = leg
+                    .get("leg_index")
+                    .and_then(Value::as_i64)
+                    .unwrap_or_default() as i32;
+                let observed_decimal_odds =
+                    leg.get("observed_decimal_odds").and_then(Value::as_f64);
+                transaction
+                    .execute(
+                        r#"
+                        INSERT INTO simulated_coupon_legs (
+                          id, simulated_coupon_id, candidate_id, leg_index,
+                          observed_decimal_odds, status, settlement_payload, payload
+                        )
+                        VALUES ($1,$2,$3,$4,($5::float8)::numeric,$6,$7,$8)
+                        ON CONFLICT DO NOTHING
+                        "#,
+                        &[
+                            &new_id(),
+                            &simulated_coupon_id,
+                            &candidate_id,
+                            &leg_index,
+                            &observed_decimal_odds,
+                            &"open",
+                            &json!({}),
+                            &leg,
+                        ],
+                    )
+                    .await?;
+            }
+            transaction
+                .execute(
+                    "UPDATE candidate_coupons SET status = 'paper_placed' WHERE id = $1 AND status = 'candidate'",
+                    &[&coupon_id],
+                )
+                .await?;
+        }
+        transaction.commit().await?;
+        self.simulated_coupon_by_coupon_id(coupon_id)
+            .await?
+            .ok_or_else(|| {
+                anyhow!("simulated coupon insert skipped but existing row was not found")
+            })
+    }
+
+    async fn candidate_coupon_by_id(&self, coupon_id: &str) -> anyhow::Result<Option<Value>> {
+        Ok(self
+            .candidate_coupons(1000)
+            .await?
+            .get("items")
+            .and_then(Value::as_array)
+            .into_iter()
+            .flatten()
+            .find(|item| item.get("id").and_then(Value::as_str) == Some(coupon_id))
+            .cloned())
+    }
+
+    async fn simulated_coupon_by_coupon_id(
+        &self,
+        coupon_id: &str,
+    ) -> anyhow::Result<Option<Value>> {
+        Ok(self
+            .simulated_coupons(1000)
+            .await?
+            .get("items")
+            .and_then(Value::as_array)
+            .into_iter()
+            .flatten()
+            .find(|item| item.get("coupon_id").and_then(Value::as_str) == Some(coupon_id))
+            .cloned())
+    }
+
     pub async fn simulate_bet(
         &self,
         candidate_id: &str,
@@ -1503,9 +1762,16 @@ impl Store {
         let row = client
             .query_one(
                 r#"
-                SELECT COALESCE(sum(hypothetical_stake), 0)::float8 AS open_exposure
-                FROM simulated_bets
-                WHERE status IN ('open', 'awaiting_result', 'unresolved')
+                SELECT (
+                  SELECT COALESCE(sum(hypothetical_stake), 0)
+                  FROM simulated_bets
+                  WHERE status IN ('open', 'awaiting_result', 'unresolved')
+                )::float8
+                + (
+                  SELECT COALESCE(sum(hypothetical_stake), 0)
+                  FROM simulated_coupons
+                  WHERE status IN ('open', 'awaiting_result', 'unresolved')
+                )::float8 AS open_exposure
                 "#,
                 &[],
             )
@@ -1889,6 +2155,53 @@ impl Store {
                 }
             }
         }
+        let client = self.connect().await?;
+        let coupon_rows = client
+            .query(
+                r#"
+                SELECT hypothetical_stake::float8 AS hypothetical_stake,
+                       observed_combined_decimal_odds::float8 AS observed_combined_decimal_odds,
+                       status,
+                       simulated_return::float8 AS simulated_return,
+                       profit_loss::float8 AS profit_loss
+                FROM simulated_coupons
+                ORDER BY created_at DESC
+                LIMIT 1000
+                "#,
+                &[],
+            )
+            .await?;
+        summary.count += coupon_rows.len();
+        for row in coupon_rows {
+            let status: String = row.get("status");
+            *summary.by_status.entry(status.clone()).or_default() += 1;
+            if status == "duplicate_void" {
+                continue;
+            }
+            let stake: f64 = row.get("hypothetical_stake");
+            summary.turnover += stake;
+            summary.simulated_return += row
+                .get::<_, Option<f64>>("simulated_return")
+                .unwrap_or_default();
+            summary.profit_loss += row.get::<_, Option<f64>>("profit_loss").unwrap_or_default();
+            if let Some(odds) = row.get::<_, Option<f64>>("observed_combined_decimal_odds") {
+                odds_total += odds;
+                odds_count += 1;
+            }
+            if matches!(status.as_str(), "open" | "awaiting_result" | "unresolved") {
+                summary.open_count += 1;
+                summary.open_exposure += stake;
+            }
+            if status.starts_with("settled_") || matches!(status.as_str(), "void" | "pushed") {
+                summary.settled_count += 1;
+            }
+            if matches!(status.as_str(), "settled_won" | "settled_lost") {
+                decided += 1;
+                if status == "settled_won" {
+                    won += 1;
+                }
+            }
+        }
         if decided > 0 {
             summary.hit_rate = Some(won as f64 / decided as f64);
         }
@@ -2258,6 +2571,129 @@ impl Store {
             .ok_or_else(|| anyhow!("settled simulated bet not found"))
     }
 
+    pub async fn settle_simulated_coupon(
+        &self,
+        coupon_id: &str,
+        result: &str,
+        source: &str,
+        confidence: f64,
+        notes: &str,
+    ) -> anyhow::Result<Value> {
+        let status = match result {
+            "won" => "settled_won",
+            "lost" => "settled_lost",
+            "void" => "void",
+            "pushed" => "pushed",
+            "unresolved" => "unresolved",
+            _ => return Err(anyhow!("unsupported settlement result: {result}")),
+        };
+        let coupon = self
+            .simulated_coupons(1000)
+            .await?
+            .get("items")
+            .and_then(Value::as_array)
+            .into_iter()
+            .flatten()
+            .find(|item| item.get("id").and_then(Value::as_str) == Some(coupon_id))
+            .cloned()
+            .ok_or_else(|| anyhow!("simulated coupon not found: {coupon_id}"))?;
+        let current_status = coupon
+            .get("status")
+            .and_then(Value::as_str)
+            .unwrap_or_default();
+        if !matches!(current_status, "open" | "awaiting_result" | "unresolved") {
+            return Err(anyhow!("simulated coupon is already settled: {coupon_id}"));
+        }
+        let stake = coupon
+            .get("hypothetical_stake")
+            .and_then(Value::as_f64)
+            .unwrap_or_default();
+        let combined_decimal_odds = coupon
+            .get("observed_combined_decimal_odds")
+            .and_then(Value::as_f64)
+            .unwrap_or_default();
+        let (simulated_return, profit_loss) = match result {
+            "won" => {
+                let returned = stake * combined_decimal_odds;
+                (Some(returned), Some(returned - stake))
+            }
+            "lost" => (Some(0.0), Some(-stake)),
+            "void" | "pushed" => (Some(stake), Some(0.0)),
+            _ => (None, None),
+        };
+        let settlement_payload = json!({
+            "source": source,
+            "observed_result": result,
+            "confidence": confidence,
+            "notes": notes,
+            "paper_only": true,
+            "coupon_level": true
+        });
+        let settled_at = Utc::now();
+        let mut client = self.connect().await?;
+        let transaction = client.transaction().await?;
+        transaction
+            .execute(
+                r#"
+                UPDATE simulated_coupons
+                SET status = $1,
+                    settled_at = $2,
+                    simulated_return = ($3::float8)::numeric,
+                    profit_loss = ($4::float8)::numeric,
+                    settlement_payload = $5
+                WHERE id = $6
+                "#,
+                &[
+                    &status,
+                    &settled_at,
+                    &simulated_return,
+                    &profit_loss,
+                    &settlement_payload,
+                    &coupon_id,
+                ],
+            )
+            .await?;
+        transaction
+            .execute(
+                r#"
+                UPDATE simulated_coupon_legs
+                SET status = $1,
+                    settlement_payload = settlement_payload || $2
+                WHERE simulated_coupon_id = $3
+                "#,
+                &[&status, &settlement_payload, &coupon_id],
+            )
+            .await?;
+        transaction
+            .execute(
+                r#"
+                INSERT INTO settlement_observations (
+                  id, simulated_coupon_id, source, observed_result, confidence, payload
+                )
+                VALUES ($1,$2,$3,$4,($5::float8)::numeric,$6)
+                "#,
+                &[
+                    &new_id(),
+                    &coupon_id,
+                    &source,
+                    &result,
+                    &confidence,
+                    &settlement_payload,
+                ],
+            )
+            .await?;
+        transaction.commit().await?;
+        self.simulated_coupons(1000)
+            .await?
+            .get("items")
+            .and_then(Value::as_array)
+            .into_iter()
+            .flatten()
+            .find(|item| item.get("id").and_then(Value::as_str) == Some(coupon_id))
+            .cloned()
+            .ok_or_else(|| anyhow!("settled simulated coupon not found"))
+    }
+
     pub async fn hermes_reflections(&self, limit: i64) -> anyhow::Result<Vec<HermesReflection>> {
         let client = self.connect().await?;
         let rows = client
@@ -2428,6 +2864,93 @@ impl Store {
                     "specialized_market_candidate_count",
                 )
                 .await;
+        }
+
+        let baseline = client
+            .query_opt(
+                r#"
+                SELECT config
+                FROM strategy_baselines
+                WHERE strategy_id = 'poc_ranker_v1' AND active = true
+                ORDER BY created_at DESC
+                LIMIT 1
+                "#,
+                &[],
+            )
+            .await?;
+        let baseline_config: Option<Value> = baseline.map(|row| row.get("config"));
+        let coupon_modes = baseline_config
+            .as_ref()
+            .and_then(|config| config.get("coupon_modes"))
+            .cloned()
+            .unwrap_or_else(|| {
+                json!({
+                    "single": true,
+                    "double": false,
+                    "triple": false,
+                    "accumulator": false,
+                    "max_legs": 1,
+                    "require_provider_accumulator_support": true,
+                    "require_same_sport_or_category_when_provider_requires_it": true
+                })
+            });
+        let doubles_enabled = coupon_modes
+            .get("double")
+            .and_then(Value::as_bool)
+            .unwrap_or(false);
+        if !doubles_enabled {
+            let mut by_sport: BTreeMap<&str, Vec<&CandidateBet>> = BTreeMap::new();
+            for candidate in candidates
+                .iter()
+                .filter(|candidate| accumulator_allowed(candidate, 2))
+            {
+                by_sport
+                    .entry(candidate.sport_key.as_str())
+                    .or_default()
+                    .push(candidate);
+            }
+            let supported_double_candidates: Vec<&CandidateBet> = by_sport
+                .values()
+                .find(|items| {
+                    let distinct_event_count = items
+                        .iter()
+                        .filter_map(|candidate| candidate.event_id.as_deref())
+                        .collect::<HashSet<_>>()
+                        .len();
+                    distinct_event_count >= 2
+                })
+                .cloned()
+                .unwrap_or_default();
+            if supported_double_candidates.len() >= 2 {
+                let mut proposed_coupon_modes = coupon_modes.clone();
+                if let Some(object) = proposed_coupon_modes.as_object_mut() {
+                    object.insert("double".to_string(), json!(true));
+                    object.insert("max_legs".to_string(), json!(2));
+                    object.insert("triple".to_string(), json!(false));
+                    object.insert("accumulator".to_string(), json!(false));
+                    object.insert(
+                        "require_provider_accumulator_support".to_string(),
+                        json!(true),
+                    );
+                    object.insert(
+                        "require_same_sport_or_category_when_provider_requires_it".to_string(),
+                        json!(true),
+                    );
+                }
+                return self
+                    .insert_strategy_experiment(
+                        snapshot_id,
+                        "Enable paper doubles",
+                        "Provider accumulator metadata shows at least two same-sport, distinct-event selections that can be combined. Enabling paper doubles lets the simulator evaluate coupon behavior without changing real-money safety gates.",
+                        "coupon_modes",
+                        coupon_modes,
+                        proposed_coupon_modes,
+                        candidates,
+                        &supported_double_candidates,
+                        "provider_supported_double_candidate_count",
+                    )
+                    .await;
+            }
         }
 
         Ok(None)

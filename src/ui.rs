@@ -52,9 +52,18 @@ pub fn render_index(base_path: &str) -> String {
                         h2 { "Candidate coupons" }
                         table {
                             thead { tr {
-                                th { "Type" } th { "Legs" } th { "Combined odds" } th { "Score" } th { "Rule evidence" }
+                                th { "Type" } th { "Legs" } th { "Combined odds" } th { "Score" } th { "Rule evidence" } th {}
                             } }
                             tbody { id: "coupons" }
+                        }
+                    }
+                    section {
+                        h2 { "Simulated coupons" }
+                        table {
+                            thead { tr {
+                                th { "Created" } th { "Coupon" } th { "Stake" } th { "Status" } th { "P/L" } th {}
+                            } }
+                            tbody { id: "simulated-coupons" }
                         }
                     }
                     section {
@@ -288,12 +297,69 @@ function renderCoupons(items) {
         <td>${num(item.combined_decimal_odds)}</td>
         <td>${num(item.score)}<br><span class="muted">conf ${pct(item.confidence)}</span></td>
         <td>${esc(ruleText || "not verified")}</td>
+        <td><button data-coupon="${item.id}" ${item.status === "rejected" ? "disabled" : ""}>Paper coupon</button></td>
       </tr>
     `;
   }).join("");
   if (!items.length) {
-    $("coupons").innerHTML = `<tr><td colspan="5" class="muted">No multi-leg coupon candidates yet. They remain disabled unless the active baseline enables them.</td></tr>`;
+    $("coupons").innerHTML = `<tr><td colspan="6" class="muted">No multi-leg coupon candidates yet. They remain disabled unless the active baseline enables them.</td></tr>`;
   }
+  document.querySelectorAll("[data-coupon]").forEach((button) => {
+    button.addEventListener("click", async () => {
+      await json(api("/api/coupons/simulate"), {
+        method: "POST",
+        body: JSON.stringify({ coupon_id: button.dataset.coupon })
+      });
+      await load();
+    });
+  });
+}
+function renderSimulatedCoupons(items) {
+  const couponLabel = (item) => {
+    const coupon = item.payload && item.payload.coupon ? item.payload.coupon : {};
+    const legs = coupon.legs || item.legs || [];
+    const labels = legs.map((leg) => {
+      const candidate = leg.payload && leg.payload.candidate ? leg.payload.candidate : {};
+      return `${esc(candidate.event_name || leg.candidate_id || "")} / ${esc(candidate.outcome_name || "")}`;
+    }).filter(Boolean);
+    return `${esc(coupon.coupon_type || "coupon")} (${labels.length || coupon.leg_count || 0})<br><span class="label">${labels.join("<br>")}</span>`;
+  };
+  $("simulated-coupons").innerHTML = items.map((item) => {
+    const canSettle = ["open", "awaiting_result", "unresolved"].includes(item.status);
+    return `
+      <tr>
+        <td>${esc(item.created_at)}</td>
+        <td>${couponLabel(item)}<br><span class="label">${esc(item.strategy_id || "")}</span></td>
+        <td>${money(item.hypothetical_stake)}<br><span class="muted">@ ${item.observed_combined_decimal_odds ?? "-"}</span></td>
+        <td>${esc(item.status)}</td>
+        <td>${item.profit_loss === null || item.profit_loss === undefined ? "-" : money(item.profit_loss)}</td>
+        <td>
+          <div class="actions">
+            <button data-coupon-settle="${item.id}" data-result="won" ${!canSettle ? "disabled" : ""}>Won</button>
+            <button data-coupon-settle="${item.id}" data-result="lost" ${!canSettle ? "disabled" : ""}>Lost</button>
+            <button data-coupon-settle="${item.id}" data-result="void" ${!canSettle ? "disabled" : ""}>Void</button>
+          </div>
+        </td>
+      </tr>
+    `;
+  }).join("");
+  if (!items.length) {
+    $("simulated-coupons").innerHTML = `<tr><td colspan="6" class="muted">No paper coupons have been simulated yet.</td></tr>`;
+  }
+  document.querySelectorAll("[data-coupon-settle]").forEach((button) => {
+    button.addEventListener("click", async () => {
+      await json(api("/api/coupons/settle"), {
+        method: "POST",
+        body: JSON.stringify({
+          coupon_id: button.dataset.couponSettle,
+          result: button.dataset.result,
+          source: "manual_operator_review",
+          confidence: 1
+        })
+      });
+      await load();
+    });
+  });
 }
 function renderLedger(items) {
   const candidateLabel = (item) => {
@@ -478,6 +544,8 @@ async function load() {
   renderStrategyDecisions(decisions.items || []);
   const coupons = await json(api("/api/coupons"));
   renderCoupons(coupons.items || []);
+  const simulatedCoupons = await json(api("/api/coupons/simulated"));
+  renderSimulatedCoupons(simulatedCoupons.items || []);
   const ledger = await json(api("/api/ledger"));
   renderLedger(ledger.items || []);
   const settlementReview = await json(api("/api/settlement/review"));
