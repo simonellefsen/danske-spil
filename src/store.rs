@@ -1629,6 +1629,196 @@ impl Store {
         }))
     }
 
+    pub async fn refresh_settlement_review_queue(&self, limit: usize) -> anyhow::Result<Value> {
+        if limit == 0 {
+            return Ok(json!({
+                "enabled": true,
+                "review_count": 0,
+                "skipped": true,
+                "reason": "settlement review limit is zero"
+            }));
+        }
+
+        let client = self.connect().await?;
+        let rows = client
+            .query(
+                r#"
+                WITH review AS (
+                  SELECT
+                    sb.id AS bet_id,
+                    sb.status AS bet_status,
+                    cb.id AS candidate_id,
+                    cb.sport_key,
+                    cb.event_id,
+                    cb.event_name,
+                    cb.competition,
+                    cb.market_id,
+                    cb.market_name,
+                    cb.market_kind,
+                    cb.outcome_id,
+                    cb.outcome_name,
+                    cb.decimal_odds::float8 AS observed_decimal_odds,
+                    se.start_time,
+                    se.status AS event_status,
+                    se.resulted AS event_resulted,
+                    se.settled AS event_settled,
+                    se.payload AS event_payload,
+                    mo.market_id AS latest_market_id,
+                    mo.active AS latest_market_active,
+                    mo.displayed AS latest_market_displayed,
+                    mo.payload AS latest_market_payload,
+                    oo.outcome_id AS latest_outcome_id,
+                    oo.outcome_name AS latest_outcome_name,
+                    oo.active AS latest_outcome_active,
+                    oo.displayed AS latest_outcome_displayed,
+                    oo.decimal_odds::float8 AS latest_decimal_odds,
+                    oo.payload AS latest_outcome_payload,
+                    CASE
+                      WHEN se.start_time IS NULL THEN NULL
+                      WHEN cb.sport_key = 'football' THEN se.start_time + interval '130 minutes'
+                      WHEN cb.sport_key = 'basketball' THEN se.start_time + interval '150 minutes'
+                      WHEN cb.sport_key = 'tennis' THEN se.start_time + interval '240 minutes'
+                      WHEN cb.sport_key IN ('formula1', 'golf', 'cycling') THEN se.start_time + interval '1 day'
+                      ELSE se.start_time + interval '4 hours'
+                    END AS expected_result_check_after
+                  FROM simulated_bets sb
+                  JOIN candidate_bets cb ON cb.id = sb.candidate_id
+                  LEFT JOIN sport_events se ON se.id = cb.event_id
+                  LEFT JOIN LATERAL (
+                    SELECT mo.*
+                    FROM market_observations mo
+                    WHERE mo.event_id = cb.event_id
+                      AND mo.market_id = cb.market_id
+                    ORDER BY mo.observed_at DESC
+                    LIMIT 1
+                  ) mo ON true
+                  LEFT JOIN LATERAL (
+                    SELECT oo.*
+                    FROM outcome_observations oo
+                    WHERE oo.market_observation_id = mo.id
+                      AND oo.outcome_id = cb.outcome_id
+                    ORDER BY oo.observed_at DESC
+                    LIMIT 1
+                  ) oo ON true
+                  WHERE sb.status IN ('awaiting_result', 'unresolved')
+                  ORDER BY se.start_time ASC NULLS LAST, sb.created_at ASC
+                  LIMIT $1
+                )
+                UPDATE simulated_bets sb
+                SET settlement_payload = sb.settlement_payload || jsonb_build_object(
+                  'review_evidence',
+                  jsonb_build_object(
+                    'source', 'danskespil_content_service',
+                    'reviewed_at', now(),
+                    'paper_only', true,
+                    'not_auto_graded', true,
+                    'requires_manual_grade', true,
+                    'bet_status', review.bet_status,
+                    'sport_key', review.sport_key,
+                    'event_id', review.event_id,
+                    'event_name', review.event_name,
+                    'competition', review.competition,
+                    'market_id', review.market_id,
+                    'market_name', review.market_name,
+                    'market_kind', review.market_kind,
+                    'outcome_id', review.outcome_id,
+                    'outcome_name', review.outcome_name,
+                    'observed_decimal_odds', review.observed_decimal_odds,
+                    'start_time', review.start_time,
+                    'expected_result_check_after', review.expected_result_check_after,
+                    'event_status', review.event_status,
+                    'event_resulted', review.event_resulted,
+                    'event_settled', review.event_settled,
+                    'latest_market_active', review.latest_market_active,
+                    'latest_market_displayed', review.latest_market_displayed,
+                    'latest_outcome_active', review.latest_outcome_active,
+                    'latest_outcome_displayed', review.latest_outcome_displayed,
+                    'latest_decimal_odds', review.latest_decimal_odds,
+                    'latest_outcome_payload', review.latest_outcome_payload
+                  )
+                )
+                FROM review
+                WHERE sb.id = review.bet_id
+                RETURNING
+                  sb.id,
+                  review.bet_status,
+                  review.candidate_id,
+                  review.sport_key,
+                  review.event_id,
+                  review.event_name,
+                  review.competition,
+                  review.market_id,
+                  review.market_name,
+                  review.market_kind,
+                  review.outcome_id,
+                  review.outcome_name,
+                  review.observed_decimal_odds,
+                  review.start_time,
+                  review.expected_result_check_after,
+                  review.event_status,
+                  review.event_resulted,
+                  review.event_settled,
+                  review.latest_market_active,
+                  review.latest_market_displayed,
+                  review.latest_outcome_active,
+                  review.latest_outcome_displayed,
+                  review.latest_decimal_odds,
+                  review.latest_outcome_payload
+                "#,
+                &[&(limit as i64)],
+            )
+            .await?;
+
+        Ok(json!({
+            "enabled": true,
+            "review_count": rows.len(),
+            "limit": limit,
+            "items": rows.iter().map(|row| {
+                let start_time: Option<DateTime<Utc>> = row.get("start_time");
+                let expected_result_check_after: Option<DateTime<Utc>> =
+                    row.get("expected_result_check_after");
+                let event_status: Option<String> = row.get("event_status");
+                let event_resulted: Option<bool> = row.get("event_resulted");
+                let event_settled: Option<bool> = row.get("event_settled");
+                let recommendation = settlement_review_recommendation(
+                    event_status.as_deref(),
+                    event_resulted,
+                    event_settled,
+                    expected_result_check_after,
+                );
+                json!({
+                    "bet_id": row.get::<_, String>("id"),
+                    "bet_status": row.get::<_, String>("bet_status"),
+                    "candidate_id": row.get::<_, String>("candidate_id"),
+                    "sport_key": row.get::<_, String>("sport_key"),
+                    "event_id": row.get::<_, Option<String>>("event_id"),
+                    "event_name": row.get::<_, Option<String>>("event_name"),
+                    "competition": row.get::<_, Option<String>>("competition"),
+                    "market_id": row.get::<_, Option<String>>("market_id"),
+                    "market_name": row.get::<_, Option<String>>("market_name"),
+                    "market_kind": row.get::<_, Option<String>>("market_kind"),
+                    "outcome_id": row.get::<_, Option<String>>("outcome_id"),
+                    "outcome_name": row.get::<_, Option<String>>("outcome_name"),
+                    "observed_decimal_odds": row.get::<_, Option<f64>>("observed_decimal_odds"),
+                    "start_time": start_time,
+                    "expected_result_check_after": expected_result_check_after,
+                    "event_status": event_status,
+                    "event_resulted": event_resulted,
+                    "event_settled": event_settled,
+                    "latest_market_active": row.get::<_, Option<bool>>("latest_market_active"),
+                    "latest_market_displayed": row.get::<_, Option<bool>>("latest_market_displayed"),
+                    "latest_outcome_active": row.get::<_, Option<bool>>("latest_outcome_active"),
+                    "latest_outcome_displayed": row.get::<_, Option<bool>>("latest_outcome_displayed"),
+                    "latest_decimal_odds": row.get::<_, Option<f64>>("latest_decimal_odds"),
+                    "latest_outcome_payload": row.get::<_, Option<Value>>("latest_outcome_payload"),
+                    "recommendation": recommendation
+                })
+            }).collect::<Vec<_>>(),
+            "paper_only": true,
+            "not_auto_graded": true
+        }))
+    }
+
     pub async fn simulated_bets(&self, limit: i64) -> anyhow::Result<Vec<SimulatedBet>> {
         let client = self.connect().await?;
         let rows = client
@@ -3008,6 +3198,30 @@ fn combinations<'a>(items: &[&'a CandidateBet], leg_count: usize) -> Vec<Vec<&'a
     let mut current = Vec::new();
     walk(items, leg_count, 0, &mut current, &mut output);
     output
+}
+
+fn settlement_review_recommendation(
+    event_status: Option<&str>,
+    event_resulted: Option<bool>,
+    event_settled: Option<bool>,
+    expected_result_check_after: Option<DateTime<Utc>>,
+) -> &'static str {
+    let normalized_status = event_status.unwrap_or_default().to_ascii_lowercase();
+    if normalized_status.contains("cancel")
+        || normalized_status.contains("postpon")
+        || normalized_status.contains("abandon")
+        || normalized_status.contains("suspend")
+        || normalized_status.contains("void")
+    {
+        return "manual_void_or_refund_review";
+    }
+    if event_settled == Some(true) || event_resulted == Some(true) {
+        return "manual_grade_ready";
+    }
+    if expected_result_check_after.is_some_and(|value| value <= Utc::now()) {
+        return "expected_finish_passed_recheck";
+    }
+    "await_more_evidence"
 }
 
 fn candidate_from_row(row: &Row) -> CandidateBet {

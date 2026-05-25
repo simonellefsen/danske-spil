@@ -210,3 +210,12 @@ Current implementation status:
 The web UI can manually settle paper-ledger rows as won, lost, void, pushed, or unresolved. This writes settlement metadata and simulated return/profit-loss fields to Postgres. Manual settlement is a placeholder for the planned result-lookup worker; it should only be used when the operator has verified the result from an acceptable source.
 
 The planned automated settlement worker should handle normal final results plus cancelled, postponed, abandoned, voided, pushed, and agency-refunded outcomes. These states should keep their source evidence and grading rule in Postgres so simulation metrics can distinguish real losses from stake returns or unresolved events.
+
+Current result-review status:
+
+- `GET/POST /api/settlement/review` refreshes review evidence for `awaiting_result` and `unresolved` paper bets.
+- The worker runs the same review refresh after advancing the settlement queue.
+- Review evidence is written into each bet's `settlement_payload.review_evidence`.
+- The review queue joins paper bets to the latest observed event, market, and outcome payloads from the Danske Spil content feed.
+- The system recommends `manual_grade_ready`, `manual_void_or_refund_review`, `expected_finish_passed_recheck`, or `await_more_evidence`.
+- It still does not auto-grade won/lost because the feed outcome result semantics have not been proven for each market type.

@@ -87,6 +87,14 @@ async fn run_worker(settings: Settings, service: GamblerService) -> anyhow::Resu
                 .unwrap_or_default(),
             "settlement_queue_advanced"
         );
+        let review_summary = service.refresh_settlement_review_queue().await;
+        tracing::info!(
+            review_count = review_summary
+                .get("review_count")
+                .and_then(|value| value.as_u64())
+                .unwrap_or_default(),
+            "settlement_review_refreshed"
+        );
         tokio::time::sleep(Duration::from_secs(settings.scan_interval_seconds)).await;
     }
 }
@@ -133,6 +141,9 @@ async fn get_handler(State(state): State<Arc<AppState>>, uri: OriginalUri) -> Re
             Err(error) => error_response(StatusCode::INTERNAL_SERVER_ERROR, error),
         },
         "/api/ledger/queue" => Json(state.service.advance_settlement_queue().await).into_response(),
+        "/api/settlement/review" => {
+            Json(state.service.refresh_settlement_review_queue().await).into_response()
+        },
         "/api/catalog/coverage" => match state.service.store().market_catalog_coverage().await {
             Ok(coverage) => Json(coverage).into_response(),
             Err(error) => error_response(StatusCode::INTERNAL_SERVER_ERROR, error),
@@ -351,6 +362,9 @@ async fn post_handler(
             }
         }
         "/api/ledger/queue" => Json(state.service.advance_settlement_queue().await).into_response(),
+        "/api/settlement/review" => {
+            Json(state.service.refresh_settlement_review_queue().await).into_response()
+        }
         "/api/strategy/experiment/review" => {
             let experiment_id = payload
                 .get("experiment_id")

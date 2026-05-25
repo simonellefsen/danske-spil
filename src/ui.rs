@@ -10,6 +10,7 @@ pub fn render_index(base_path: &str) -> String {
                     button { id: "auto-paper", "Auto paper selected" }
                     button { id: "generate-coupons", "Generate coupons" }
                     button { id: "queue-settlement", "Queue settlement" }
+                    button { id: "review-settlement", "Review results" }
                     button { id: "refresh", "Refresh" }
                 }
             }
@@ -67,6 +68,15 @@ pub fn render_index(base_path: &str) -> String {
                                 th { "Created" } th { "Selection" } th { "Stake" } th { "Status" } th { "P/L" } th {}
                             } }
                             tbody { id: "ledger" }
+                        }
+                    }
+                    section {
+                        h2 { "Settlement review" }
+                        table {
+                            thead { tr {
+                                th { "Selection" } th { "Expected" } th { "Event state" } th { "Recommendation" }
+                            } }
+                            tbody { id: "settlement-review" }
                         }
                     }
                     section {
@@ -324,6 +334,20 @@ function renderLedger(items) {
     });
   });
 }
+function renderSettlementReview(summary) {
+  const items = summary.items || [];
+  $("settlement-review").innerHTML = items.map((item) => `
+    <tr>
+      <td>${esc(item.event_name || item.bet_id)}<br><span class="label">${esc(item.market_name || "")} / ${esc(item.outcome_name || "")}</span></td>
+      <td>${esc(item.expected_result_check_after || "-")}<br><span class="muted">${esc(item.sport_key || "")}</span></td>
+      <td>${esc(item.event_status || "-")}<br><span class="muted">resulted ${esc(item.event_resulted)} / settled ${esc(item.event_settled)}</span></td>
+      <td><span class="pill">${esc(item.recommendation || "await_more_evidence")}</span></td>
+    </tr>
+  `).join("");
+  if (!items.length) {
+    $("settlement-review").innerHTML = `<tr><td colspan="4" class="muted">No awaiting-result paper bets need review.</td></tr>`;
+  }
+}
 function renderPlayed(summary) {
   const items = summary.by_strategy || [];
   $("played").innerHTML = items.map((item) => `
@@ -456,6 +480,8 @@ async function load() {
   renderCoupons(coupons.items || []);
   const ledger = await json(api("/api/ledger"));
   renderLedger(ledger.items || []);
+  const settlementReview = await json(api("/api/settlement/review"));
+  renderSettlementReview(settlementReview);
   const played = await json(api("/api/strategy/played"));
   renderPlayed(played);
   const coverage = await json(api("/api/catalog/coverage"));
@@ -485,6 +511,11 @@ $("queue-settlement").addEventListener("click", async () => {
   $("queue-settlement").disabled = true;
   try { await json(api("/api/ledger/queue"), { method: "POST", body: "{}" }); await load(); }
   finally { $("queue-settlement").disabled = false; }
+});
+$("review-settlement").addEventListener("click", async () => {
+  $("review-settlement").disabled = true;
+  try { await json(api("/api/settlement/review"), { method: "POST", body: "{}" }); await load(); }
+  finally { $("review-settlement").disabled = false; }
 });
 $("refresh").addEventListener("click", load);
 load().catch((error) => { $("reasoning").textContent = error.stack || String(error); });

@@ -131,6 +131,7 @@ impl GamblerService {
             json!({"enabled": false, "placed_count": 0})
         };
         let settlement_queue_summary = self.advance_settlement_queue().await;
+        let settlement_review_summary = self.refresh_settlement_review_queue().await;
         let (strategy_proposal, strategy_proposal_error) = match self
             .store
             .ensure_scan_strategy_proposal(&snapshot_id, &candidates)
@@ -152,6 +153,7 @@ impl GamblerService {
                     "coupon_candidate_summary": coupon_candidate_summary,
                     "auto_paper_summary": auto_paper_summary,
                     "settlement_queue_summary": settlement_queue_summary,
+                    "settlement_review_summary": settlement_review_summary,
                     "include_live": include_live,
                     "paper_only": true,
                     "runtime": "rust-dioxus"
@@ -166,6 +168,7 @@ impl GamblerService {
             "coupon_candidate_summary": coupon_candidate_summary,
             "auto_paper_summary": auto_paper_summary,
             "settlement_queue_summary": settlement_queue_summary,
+            "settlement_review_summary": settlement_review_summary,
             "strategy_proposal": strategy_proposal,
             "strategy_proposal_error": strategy_proposal_error,
             "snapshot": snapshot
@@ -196,6 +199,33 @@ impl GamblerService {
                 json!({
                     "enabled": true,
                     "transitioned_count": 0,
+                    "error": error.to_string()
+                })
+            }
+        }
+    }
+
+    pub async fn refresh_settlement_review_queue(&self) -> Value {
+        if !self.settings.settlement_queue_enabled {
+            return json!({"enabled": false, "review_count": 0});
+        }
+        match self
+            .store
+            .refresh_settlement_review_queue(self.settings.settlement_queue_limit)
+            .await
+        {
+            Ok(summary) => {
+                self.store
+                    .record_audit("settlement_review_refreshed", summary.clone())
+                    .await
+                    .ok();
+                summary
+            }
+            Err(error) => {
+                tracing::warn!(%error, "settlement review refresh failed");
+                json!({
+                    "enabled": true,
+                    "review_count": 0,
                     "error": error.to_string()
                 })
             }
