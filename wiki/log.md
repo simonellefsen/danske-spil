@@ -54,3 +54,9 @@ Append-only timeline for project wiki maintenance. Use headings with the format 
 - Made the `gambler` UI base-path aware for `/danske-spil`.
 - Added internal ngrok agent endpoints for the `danske-spil` UI and the existing saxo daytrader UI.
 - Documented the shared ngrok hostname path-routing model.
+
+## [2026-05-25] implementation | Candidate ranking and paper settlement POC
+
+- Added `poc_ranker_v1` candidate scoring fields: implied probability, model probability, expected value, confidence, score, risk flags, and feature snapshot.
+- Extended the simulation ledger with settlement metadata, simulated return, profit/loss, and settlement observations.
+- Added web UI metrics for open exposure and paper P/L plus manual paper-settlement controls.

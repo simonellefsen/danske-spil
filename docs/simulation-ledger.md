@@ -74,6 +74,13 @@ Every settlement observation should record:
 
 Ambiguous outcomes should stay unresolved or require operator review. The system should not silently guess.
 
+Current POC status:
+
+- Paper placements are stored in `simulated_bets` with immutable observed odds and stake.
+- Manual operator settlement can mark rows as won, lost, void, pushed, or unresolved through the API.
+- Manual settlement writes `settlement_observations` and computed simulated return/profit-loss.
+- Automated result lookup is still pending and should use the source ordering above.
+
 ## Metrics
 
 The ledger should support:
@@ -88,6 +95,15 @@ The ledger should support:
 - Drawdown.
 - Coupon leg contribution.
 - Strategy baseline comparison.
+
+Current POC metrics are exposed through `/api/ledger/summary`:
+
+- Count, open count, and settled count.
+- Simulated turnover and open exposure.
+- Simulated return and profit/loss.
+- Hit rate for decided won/lost rows.
+- Average observed odds.
+- Status breakdown.
 
 ## Data Model
 

@@ -69,6 +69,8 @@ class Handler(BaseHTTPRequestHandler):
                 self.send_json({"items": service.store.candidates(limit=50)})
             elif path == "/api/ledger":
                 self.send_json({"items": service.store.simulated_bets(limit=50)})
+            elif path == "/api/ledger/summary":
+                self.send_json(service.store.ledger_summary())
             elif path == "/api/hermes":
                 self.send_json(
                     {
@@ -95,6 +97,24 @@ class Handler(BaseHTTPRequestHandler):
                 item = service.store.simulate_bet(candidate_id, stake)
                 service.store.record_audit("paper_bet_created", {"candidate_id": candidate_id, "stake": stake})
                 self.send_json({"item": item}, HTTPStatus.CREATED)
+            elif path == "/api/ledger/settle":
+                payload = self.read_json()
+                item = service.store.settle_simulated_bet(
+                    bet_id=str(payload.get("bet_id") or ""),
+                    result=str(payload.get("result") or ""),
+                    source=str(payload.get("source") or "manual_operator_review"),
+                    confidence=float(payload.get("confidence") or 1),
+                    notes=str(payload.get("notes") or ""),
+                )
+                service.store.record_audit(
+                    "paper_bet_settled",
+                    {
+                        "bet_id": item["id"],
+                        "status": item["status"],
+                        "source": item.get("settlement_payload", {}).get("source"),
+                    },
+                )
+                self.send_json({"item": item})
             else:
                 self.send_json({"error": "not found"}, HTTPStatus.NOT_FOUND)
         except ValueError as exc:

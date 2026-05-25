@@ -33,7 +33,7 @@ INDEX_HTML = """<!doctype html>
     @media (min-width: 920px) { .grid { grid-template-columns: 1.1fr .9fr; } }
     section { background: #ffffff; border: 1px solid #d9dee7; border-radius: 8px; padding: 16px; }
     h2 { margin: 0 0 12px; font-size: 16px; letter-spacing: 0; }
-    .metric-row { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 10px; margin-bottom: 16px; }
+    .metric-row { display: grid; grid-template-columns: repeat(auto-fit, minmax(155px, 1fr)); gap: 10px; margin-bottom: 16px; }
     .metric { border: 1px solid #e2e7ef; border-radius: 6px; padding: 12px; background: #fbfcfe; }
     .label { color: #596678; font-size: 12px; text-transform: uppercase; letter-spacing: .04em; }
     .value { margin-top: 5px; font-size: 18px; font-weight: 650; word-break: break-word; }
@@ -41,8 +41,12 @@ INDEX_HTML = """<!doctype html>
     th, td { text-align: left; border-bottom: 1px solid #e6ebf2; padding: 9px 8px; vertical-align: top; }
     th { color: #596678; font-size: 12px; text-transform: uppercase; letter-spacing: .04em; }
     .pill { display: inline-block; border: 1px solid #cdd5df; border-radius: 999px; padding: 2px 8px; font-size: 12px; }
+    .muted { color: #596678; }
+    .actions { display: flex; gap: 6px; flex-wrap: wrap; }
+    .actions button { min-height: 28px; padding: 0 8px; font-size: 12px; }
     .danger { color: #9f1239; }
     .ok { color: #166534; }
+    .warn { color: #a16207; }
     pre { white-space: pre-wrap; overflow: auto; max-height: 420px; background: #0f172a; color: #e2e8f0; padding: 12px; border-radius: 6px; }
   </style>
 </head>
@@ -59,13 +63,15 @@ INDEX_HTML = """<!doctype html>
       <div class="metric"><div class="label">Mode</div><div class="value" id="mode">-</div></div>
       <div class="metric"><div class="label">Database</div><div class="value" id="database">-</div></div>
       <div class="metric"><div class="label">Latest snapshot</div><div class="value" id="snapshot">-</div></div>
+      <div class="metric"><div class="label">Open exposure</div><div class="value" id="exposure">-</div></div>
+      <div class="metric"><div class="label">Paper P/L</div><div class="value" id="profit">-</div></div>
       <div class="metric"><div class="label">Real-money placement</div><div class="value danger" id="placement">disabled</div></div>
     </div>
     <div class="grid">
       <section>
         <h2>Candidate odds</h2>
         <table>
-          <thead><tr><th>Sport</th><th>Event</th><th>Market</th><th>Outcome</th><th>Odds</th><th></th></tr></thead>
+          <thead><tr><th>Sport</th><th>Event</th><th>Market</th><th>Outcome</th><th>Odds</th><th>Score</th><th></th></tr></thead>
           <tbody id="candidates"></tbody>
         </table>
       </section>
@@ -76,7 +82,7 @@ INDEX_HTML = """<!doctype html>
       <section>
         <h2>Paper ledger</h2>
         <table>
-          <thead><tr><th>Created</th><th>Candidate</th><th>Stake</th><th>Status</th></tr></thead>
+          <thead><tr><th>Created</th><th>Selection</th><th>Stake</th><th>Status</th><th>P/L</th><th></th></tr></thead>
           <tbody id="ledger"></tbody>
         </table>
       </section>
@@ -90,6 +96,12 @@ INDEX_HTML = """<!doctype html>
     const $ = (id) => document.getElementById(id);
     const appBase = document.body.dataset.basePath || "";
     const api = (path) => `${appBase}${path}`;
+    const money = (value) => Number(value || 0).toFixed(2);
+    const pct = (value) => value === null || value === undefined ? "-" : `${(Number(value) * 100).toFixed(1)}%`;
+    const num = (value) => value === null || value === undefined ? "-" : Number(value).toFixed(3);
+    const esc = (value) => String(value ?? "").replace(/[&<>"']/g, (ch) => ({
+      "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;"
+    }[ch]));
     const json = (url, options) => fetch(url, options).then((r) => {
       if (!r.ok) throw new Error(`${r.status} ${r.statusText}`);
       return r.json();
@@ -97,11 +109,12 @@ INDEX_HTML = """<!doctype html>
     function renderRows(items) {
       $("candidates").innerHTML = items.map((item) => `
         <tr>
-          <td><span class="pill">${item.sport_key}</span></td>
-          <td>${item.event_name || ""}<br><span class="label">${item.competition || ""}</span></td>
-          <td>${item.market_name || ""}<br><span class="label">${item.market_kind || ""}</span></td>
-          <td>${item.outcome_name || ""}</td>
-          <td>${item.decimal_odds ?? ""}</td>
+          <td><span class="pill">${esc(item.sport_key)}</span></td>
+          <td>${esc(item.event_name)}<br><span class="label">${esc(item.competition)}</span></td>
+          <td>${esc(item.market_name)}<br><span class="label">${esc(item.market_kind)}</span></td>
+          <td>${esc(item.outcome_name)}</td>
+          <td>${item.decimal_odds ?? ""}<br><span class="muted">imp ${pct(item.implied_probability)}</span></td>
+          <td>${num(item.score)}<br><span class="muted">conf ${pct(item.confidence)}</span></td>
           <td><button data-candidate="${item.id}">Paper</button></td>
         </tr>
       `).join("");
@@ -111,12 +124,56 @@ INDEX_HTML = """<!doctype html>
           await load();
         });
       });
-      $("reasoning").textContent = items[0] ? JSON.stringify(items[0].rationale, null, 2) : "No candidates yet.";
+      $("reasoning").textContent = items[0] ? JSON.stringify({
+        candidate_id: items[0].id,
+        event: items[0].event_name,
+        market: items[0].market_name,
+        outcome: items[0].outcome_name,
+        score: items[0].score,
+        implied_probability: items[0].implied_probability,
+        model_probability: items[0].model_probability,
+        expected_value: items[0].expected_value,
+        confidence: items[0].confidence,
+        risk_flags: items[0].risk_flags,
+        rationale: items[0].rationale,
+        feature_snapshot: items[0].feature_snapshot
+      }, null, 2) : "No candidates yet.";
     }
     function renderLedger(items) {
+      const candidateLabel = (item) => {
+        const candidate = item.payload && item.payload.candidate ? item.payload.candidate : {};
+        return `${candidate.event_name || item.candidate_id || ""} / ${candidate.outcome_name || ""}`;
+      };
       $("ledger").innerHTML = items.map((item) => `
-        <tr><td>${item.created_at || ""}</td><td>${item.candidate_id || ""}</td><td>${item.hypothetical_stake}</td><td>${item.status}</td></tr>
+        <tr>
+          <td>${esc(item.created_at)}</td>
+          <td>${esc(candidateLabel(item))}<br><span class="label">${esc(item.strategy_id || "")}</span></td>
+          <td>${money(item.hypothetical_stake)}<br><span class="muted">@ ${item.observed_decimal_odds ?? "-"}</span></td>
+          <td>${esc(item.status)}</td>
+          <td>${item.profit_loss === null || item.profit_loss === undefined ? "-" : money(item.profit_loss)}</td>
+          <td>
+            <div class="actions">
+              <button data-settle="${item.id}" data-result="won" ${item.status !== "open" ? "disabled" : ""}>Won</button>
+              <button data-settle="${item.id}" data-result="lost" ${item.status !== "open" ? "disabled" : ""}>Lost</button>
+              <button data-settle="${item.id}" data-result="void" ${item.status !== "open" ? "disabled" : ""}>Void</button>
+            </div>
+          </td>
+        </tr>
       `).join("");
+      document.querySelectorAll("[data-settle]").forEach((button) => {
+        button.addEventListener("click", async () => {
+          await json(api("/api/ledger/settle"), {
+            method: "POST",
+            body: JSON.stringify({
+              bet_id: button.dataset.settle,
+              result: button.dataset.result,
+              source: "manual_operator_review",
+              confidence: 1
+            })
+          });
+          await load();
+        });
+      });
     }
     async function load() {
       const status = await json(api("/api/status"));
@@ -125,6 +182,10 @@ INDEX_HTML = """<!doctype html>
       $("database").className = status.database.connected ? "value ok" : "value danger";
       $("snapshot").textContent = status.latest_snapshot_id || "-";
       $("placement").textContent = status.allow_real_money_placement ? "enabled" : "disabled";
+      const summary = await json(api("/api/ledger/summary"));
+      $("exposure").textContent = money(summary.open_exposure);
+      $("profit").textContent = money(summary.profit_loss);
+      $("profit").className = Number(summary.profit_loss || 0) >= 0 ? "value ok" : "value danger";
       const candidates = await json(api("/api/candidates"));
       renderRows(candidates.items || []);
       const ledger = await json(api("/api/ledger"));

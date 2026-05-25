@@ -86,3 +86,21 @@ Golf currently returns no anonymous match or outright events from the observed f
 ## Safety Boundary
 
 Do not click odds or `Tilføj kupon` during POC runs. The POC should only read navigation, DOM, and content-service data.
+
+## Candidate Ranking POC
+
+The API stores a conservative `poc_ranker_v1` watchlist score for each candidate. The score is not a betting recommendation; it exists to make candidate ordering, paper-ledger choices, and Hermes review replayable.
+
+Stored candidate fields include:
+
+- Implied probability from the observed decimal odds.
+- A first-pass model probability from odds shape, market kind, and metadata completeness.
+- Expected value, confidence, and score.
+- Risk flags such as missing participants, specialized market, long-horizon market, line market, very short price, or long price.
+- A feature snapshot containing only decision-time metadata from the normalized odds feed.
+
+The ranker intentionally uses weak, transparent heuristics until sports intelligence ingestion is wired in. Later model versions should replace these heuristics with feature snapshots from stats, news, weather, form, and settlement history.
+
+## Paper Settlement POC
+
+The web UI can manually settle paper-ledger rows as won, lost, or void. This writes settlement metadata and simulated return/profit-loss fields to Postgres. Manual settlement is a placeholder for the planned result-lookup worker; it should only be used when the operator has verified the result from an acceptable source.
