@@ -3,7 +3,7 @@ use anyhow::{anyhow, Context};
 use chrono::{DateTime, Utc};
 use serde_json::{json, Value};
 use std::collections::BTreeMap;
-use tokio_postgres::{Client, NoTls, Row};
+use tokio_postgres::{Client, NoTls, Row, Transaction};
 use uuid::Uuid;
 
 const SCHEMA_SQL: &str = r#"
@@ -16,6 +16,90 @@ CREATE TABLE IF NOT EXISTS odds_snapshots (
   event_count integer NOT NULL,
   payload jsonb NOT NULL,
   created_at timestamptz NOT NULL DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS sports (
+  sport_key text PRIMARY KEY,
+  label text,
+  drilldown_id text,
+  sport_codes text[] NOT NULL DEFAULT '{}',
+  first_seen_at timestamptz NOT NULL DEFAULT now(),
+  last_seen_at timestamptz NOT NULL DEFAULT now(),
+  payload jsonb NOT NULL DEFAULT '{}'::jsonb
+);
+
+CREATE TABLE IF NOT EXISTS competitions (
+  id text PRIMARY KEY,
+  sport_key text NOT NULL REFERENCES sports(sport_key) ON DELETE CASCADE,
+  name text NOT NULL,
+  class_name text,
+  drilldown_tag_id text,
+  first_seen_at timestamptz NOT NULL DEFAULT now(),
+  last_seen_at timestamptz NOT NULL DEFAULT now(),
+  payload jsonb NOT NULL DEFAULT '{}'::jsonb,
+  UNIQUE (sport_key, name)
+);
+
+CREATE TABLE IF NOT EXISTS sport_events (
+  id text PRIMARY KEY,
+  sport_key text NOT NULL REFERENCES sports(sport_key) ON DELETE CASCADE,
+  competition_name text,
+  event_name text,
+  start_time timestamptz,
+  status text,
+  live_now boolean NOT NULL DEFAULT false,
+  started boolean NOT NULL DEFAULT false,
+  resulted boolean NOT NULL DEFAULT false,
+  settled boolean NOT NULL DEFAULT false,
+  first_seen_at timestamptz NOT NULL DEFAULT now(),
+  last_seen_at timestamptz NOT NULL DEFAULT now(),
+  payload jsonb NOT NULL DEFAULT '{}'::jsonb
+);
+
+CREATE TABLE IF NOT EXISTS event_participants (
+  id text PRIMARY KEY,
+  event_id text NOT NULL REFERENCES sport_events(id) ON DELETE CASCADE,
+  name text NOT NULL,
+  role text,
+  first_seen_at timestamptz NOT NULL DEFAULT now(),
+  last_seen_at timestamptz NOT NULL DEFAULT now(),
+  payload jsonb NOT NULL DEFAULT '{}'::jsonb,
+  UNIQUE (event_id, name, role)
+);
+
+CREATE TABLE IF NOT EXISTS market_observations (
+  id text PRIMARY KEY,
+  snapshot_id text NOT NULL REFERENCES odds_snapshots(id) ON DELETE CASCADE,
+  event_id text NOT NULL REFERENCES sport_events(id) ON DELETE CASCADE,
+  market_id text,
+  market_name text,
+  market_kind text,
+  group_code text,
+  active boolean,
+  displayed boolean,
+  bet_in_run boolean,
+  outcome_count integer NOT NULL DEFAULT 0,
+  observed_at timestamptz NOT NULL DEFAULT now(),
+  payload jsonb NOT NULL DEFAULT '{}'::jsonb,
+  UNIQUE (snapshot_id, event_id, market_id)
+);
+
+CREATE TABLE IF NOT EXISTS outcome_observations (
+  id text PRIMARY KEY,
+  snapshot_id text NOT NULL REFERENCES odds_snapshots(id) ON DELETE CASCADE,
+  market_observation_id text NOT NULL REFERENCES market_observations(id) ON DELETE CASCADE,
+  outcome_id text,
+  outcome_name text,
+  outcome_type text,
+  outcome_sub_type text,
+  decimal_odds numeric,
+  active boolean,
+  displayed boolean,
+  handicap_low numeric,
+  handicap_high numeric,
+  observed_at timestamptz NOT NULL DEFAULT now(),
+  payload jsonb NOT NULL DEFAULT '{}'::jsonb,
+  UNIQUE (snapshot_id, market_observation_id, outcome_id)
 );
 
 CREATE TABLE IF NOT EXISTS candidate_bets (
@@ -97,6 +181,12 @@ CREATE TABLE IF NOT EXISTS hermes_reflections (
   evidence jsonb NOT NULL,
   status text NOT NULL DEFAULT 'proposed'
 );
+
+CREATE INDEX IF NOT EXISTS idx_sport_events_sport_key ON sport_events(sport_key);
+CREATE INDEX IF NOT EXISTS idx_sport_events_start_time ON sport_events(start_time);
+CREATE INDEX IF NOT EXISTS idx_market_observations_snapshot ON market_observations(snapshot_id);
+CREATE INDEX IF NOT EXISTS idx_market_observations_kind ON market_observations(market_kind);
+CREATE INDEX IF NOT EXISTS idx_outcome_observations_snapshot ON outcome_observations(snapshot_id);
 "#;
 
 #[derive(Clone)]
@@ -215,6 +305,7 @@ impl Store {
                 ],
             )
             .await?;
+        save_market_catalog(&transaction, &snapshot_id, payload).await?;
         for candidate in candidates {
             transaction
                 .execute(
@@ -410,6 +501,91 @@ impl Store {
         Ok(summary)
     }
 
+    pub async fn market_catalog_coverage(&self) -> anyhow::Result<Value> {
+        let client = self.connect().await?;
+        let sports = client
+            .query(
+                r#"
+                SELECT
+                  s.sport_key,
+                  s.label,
+                  s.last_seen_at,
+                  count(DISTINCT e.id)::int AS event_count,
+                  count(DISTINCT c.id)::int AS competition_count,
+                  count(DISTINCT mo.id)::int AS market_count,
+                  count(DISTINCT oo.id)::int AS outcome_count,
+                  count(DISTINCT cb.id)::int AS candidate_count
+                FROM sports s
+                LEFT JOIN sport_events e ON e.sport_key = s.sport_key
+                LEFT JOIN competitions c ON c.sport_key = s.sport_key
+                LEFT JOIN market_observations mo ON mo.event_id = e.id
+                LEFT JOIN outcome_observations oo ON oo.market_observation_id = mo.id
+                LEFT JOIN candidate_bets cb ON cb.sport_key = s.sport_key
+                GROUP BY s.sport_key, s.label, s.last_seen_at
+                ORDER BY s.sport_key
+                "#,
+                &[],
+            )
+            .await?;
+        let market_kinds = client
+            .query(
+                r#"
+                SELECT e.sport_key, mo.market_kind, count(*)::int AS market_count
+                FROM market_observations mo
+                JOIN sport_events e ON e.id = mo.event_id
+                GROUP BY e.sport_key, mo.market_kind
+                ORDER BY e.sport_key, market_count DESC, mo.market_kind
+                "#,
+                &[],
+            )
+            .await?;
+        let competitions = client
+            .query(
+                r#"
+                SELECT c.sport_key, c.name, c.class_name, c.last_seen_at, count(e.id)::int AS event_count
+                FROM competitions c
+                LEFT JOIN sport_events e ON e.sport_key = c.sport_key AND e.competition_name = c.name
+                GROUP BY c.sport_key, c.name, c.class_name, c.last_seen_at
+                ORDER BY event_count DESC, c.last_seen_at DESC
+                LIMIT 30
+                "#,
+                &[],
+            )
+            .await?;
+        Ok(json!({
+            "sports": sports.iter().map(|row| {
+                let last_seen_at: DateTime<Utc> = row.get("last_seen_at");
+                json!({
+                    "sport_key": row.get::<_, String>("sport_key"),
+                    "label": row.get::<_, Option<String>>("label"),
+                    "last_seen_at": last_seen_at,
+                    "event_count": row.get::<_, i32>("event_count"),
+                    "competition_count": row.get::<_, i32>("competition_count"),
+                    "market_count": row.get::<_, i32>("market_count"),
+                    "outcome_count": row.get::<_, i32>("outcome_count"),
+                    "candidate_count": row.get::<_, i32>("candidate_count")
+                })
+            }).collect::<Vec<_>>(),
+            "market_kinds": market_kinds.iter().map(|row| {
+                json!({
+                    "sport_key": row.get::<_, String>("sport_key"),
+                    "market_kind": row.get::<_, Option<String>>("market_kind"),
+                    "market_count": row.get::<_, i32>("market_count")
+                })
+            }).collect::<Vec<_>>(),
+            "competitions": competitions.iter().map(|row| {
+                let last_seen_at: DateTime<Utc> = row.get("last_seen_at");
+                json!({
+                    "sport_key": row.get::<_, String>("sport_key"),
+                    "name": row.get::<_, String>("name"),
+                    "class_name": row.get::<_, Option<String>>("class_name"),
+                    "last_seen_at": last_seen_at,
+                    "event_count": row.get::<_, i32>("event_count")
+                })
+            }).collect::<Vec<_>>()
+        }))
+    }
+
     pub async fn settle_simulated_bet(
         &self,
         bet_id: &str,
@@ -541,6 +717,290 @@ impl Store {
         });
         Ok(client)
     }
+}
+
+async fn save_market_catalog(
+    transaction: &Transaction<'_>,
+    snapshot_id: &str,
+    payload: &Value,
+) -> anyhow::Result<()> {
+    for sport in payload
+        .get("sports")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+    {
+        let Some(sport_key) = text(sport, "sport_key") else {
+            continue;
+        };
+        let sport_codes: Vec<String> = sport
+            .get("sport_codes")
+            .and_then(Value::as_array)
+            .into_iter()
+            .flatten()
+            .filter_map(Value::as_str)
+            .map(str::to_string)
+            .collect();
+        transaction
+            .execute(
+                r#"
+                INSERT INTO sports (sport_key, label, drilldown_id, sport_codes, payload)
+                VALUES ($1,$2,$3,$4,$5)
+                ON CONFLICT (sport_key) DO UPDATE
+                SET label = EXCLUDED.label,
+                    drilldown_id = EXCLUDED.drilldown_id,
+                    sport_codes = EXCLUDED.sport_codes,
+                    last_seen_at = now(),
+                    payload = EXCLUDED.payload
+                "#,
+                &[
+                    &sport_key,
+                    &text(sport, "label"),
+                    &text(sport, "drilldown_id"),
+                    &sport_codes,
+                    sport,
+                ],
+            )
+            .await?;
+
+        for event in sport_events(sport) {
+            let Some(event_id) = text(event, "id") else {
+                continue;
+            };
+            let competition = text(event, "competition");
+            if let Some(name) = competition {
+                transaction
+                    .execute(
+                        r#"
+                        INSERT INTO competitions (id, sport_key, name, class_name, drilldown_tag_id, payload)
+                        VALUES ($1,$2,$3,$4,$5,$6)
+                        ON CONFLICT (sport_key, name) DO UPDATE
+                        SET class_name = EXCLUDED.class_name,
+                            drilldown_tag_id = EXCLUDED.drilldown_tag_id,
+                            last_seen_at = now(),
+                            payload = EXCLUDED.payload
+                        "#,
+                        &[
+                            &new_id(),
+                            &sport_key,
+                            &name,
+                            &text(event, "class_name"),
+                            &text(event, "competition_drilldown_tag_id"),
+                            event,
+                        ],
+                    )
+                    .await?;
+            }
+
+            let start_time = parse_datetime(event.get("start_time"));
+            transaction
+                .execute(
+                    r#"
+                    INSERT INTO sport_events (
+                      id, sport_key, competition_name, event_name, start_time, status,
+                      live_now, started, resulted, settled, payload
+                    )
+                    VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
+                    ON CONFLICT (id) DO UPDATE
+                    SET sport_key = EXCLUDED.sport_key,
+                        competition_name = EXCLUDED.competition_name,
+                        event_name = EXCLUDED.event_name,
+                        start_time = EXCLUDED.start_time,
+                        status = EXCLUDED.status,
+                        live_now = EXCLUDED.live_now,
+                        started = EXCLUDED.started,
+                        resulted = EXCLUDED.resulted,
+                        settled = EXCLUDED.settled,
+                        last_seen_at = now(),
+                        payload = EXCLUDED.payload
+                    "#,
+                    &[
+                        &event_id,
+                        &sport_key,
+                        &competition,
+                        &text(event, "name"),
+                        &start_time,
+                        &text(event, "status"),
+                        &bool_value(event, "live_now"),
+                        &bool_value(event, "started"),
+                        &bool_value(event, "resulted"),
+                        &bool_value(event, "settled"),
+                        event,
+                    ],
+                )
+                .await?;
+
+            for participant in event
+                .get("teams")
+                .and_then(Value::as_array)
+                .into_iter()
+                .flatten()
+            {
+                let name = participant
+                    .get("name")
+                    .and_then(Value::as_str)
+                    .or_else(|| participant.get("fullName").and_then(Value::as_str));
+                let Some(name) = name else {
+                    continue;
+                };
+                let role = participant
+                    .get("roleCode")
+                    .and_then(Value::as_str)
+                    .or_else(|| participant.get("role").and_then(Value::as_str));
+                transaction
+                    .execute(
+                        r#"
+                        INSERT INTO event_participants (id, event_id, name, role, payload)
+                        VALUES ($1,$2,$3,$4,$5)
+                        ON CONFLICT (event_id, name, role) DO UPDATE
+                        SET last_seen_at = now(), payload = EXCLUDED.payload
+                        "#,
+                        &[&new_id(), &event_id, &name, &role, participant],
+                    )
+                    .await?;
+            }
+
+            for market in event
+                .get("markets")
+                .and_then(Value::as_array)
+                .into_iter()
+                .flatten()
+            {
+                let market_observation_id = new_id();
+                let row = transaction
+                    .query_one(
+                        r#"
+                        INSERT INTO market_observations (
+                          id, snapshot_id, event_id, market_id, market_name, market_kind,
+                          group_code, active, displayed, bet_in_run, outcome_count, payload
+                        )
+                        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)
+                        ON CONFLICT (snapshot_id, event_id, market_id) DO UPDATE
+                        SET market_name = EXCLUDED.market_name,
+                            market_kind = EXCLUDED.market_kind,
+                            group_code = EXCLUDED.group_code,
+                            active = EXCLUDED.active,
+                            displayed = EXCLUDED.displayed,
+                            bet_in_run = EXCLUDED.bet_in_run,
+                            outcome_count = EXCLUDED.outcome_count,
+                            payload = EXCLUDED.payload
+                        RETURNING id
+                        "#,
+                        &[
+                            &market_observation_id,
+                            &snapshot_id,
+                            &event_id,
+                            &text(market, "id"),
+                            &text(market, "name"),
+                            &text(market, "kind"),
+                            &text(market, "group_code"),
+                            &optional_bool(market, "active"),
+                            &optional_bool(market, "displayed"),
+                            &optional_bool(market, "bet_in_run"),
+                            &market
+                                .get("outcomes")
+                                .and_then(Value::as_array)
+                                .map(|items| items.len() as i32)
+                                .unwrap_or_default(),
+                            market,
+                        ],
+                    )
+                    .await?;
+                let stored_market_id: String = row.get("id");
+
+                for outcome in market
+                    .get("outcomes")
+                    .and_then(Value::as_array)
+                    .into_iter()
+                    .flatten()
+                {
+                    transaction
+                        .execute(
+                            r#"
+                            INSERT INTO outcome_observations (
+                              id, snapshot_id, market_observation_id, outcome_id, outcome_name,
+                              outcome_type, outcome_sub_type, decimal_odds, active, displayed,
+                              handicap_low, handicap_high, payload
+                            )
+                            VALUES (
+                              $1,$2,$3,$4,$5,$6,$7,
+                              ($8::float8)::numeric,
+                              $9,$10,
+                              ($11::float8)::numeric,
+                              ($12::float8)::numeric,
+                              $13
+                            )
+                            ON CONFLICT (snapshot_id, market_observation_id, outcome_id) DO UPDATE
+                            SET outcome_name = EXCLUDED.outcome_name,
+                                outcome_type = EXCLUDED.outcome_type,
+                                outcome_sub_type = EXCLUDED.outcome_sub_type,
+                                decimal_odds = EXCLUDED.decimal_odds,
+                                active = EXCLUDED.active,
+                                displayed = EXCLUDED.displayed,
+                                handicap_low = EXCLUDED.handicap_low,
+                                handicap_high = EXCLUDED.handicap_high,
+                                payload = EXCLUDED.payload
+                            "#,
+                            &[
+                                &new_id(),
+                                &snapshot_id,
+                                &stored_market_id,
+                                &text(outcome, "id"),
+                                &text(outcome, "name"),
+                                &text(outcome, "type"),
+                                &text(outcome, "sub_type"),
+                                &number(outcome, "decimal_odds"),
+                                &optional_bool(outcome, "active"),
+                                &optional_bool(outcome, "displayed"),
+                                &number(outcome, "handicap_low"),
+                                &number(outcome, "handicap_high"),
+                                outcome,
+                            ],
+                        )
+                        .await?;
+                }
+            }
+        }
+    }
+    Ok(())
+}
+
+fn sport_events(sport: &Value) -> impl Iterator<Item = &Value> {
+    sport
+        .get("events")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .chain(
+            sport
+                .get("outrights")
+                .and_then(Value::as_array)
+                .into_iter()
+                .flatten(),
+        )
+}
+
+fn parse_datetime(value: Option<&Value>) -> Option<DateTime<Utc>> {
+    value
+        .and_then(Value::as_str)
+        .and_then(|value| DateTime::parse_from_rfc3339(value).ok())
+        .map(|datetime| datetime.with_timezone(&Utc))
+}
+
+fn text<'a>(value: &'a Value, key: &str) -> Option<&'a str> {
+    value.get(key).and_then(Value::as_str)
+}
+
+fn bool_value(value: &Value, key: &str) -> bool {
+    value.get(key).and_then(Value::as_bool).unwrap_or(false)
+}
+
+fn optional_bool(value: &Value, key: &str) -> Option<bool> {
+    value.get(key).and_then(Value::as_bool)
+}
+
+fn number(value: &Value, key: &str) -> Option<f64> {
+    value.get(key).and_then(Value::as_f64)
 }
 
 fn candidate_from_row(row: &Row) -> CandidateBet {

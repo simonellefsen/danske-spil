@@ -85,6 +85,25 @@ The rendered page also exposes market selector chips such as:
 
 Golf currently returns no anonymous match or outright events from the observed feeds when probed on 2026-05-25. Keep it in scope, but treat it as a feed-discovery item for the next browser pass.
 
+## Normalized Market Catalog
+
+Each Rust scanner run now persists both the raw snapshot and a normalized catalog:
+
+- `sports`: sport keys, labels, drilldown ids, and source sport codes.
+- `competitions`: league, tournament, or class grouping observed for a sport.
+- `sport_events`: events, start times, live/result/settlement flags, and raw event payloads.
+- `event_participants`: teams or participants attached to observed events when the feed exposes them.
+- `market_observations`: per-snapshot market rows with market kind, group code, active/display state, and outcome count.
+- `outcome_observations`: per-snapshot outcome rows with odds, active/display state, subtype, and handicap/line values.
+
+The web UI and API expose catalog coverage at:
+
+```text
+GET /api/catalog/coverage
+```
+
+This endpoint is meant for feed-quality inspection before strategy work. It shows whether the scanner is actually identifying sports, competitions, market kinds, outcomes, and candidates across the configured sport scope.
+
 ## Safety Boundary
 
 Do not click odds or `Tilføj kupon` during POC runs. The POC should only read navigation, DOM, and content-service data.

@@ -15,6 +15,7 @@ pub fn render_index(base_path: &str) -> String {
                     div { class: "metric", div { class: "label", "Mode" } div { class: "value", id: "mode", "-" } }
                     div { class: "metric", div { class: "label", "Database" } div { class: "value", id: "database", "-" } }
                     div { class: "metric", div { class: "label", "Latest snapshot" } div { class: "value", id: "snapshot", "-" } }
+                    div { class: "metric", div { class: "label", "Catalog events" } div { class: "value", id: "catalog-events", "-" } }
                     div { class: "metric", div { class: "label", "Open exposure" } div { class: "value", id: "exposure", "-" } }
                     div { class: "metric", div { class: "label", "Paper P/L" } div { class: "value", id: "profit", "-" } }
                     div { class: "metric", div { class: "label", "Real-money placement" } div { class: "value danger", id: "placement", "disabled" } }
@@ -40,6 +41,15 @@ pub fn render_index(base_path: &str) -> String {
                                 th { "Created" } th { "Selection" } th { "Stake" } th { "Status" } th { "P/L" } th {}
                             } }
                             tbody { id: "ledger" }
+                        }
+                    }
+                    section {
+                        h2 { "Market coverage" }
+                        table {
+                            thead { tr {
+                                th { "Sport" } th { "Events" } th { "Competitions" } th { "Markets" } th { "Outcomes" } th { "Candidates" }
+                            } }
+                            tbody { id: "coverage" }
                         }
                     }
                     section {
@@ -207,6 +217,24 @@ function renderLedger(items) {
     });
   });
 }
+function renderCoverage(coverage) {
+  const sports = coverage.sports || [];
+  const totalEvents = sports.reduce((sum, item) => sum + Number(item.event_count || 0), 0);
+  $("catalog-events").textContent = String(totalEvents);
+  $("coverage").innerHTML = sports.map((item) => `
+    <tr>
+      <td><span class="pill">${esc(item.sport_key)}</span><br><span class="label">${esc(item.label || "")}</span></td>
+      <td>${esc(item.event_count)}</td>
+      <td>${esc(item.competition_count)}</td>
+      <td>${esc(item.market_count)}</td>
+      <td>${esc(item.outcome_count)}</td>
+      <td>${esc(item.candidate_count)}</td>
+    </tr>
+  `).join("");
+  if (!sports.length) {
+    $("coverage").innerHTML = `<tr><td colspan="6" class="muted">No market catalog rows yet. Run a scan.</td></tr>`;
+  }
+}
 async function load() {
   const status = await json(api("/api/status"));
   $("mode").textContent = status.mode;
@@ -222,6 +250,8 @@ async function load() {
   renderRows(candidates.items || []);
   const ledger = await json(api("/api/ledger"));
   renderLedger(ledger.items || []);
+  const coverage = await json(api("/api/catalog/coverage"));
+  renderCoverage(coverage);
   const hermes = await json(api("/api/hermes"));
   $("hermes").textContent = JSON.stringify(hermes, null, 2);
 }
