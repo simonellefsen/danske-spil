@@ -52,7 +52,7 @@ Append-only timeline for project wiki maintenance. Use headings with the format 
 ## [2026-05-25] infrastructure | ngrok shared path routing
 
 - Made the `gambler` UI base-path aware for `/danske-spil`.
-- Added internal ngrok agent endpoints for the `danske-spil` UI and the existing saxo daytrader UI.
+- Documented the ngrok path-routing model for exposing the `danske-spil` UI behind Google SSO.
 - Documented the shared ngrok hostname path-routing model.
 
 ## [2026-05-25] implementation | Candidate ranking and paper settlement POC

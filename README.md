@@ -28,7 +28,7 @@ These topics are the durable map for the project:
 - [Simulation ledger](docs/simulation-ledger.md) - Paper-betting model for simulated placements, immutable entry odds, settlement lookup, and simulated performance metrics.
 - [POC implementation notes](docs/poc-implementation.md) - Current Rust/Dioxus service shape, scanner behavior, storage model, API endpoints, and implementation boundaries.
 - [POC deployment](docs/poc-deployment.md) - Local Docker Desktop Kubernetes deployment steps for the gambler API, worker, Hermes POC, and CloudNativePG database.
-- [ngrok path routing](docs/ngrok-path-routing.md) - Shared ngrok hostname routing for `/danske-spil` and `/saxo-daytrader` behind Google SSO.
+- [ngrok path routing](docs/ngrok-path-routing.md) - Shared ngrok hostname routing for `/danske-spil` behind Google SSO.
 - [Hermes and gambler loop](docs/hermes-agent.md) - Safe reinforcement loop design where Hermes can reflect and propose one-variable experiments without browser, secret, or bet-placement access.
 - [Kubernetes architecture](docs/kubernetes-architecture.md) - Namespace layout, workloads, secrets, database cluster, observability expectations, and operational commands.
 - [Project wiki](wiki/index.md) - Maintained knowledge base with concepts, runbooks, decisions, source notes, and experiment records.
