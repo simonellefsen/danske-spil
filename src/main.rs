@@ -212,6 +212,39 @@ async fn post_handler(
                 Err(error) => error_response(StatusCode::BAD_REQUEST, error),
             }
         }
+        "/api/simulate/selected" => {
+            let snapshot_id = payload.get("snapshot_id").and_then(Value::as_str);
+            let stake = payload
+                .get("stake")
+                .and_then(Value::as_f64)
+                .unwrap_or(state.settings.default_stake);
+            let limit = payload
+                .get("limit")
+                .and_then(Value::as_u64)
+                .map(|value| value as usize)
+                .unwrap_or(state.settings.auto_paper_per_scan_limit);
+            let max_open_exposure = payload
+                .get("max_open_exposure")
+                .and_then(Value::as_f64)
+                .unwrap_or(state.settings.auto_paper_max_open_exposure);
+            match state
+                .service
+                .store()
+                .paper_place_selected(snapshot_id, stake, limit, max_open_exposure)
+                .await
+            {
+                Ok(summary) => {
+                    state
+                        .service
+                        .store()
+                        .record_audit("paper_selected_auto_placed", summary.clone())
+                        .await
+                        .ok();
+                    Json(summary).into_response()
+                }
+                Err(error) => error_response(StatusCode::BAD_REQUEST, error),
+            }
+        }
         "/api/ledger/settle" => {
             let bet_id = payload
                 .get("bet_id")

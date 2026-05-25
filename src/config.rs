@@ -13,6 +13,9 @@ pub struct Settings {
     pub scan_limit: usize,
     pub scan_max_markets: usize,
     pub default_stake: f64,
+    pub auto_paper_enabled: bool,
+    pub auto_paper_per_scan_limit: usize,
+    pub auto_paper_max_open_exposure: f64,
     pub database_url: Option<String>,
 }
 
@@ -58,6 +61,15 @@ impl Settings {
                 .ok()
                 .and_then(|v| v.parse().ok())
                 .unwrap_or(10.0),
+            auto_paper_enabled: bool_env("GAMBLER_AUTO_PAPER_ENABLED", true),
+            auto_paper_per_scan_limit: env::var("GAMBLER_AUTO_PAPER_PER_SCAN_LIMIT")
+                .ok()
+                .and_then(|v| v.parse().ok())
+                .unwrap_or(2),
+            auto_paper_max_open_exposure: env::var("GAMBLER_AUTO_PAPER_MAX_OPEN_EXPOSURE")
+                .ok()
+                .and_then(|v| v.parse().ok())
+                .unwrap_or(100.0),
             database_url,
         }
     }

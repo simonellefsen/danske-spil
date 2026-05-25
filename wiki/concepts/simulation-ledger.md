@@ -34,6 +34,7 @@ flowchart LR
 - Ambiguous results stay unresolved or require operator review.
 - Performance metrics must clearly be labeled simulated.
 - Paper placement uses active strategy decisions; rejected candidates remain visible but cannot be simulated.
+- Auto-paper placement writes only to the simulation ledger and is capped by per-scan count and open exposure.
 
 ## Related
 

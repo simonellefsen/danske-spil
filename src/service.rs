@@ -49,6 +49,12 @@ impl GamblerService {
             "recent_simulated_bet_count": ledger.len(),
             "ledger_summary": ledger_summary,
             "strategy_id": "poc_ranker_v1",
+            "auto_paper": {
+                "enabled": self.settings.auto_paper_enabled,
+                "per_scan_limit": self.settings.auto_paper_per_scan_limit,
+                "max_open_exposure": self.settings.auto_paper_max_open_exposure,
+                "default_stake": self.settings.default_stake
+            },
             "runtime": "rust-dioxus",
             "sports_scope": ["football", "tennis", "basketball", "formula1", "golf", "cycling"]
         })
@@ -79,6 +85,30 @@ impl GamblerService {
                 })
             }
         };
+        let auto_paper_summary = if self.settings.auto_paper_enabled {
+            match self
+                .store
+                .paper_place_selected(
+                    Some(&snapshot_id),
+                    self.settings.default_stake,
+                    self.settings.auto_paper_per_scan_limit,
+                    self.settings.auto_paper_max_open_exposure,
+                )
+                .await
+            {
+                Ok(summary) => summary,
+                Err(error) => {
+                    tracing::warn!(%error, snapshot_id = %snapshot_id, "auto paper placement failed");
+                    json!({
+                        "enabled": true,
+                        "placed_count": 0,
+                        "error": error.to_string()
+                    })
+                }
+            }
+        } else {
+            json!({"enabled": false, "placed_count": 0})
+        };
         let (strategy_proposal, strategy_proposal_error) = match self
             .store
             .ensure_scan_strategy_proposal(&snapshot_id, &candidates)
@@ -97,6 +127,7 @@ impl GamblerService {
                     "snapshot_id": snapshot_id,
                     "candidate_count": candidates.len(),
                     "strategy_decision_summary": strategy_decision_summary,
+                    "auto_paper_summary": auto_paper_summary,
                     "include_live": include_live,
                     "paper_only": true,
                     "runtime": "rust-dioxus"
@@ -108,6 +139,7 @@ impl GamblerService {
             "snapshot_id": snapshot_id,
             "candidate_count": candidates.len(),
             "strategy_decision_summary": strategy_decision_summary,
+            "auto_paper_summary": auto_paper_summary,
             "strategy_proposal": strategy_proposal,
             "strategy_proposal_error": strategy_proposal_error,
             "snapshot": snapshot

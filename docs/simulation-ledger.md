@@ -80,6 +80,7 @@ Current POC status:
 - Manual operator settlement can mark rows as won, lost, void, pushed, or unresolved through the API.
 - Manual settlement writes `settlement_observations` and computed simulated return/profit-loss.
 - Strategy selection is stored in `strategy_candidate_decisions`; rejected candidates are preserved for review but blocked from paper-ledger placement.
+- Selected candidates can be auto-paper-placed into `simulated_bets` with per-scan and max-open-exposure caps. This is idempotent per candidate and remains simulation-only.
 - Automated result lookup is still pending and should use the source ordering above.
 
 ## Metrics

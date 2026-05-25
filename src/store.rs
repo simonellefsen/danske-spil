@@ -766,6 +766,9 @@ impl Store {
         candidate_id: &str,
         stake: f64,
     ) -> anyhow::Result<SimulatedBet> {
+        if stake <= 0.0 {
+            return Err(anyhow!("stake must be positive"));
+        }
         let candidate = self
             .candidates(200)
             .await?
@@ -776,6 +779,9 @@ impl Store {
             return Err(anyhow!(
                 "candidate rejected by active strategy and cannot be paper-ledgered: {candidate_id}"
             ));
+        }
+        if let Some(existing) = self.simulated_bet_by_candidate(candidate_id).await? {
+            return Ok(existing);
         }
         let id = new_id();
         let payload =
@@ -807,6 +813,195 @@ impl Store {
             .into_iter()
             .find(|bet| bet.id == id)
             .ok_or_else(|| anyhow!("inserted simulated bet not found"))
+    }
+
+    pub async fn paper_place_selected(
+        &self,
+        snapshot_id: Option<&str>,
+        stake: f64,
+        per_scan_limit: usize,
+        max_open_exposure: f64,
+    ) -> anyhow::Result<Value> {
+        if stake <= 0.0 {
+            return Err(anyhow!("stake must be positive"));
+        }
+        if per_scan_limit == 0 {
+            return Ok(json!({
+                "enabled": true,
+                "placed_count": 0,
+                "skipped": true,
+                "reason": "per_scan_limit is zero"
+            }));
+        }
+
+        let client = self.connect().await?;
+        let snapshot_id = match snapshot_id.filter(|value| !value.is_empty()) {
+            Some(value) => value.to_string(),
+            None => client
+                .query_opt(
+                    "SELECT id FROM odds_snapshots ORDER BY observed_at DESC LIMIT 1",
+                    &[],
+                )
+                .await?
+                .map(|row| row.get::<_, String>("id"))
+                .ok_or_else(|| anyhow!("no snapshot available for paper placement"))?,
+        };
+        let open_exposure = self.open_exposure().await?;
+        let remaining_exposure = (max_open_exposure - open_exposure).max(0.0);
+        let exposure_limited_slots = (remaining_exposure / stake).floor() as usize;
+        let place_limit = per_scan_limit.min(exposure_limited_slots);
+        if place_limit == 0 {
+            return Ok(json!({
+                "enabled": true,
+                "snapshot_id": snapshot_id,
+                "placed_count": 0,
+                "open_exposure": open_exposure,
+                "max_open_exposure": max_open_exposure,
+                "skipped": true,
+                "reason": "open exposure cap reached"
+            }));
+        }
+
+        let rows = client
+            .query(
+                r#"
+                SELECT
+                  cb.id, cb.snapshot_id, cb.created_at, cb.sport_key, cb.event_id, cb.event_name,
+                  cb.competition, cb.market_id, cb.market_name, cb.market_kind, cb.outcome_id,
+                  cb.outcome_name, cb.decimal_odds::float8 AS decimal_odds, cb.rationale,
+                  cb.implied_probability::float8 AS implied_probability,
+                  cb.model_probability::float8 AS model_probability,
+                  cb.expected_value::float8 AS expected_value,
+                  cb.confidence::float8 AS confidence,
+                  cb.score::float8 AS score,
+                  cb.risk_flags, cb.feature_snapshot, cb.status,
+                  d.id AS decision_id,
+                  d.strategy_id,
+                  d.strategy_baseline_id,
+                  d.strategy_version,
+                  d.evidence AS decision_evidence
+                FROM strategy_candidate_decisions d
+                JOIN candidate_bets cb ON cb.id = d.candidate_id
+                WHERE d.snapshot_id = $1
+                  AND d.decision = 'selected'
+                  AND cb.status = 'selected'
+                  AND NOT EXISTS (
+                    SELECT 1 FROM simulated_bets sb WHERE sb.candidate_id = cb.id
+                  )
+                ORDER BY d.score DESC NULLS LAST, d.created_at ASC
+                LIMIT $2
+                "#,
+                &[&snapshot_id, &(place_limit as i64)],
+            )
+            .await?;
+
+        let mut placed = Vec::new();
+        for row in rows {
+            let candidate = candidate_from_row(&row);
+            let decision_id: String = row.get("decision_id");
+            let strategy_id: String = row.get("strategy_id");
+            let strategy_baseline_id: String = row.get("strategy_baseline_id");
+            let strategy_version: i32 = row.get("strategy_version");
+            let decision_evidence: Value = row.get("decision_evidence");
+            let id = new_id();
+            let payload = json!({
+                "candidate": candidate,
+                "paper_only": true,
+                "auto_paper": true,
+                "decision_id": decision_id,
+                "strategy_id": strategy_id,
+                "strategy_baseline_id": strategy_baseline_id,
+                "strategy_version": strategy_version,
+                "decision_evidence": decision_evidence
+            });
+            client
+                .execute(
+                    r#"
+                    INSERT INTO simulated_bets (
+                      id, candidate_id, hypothetical_stake, observed_decimal_odds, status,
+                      strategy_id, settlement_payload, payload
+                    )
+                    SELECT $1,$2,($3::float8)::numeric,($4::float8)::numeric,$5,$6,$7,$8
+                    WHERE NOT EXISTS (
+                      SELECT 1 FROM simulated_bets WHERE candidate_id = $2
+                    )
+                    "#,
+                    &[
+                        &id,
+                        &candidate.id,
+                        &stake,
+                        &candidate.decimal_odds,
+                        &"open",
+                        &strategy_id,
+                        &json!({}),
+                        &payload,
+                    ],
+                )
+                .await?;
+            if let Some(item) = self.simulated_bet_by_candidate(&candidate.id).await? {
+                placed.push(json!({
+                    "bet_id": item.id,
+                    "candidate_id": item.candidate_id,
+                    "event_name": candidate.event_name,
+                    "market_name": candidate.market_name,
+                    "outcome_name": candidate.outcome_name,
+                    "observed_decimal_odds": item.observed_decimal_odds,
+                    "hypothetical_stake": item.hypothetical_stake
+                }));
+            }
+        }
+
+        Ok(json!({
+            "enabled": true,
+            "snapshot_id": snapshot_id,
+            "stake": stake,
+            "per_scan_limit": per_scan_limit,
+            "max_open_exposure": max_open_exposure,
+            "open_exposure_before": open_exposure,
+            "placed_count": placed.len(),
+            "placed": placed,
+            "paper_only": true
+        }))
+    }
+
+    async fn simulated_bet_by_candidate(
+        &self,
+        candidate_id: &str,
+    ) -> anyhow::Result<Option<SimulatedBet>> {
+        let client = self.connect().await?;
+        let row = client
+            .query_opt(
+                r#"
+                SELECT id, candidate_id, created_at, hypothetical_stake::float8 AS hypothetical_stake,
+                       observed_decimal_odds::float8 AS observed_decimal_odds, status,
+                       strategy_id, settled_at,
+                       simulated_return::float8 AS simulated_return,
+                       profit_loss::float8 AS profit_loss,
+                       settlement_payload, payload
+                FROM simulated_bets
+                WHERE candidate_id = $1
+                ORDER BY created_at ASC
+                LIMIT 1
+                "#,
+                &[&candidate_id],
+            )
+            .await?;
+        Ok(row.map(|row| simulated_bet_from_row(&row)))
+    }
+
+    async fn open_exposure(&self) -> anyhow::Result<f64> {
+        let client = self.connect().await?;
+        let row = client
+            .query_one(
+                r#"
+                SELECT COALESCE(sum(hypothetical_stake), 0)::float8 AS open_exposure
+                FROM simulated_bets
+                WHERE status IN ('open', 'awaiting_result', 'unresolved')
+                "#,
+                &[],
+            )
+            .await?;
+        Ok(row.get("open_exposure"))
     }
 
     pub async fn simulated_bets(&self, limit: i64) -> anyhow::Result<Vec<SimulatedBet>> {

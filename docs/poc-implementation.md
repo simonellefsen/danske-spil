@@ -139,6 +139,12 @@ Each scan also applies the active baseline to every generated candidate and reco
 
 Rejected candidates cannot be added to the paper ledger through the API. This keeps manual simulation aligned with the active strategy while still preserving the rejected alternatives for review.
 
+When `GAMBLER_AUTO_PAPER_ENABLED=true`, each scan automatically paper-places the top selected candidates up to `GAMBLER_AUTO_PAPER_PER_SCAN_LIMIT` and the `GAMBLER_AUTO_PAPER_MAX_OPEN_EXPOSURE` cap. The placement writes only to `simulated_bets`; it never clicks Danske Spil odds or submits a coupon. Operators can also trigger the same idempotent flow with:
+
+```text
+POST /api/simulate/selected
+```
+
 Strategy state is available at:
 
 ```text

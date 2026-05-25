@@ -7,6 +7,7 @@ pub fn render_index(base_path: &str) -> String {
                 h1 { "Gambler POC" }
                 div { class: "toolbar",
                     button { class: "primary", id: "scan", "Scan markets" }
+                    button { id: "auto-paper", "Auto paper selected" }
                     button { id: "refresh", "Refresh" }
                 }
             }
@@ -19,6 +20,7 @@ pub fn render_index(base_path: &str) -> String {
                     div { class: "metric", div { class: "label", "Feature snapshots" } div { class: "value", id: "feature-snapshots", "-" } }
                     div { class: "metric", div { class: "label", "Strategy selected" } div { class: "value", id: "strategy-selected", "-" } }
                     div { class: "metric", div { class: "label", "Strategy rejected" } div { class: "value", id: "strategy-rejected", "-" } }
+                    div { class: "metric", div { class: "label", "Auto paper" } div { class: "value", id: "auto-paper-state", "-" } }
                     div { class: "metric", div { class: "label", "Open exposure" } div { class: "value", id: "exposure", "-" } }
                     div { class: "metric", div { class: "label", "Paper P/L" } div { class: "value", id: "profit", "-" } }
                     div { class: "metric", div { class: "label", "Real-money placement" } div { class: "value danger", id: "placement", "disabled" } }
@@ -371,6 +373,10 @@ async function load() {
   $("database").className = status.database.connected ? "value ok" : "value danger";
   $("snapshot").textContent = status.latest_snapshot_id || "-";
   $("placement").textContent = status.allow_real_money_placement ? "enabled" : "disabled";
+  const autoPaper = status.auto_paper || {};
+  $("auto-paper-state").textContent = autoPaper.enabled
+    ? `${autoPaper.per_scan_limit || 0} x ${money(autoPaper.default_stake || 0)}`
+    : "off";
   const summary = await json(api("/api/ledger/summary"));
   $("exposure").textContent = money(summary.open_exposure);
   $("profit").textContent = money(summary.profit_loss);
@@ -393,6 +399,11 @@ $("scan").addEventListener("click", async () => {
   $("scan").disabled = true;
   try { await json(api("/api/scan"), { method: "POST", body: "{}" }); await load(); }
   finally { $("scan").disabled = false; }
+});
+$("auto-paper").addEventListener("click", async () => {
+  $("auto-paper").disabled = true;
+  try { await json(api("/api/simulate/selected"), { method: "POST", body: "{}" }); await load(); }
+  finally { $("auto-paper").disabled = false; }
 });
 $("refresh").addEventListener("click", load);
 load().catch((error) => { $("reasoning").textContent = error.stack || String(error); });
