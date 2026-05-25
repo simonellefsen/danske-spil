@@ -9,6 +9,7 @@ The initial project goal is to understand the site, maintain a durable LLM wiki,
 - Documentation and wiki scaffold only.
 - `.env.local` is ignored and must hold credentials locally.
 - The proposed `gambler` agent may observe, model, and prepare candidate coupons.
+- The proposed `gambler` web UI should show candidate odds, structured reasoning, risk checks, and review state.
 - The proposed Hermes Agent loop may reflect and propose one-variable strategy experiments.
 - No agent may submit real-money bets until a separate compliance and human-approval gate is explicitly accepted.
 
@@ -17,6 +18,7 @@ The initial project goal is to understand the site, maintain a durable LLM wiki,
 - [Project plan](/Users/lindau/codex/danske-spil/docs/project-plan.md)
 - [Compliance and safety](/Users/lindau/codex/danske-spil/docs/compliance-and-safety.md)
 - [Browser investigation](/Users/lindau/codex/danske-spil/docs/browser-investigation.md)
+- [Gambler web UI](/Users/lindau/codex/danske-spil/docs/web-ui.md)
 - [Hermes and gambler loop](/Users/lindau/codex/danske-spil/docs/hermes-agent.md)
 - [Kubernetes architecture](/Users/lindau/codex/danske-spil/docs/kubernetes-architecture.md)
 - [Project wiki](/Users/lindau/codex/danske-spil/wiki/index.md)

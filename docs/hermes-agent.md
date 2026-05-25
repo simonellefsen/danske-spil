@@ -1,6 +1,6 @@
 # Hermes Agent And Gambler Loop
 
-This document adapts the `rust_daytrader` Hermes pattern to Danske Spil. The core change is stronger gating: Hermes may learn from observations and propose strategy changes, but it must not control the browser or place bets.
+This document describes the Hermes and `gambler` learning loop for Danske Spil. The core rule is strong separation: Hermes may learn from observations and propose strategy changes, but it must not control the browser or place bets.
 
 ## Roles
 
@@ -8,6 +8,30 @@ This document adapts the `rust_daytrader` Hermes pattern to Danske Spil. The cor
 - `gambler-mcp`: exposes a narrow, sanitized tool surface to Hermes.
 - `hermes-agent`: reflects on outcomes and proposes one-variable experiments.
 - Operator: decides whether to approve experiments and, if ever enabled, any real-money action.
+
+## Operator Web UI
+
+The `gambler` app should expose a web UI as the primary operator surface.
+
+The odds-selection view should show:
+
+- Current market and coupon observations.
+- Candidate bets and candidate Tips coupons.
+- Selected odds, estimated probability, implied probability, estimated edge, confidence, and stake suggestion when staking is enabled.
+- Rejected alternatives and the reason they were rejected.
+- Responsible-gambling checks, local stake limits, and terms/safety gates.
+- A structured reasoning trace with evidence, scoring factors, uncertainty, and recommendation.
+
+The UI should not show raw hidden chain-of-thought, credentials, cookies, raw account payloads, or browser session material. "Thinking" in the UI means auditable rationale and decision trace, not private scratchpad text.
+
+The Hermes view should show:
+
+- Recent reflections.
+- One-variable experiment proposals.
+- Experiment lifecycle status.
+- Evidence used by each proposal.
+- Approval, rejection, promotion, and rollback history.
+- Active baseline context when one exists.
 
 ## Initial Goal Contract
 
@@ -88,15 +112,18 @@ sequenceDiagram
   participant G as gambler
   participant DB as Postgres
   participant M as gambler-mcp
+  participant UI as Web UI
   participant H as Hermes
   participant O as Operator
 
   B->>G: Read Oddset/Tips state
   G->>DB: Store snapshots and candidates
+  UI->>DB: Show candidates, reasoning traces, and Hermes state
   H->>M: Request sanitized context
   M->>DB: Read observations
   H->>DB: Write reflection/proposal through MCP
-  O->>DB: Approve, reject, or promote experiment
+  O->>UI: Review or approve lifecycle action
+  UI->>DB: Record approval, rejection, or promotion
 ```
 
 ## Promotion Gate

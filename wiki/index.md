@@ -16,12 +16,13 @@ Future Codex and Hermes sessions should read this file first for project-history
 - [log](log.md) - Append-only timeline of wiki operations.
 - [concepts/llm-maintained-project-wiki](concepts/llm-maintained-project-wiki.md) - How this repo uses the LLM wiki pattern.
 - [concepts/hermes-gambler-loop](concepts/hermes-gambler-loop.md) - Safe learning loop for `gambler` and Hermes.
+- [concepts/gambler-web-ui](concepts/gambler-web-ui.md) - Operator dashboard for reasoning, candidate review, and Hermes state.
 - [concepts/browser-automation-investigation](concepts/browser-automation-investigation.md) - How browser investigation should be run.
 
 ## Source Notes
 
 - [sources/danske-spil-netspil-terms](sources/danske-spil-netspil-terms.md) - Source-note summary of official terms and responsible-gambling pages reviewed during planning.
-- [sources/llm-wiki](sources/llm-wiki.md) - Source-note summary for the LLM wiki pattern used in `rust_daytrader`.
+- [sources/llm-wiki](sources/llm-wiki.md) - Source-note summary for the LLM wiki pattern.
 
 ## Runbooks
 
@@ -41,5 +42,5 @@ Future Codex and Hermes sessions should read this file first for project-history
 
 - Does Danske Spil provide any official odds/history API or export that should replace browser scraping?
 - Which browser-session storage model is safest for Kubernetes without leaking cookies or credentials?
-- Should `gambler` be Python-first for Playwright speed or Rust-first for parity with `rust_daytrader`?
+- Should `gambler` be Python-first for Playwright speed or Rust-first for deployment simplicity?
 - What exact human approval UX is acceptable if real-money placement is ever considered?

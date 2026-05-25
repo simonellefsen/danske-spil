@@ -1,6 +1,6 @@
 # Project Knowledge Wiki
 
-This repository uses an LLM-maintained wiki pattern, adapted from the `rust_daytrader` project. The wiki is the maintained synthesis layer between raw source files, browser observations, strategy experiments, and future agent sessions.
+This repository uses an LLM-maintained wiki pattern. The wiki is the maintained synthesis layer between raw source files, browser observations, strategy experiments, and future agent sessions.
 
 ## Directory Structure
 
@@ -20,6 +20,7 @@ wiki/
 
 - Browser investigation findings.
 - Stable DOM/navigation models.
+- Web UI decisions and operator-review flows.
 - Strategy hypotheses and rejected ideas.
 - Hermes reflections and one-variable experiment summaries.
 - Kubernetes and operations runbooks.

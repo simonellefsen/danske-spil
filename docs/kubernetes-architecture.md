@@ -7,6 +7,7 @@ Target namespace: `danske-spil`.
 ## Workloads
 
 - `gambler-api`: future internal API and browser-observation service.
+- `gambler-web`: future operator web UI for candidate odds, reasoning traces, safety gates, and Hermes review.
 - `gambler-worker`: future scheduled observation and strategy scoring worker.
 - `gambler-mcp`: future Hermes-safe MCP adapter.
 - `hermes-agent`: Hermes gateway and reflection engine.
@@ -56,6 +57,7 @@ Start closed and open narrowly:
 - `hermes-agent` can call `gambler-mcp`.
 - `gambler-mcp` can call Postgres and `gambler-api`.
 - `gambler-api` and `gambler-worker` can call Postgres and `danskespil.dk`.
+- `gambler-web` can call `gambler-api` and Postgres; it should not call `danskespil.dk` directly.
 - No public ingress in the first deployment.
 
 ## Deployment Order
@@ -65,13 +67,15 @@ Start closed and open narrowly:
 3. Postgres cluster and app secret.
 4. `gambler` read-only service.
 5. `gambler-mcp`.
-6. Hermes with MCP wait/init check.
-7. Suspended CronJob for manual smoke tests.
+6. `gambler-web` after the API and schema are available.
+7. Hermes with MCP wait/init check.
+8. Suspended CronJob for manual smoke tests.
 
 ## Smoke Tests
 
 ```bash
 rtk kubectl --context docker-desktop -n danske-spil get pods,svc,pvc,cluster
 rtk kubectl --context docker-desktop -n danske-spil logs deployment/gambler-api --tail=120
+rtk kubectl --context docker-desktop -n danske-spil logs deployment/gambler-web --tail=120
 rtk kubectl --context docker-desktop -n danske-spil logs deployment/hermes-agent --tail=120
 ```

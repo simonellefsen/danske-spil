@@ -18,6 +18,7 @@ The project will accumulate knowledge that is easy to lose:
 
 - Oddset and Tips DOM/navigation details.
 - Login/session boundaries.
+- Operator dashboard and reasoning-view decisions.
 - Terms and responsible-gambling constraints.
 - Strategy hypotheses and simulation evidence.
 - Kubernetes deployment procedures.
