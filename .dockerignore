@@ -1,0 +1,11 @@
+.git
+.env
+.env.*
+!.env.example
+tmp/
+__pycache__/
+*.py[cod]
+.venv/
+.qmd/
+.obsidian/
+.DS_Store

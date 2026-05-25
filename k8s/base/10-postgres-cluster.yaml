@@ -1,0 +1,16 @@
+apiVersion: postgresql.cnpg.io/v1
+kind: Cluster
+metadata:
+  name: danske-spil-postgres
+  namespace: danske-spil
+spec:
+  instances: 2
+  imageName: ghcr.io/cloudnative-pg/postgresql:18.3-system-trixie
+  bootstrap:
+    initdb:
+      database: danske_spil
+      owner: danske_spil
+      secret:
+        name: danske-spil-postgres-app
+  storage:
+    size: 5Gi

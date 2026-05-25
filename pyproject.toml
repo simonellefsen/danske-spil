@@ -1,0 +1,11 @@
+[project]
+name = "danske-spil-gambler"
+version = "0.1.0"
+description = "Observe-only Danske Spil odds scanner and paper-ledger POC."
+requires-python = ">=3.12"
+dependencies = [
+  "psycopg[binary]>=3.2,<4",
+]
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]

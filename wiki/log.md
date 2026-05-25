@@ -42,3 +42,9 @@ Append-only timeline for project wiki maintenance. Use headings with the format 
 - Observed sport navigation, market chips, event links, odds buttons, and content-service JSON calls.
 - Added POC scripts for browser artifact capture and read-only content-service normalization.
 - Added the first DOM/content-service source note.
+
+## [2026-05-25] implementation | Core service POC
+
+- Added the first `gambler` API, web UI, scanner service, and paper-ledger flow.
+- Added Postgres schema initialization for odds snapshots, candidate bets, simulated bets, audit events, and Hermes reflections.
+- Added local Docker Desktop Kubernetes manifests for `gambler-api`, `gambler-worker`, `hermes-agent` POC, and a two-instance CNPG cluster.
