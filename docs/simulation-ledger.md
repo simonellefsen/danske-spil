@@ -81,6 +81,7 @@ Current POC status:
 - Manual settlement writes `settlement_observations` and computed simulated return/profit-loss.
 - Strategy selection is stored in `strategy_candidate_decisions`; rejected candidates are preserved for review but blocked from paper-ledger placement.
 - Selected candidates can be auto-paper-placed into `simulated_bets` with per-scan and max-open-exposure caps. This is idempotent per candidate and remains simulation-only.
+- Open paper bets move to `awaiting_result` after the event start time has passed. This queues them for result lookup without grading the outcome.
 - Automated result lookup is still pending and should use the source ordering above.
 
 ## Metrics

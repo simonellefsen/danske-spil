@@ -145,6 +145,15 @@ When `GAMBLER_AUTO_PAPER_ENABLED=true`, each scan automatically paper-places the
 POST /api/simulate/selected
 ```
 
+The worker and UI can also advance open paper bets into `awaiting_result` once the observed event start time has passed:
+
+```text
+GET  /api/ledger/queue
+POST /api/ledger/queue
+```
+
+This is only a queue transition. It does not grade a bet as won, lost, or void.
+
 Strategy state is available at:
 
 ```text

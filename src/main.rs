@@ -79,6 +79,14 @@ async fn run_worker(settings: Settings, service: GamblerService) -> anyhow::Resu
             ),
             Err(error) => tracing::warn!(%error, "scan_failed"),
         }
+        let queue_summary = service.advance_settlement_queue().await;
+        tracing::info!(
+            transitioned_count = queue_summary
+                .get("transitioned_count")
+                .and_then(|value| value.as_u64())
+                .unwrap_or_default(),
+            "settlement_queue_advanced"
+        );
         tokio::time::sleep(Duration::from_secs(settings.scan_interval_seconds)).await;
     }
 }
@@ -120,6 +128,7 @@ async fn get_handler(State(state): State<Arc<AppState>>, uri: OriginalUri) -> Re
             Ok(summary) => Json(summary).into_response(),
             Err(error) => error_response(StatusCode::INTERNAL_SERVER_ERROR, error),
         },
+        "/api/ledger/queue" => Json(state.service.advance_settlement_queue().await).into_response(),
         "/api/catalog/coverage" => match state.service.store().market_catalog_coverage().await {
             Ok(coverage) => Json(coverage).into_response(),
             Err(error) => error_response(StatusCode::INTERNAL_SERVER_ERROR, error),
@@ -287,6 +296,7 @@ async fn post_handler(
                 Err(error) => error_response(StatusCode::BAD_REQUEST, error),
             }
         }
+        "/api/ledger/queue" => Json(state.service.advance_settlement_queue().await).into_response(),
         "/api/strategy/experiment/review" => {
             let experiment_id = payload
                 .get("experiment_id")

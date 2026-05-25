@@ -35,6 +35,7 @@ flowchart LR
 - Performance metrics must clearly be labeled simulated.
 - Paper placement uses active strategy decisions; rejected candidates remain visible but cannot be simulated.
 - Auto-paper placement writes only to the simulation ledger and is capped by per-scan count and open exposure.
+- Awaiting-result queueing is separate from settlement grading; it never marks a bet won or lost.
 
 ## Related
 

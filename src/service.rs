@@ -55,6 +55,11 @@ impl GamblerService {
                 "max_open_exposure": self.settings.auto_paper_max_open_exposure,
                 "default_stake": self.settings.default_stake
             },
+            "settlement_queue": {
+                "enabled": self.settings.settlement_queue_enabled,
+                "awaiting_grace_minutes": self.settings.settlement_awaiting_grace_minutes,
+                "limit": self.settings.settlement_queue_limit
+            },
             "runtime": "rust-dioxus",
             "sports_scope": ["football", "tennis", "basketball", "formula1", "golf", "cycling"]
         })
@@ -109,6 +114,7 @@ impl GamblerService {
         } else {
             json!({"enabled": false, "placed_count": 0})
         };
+        let settlement_queue_summary = self.advance_settlement_queue().await;
         let (strategy_proposal, strategy_proposal_error) = match self
             .store
             .ensure_scan_strategy_proposal(&snapshot_id, &candidates)
@@ -128,6 +134,7 @@ impl GamblerService {
                     "candidate_count": candidates.len(),
                     "strategy_decision_summary": strategy_decision_summary,
                     "auto_paper_summary": auto_paper_summary,
+                    "settlement_queue_summary": settlement_queue_summary,
                     "include_live": include_live,
                     "paper_only": true,
                     "runtime": "rust-dioxus"
@@ -140,10 +147,41 @@ impl GamblerService {
             "candidate_count": candidates.len(),
             "strategy_decision_summary": strategy_decision_summary,
             "auto_paper_summary": auto_paper_summary,
+            "settlement_queue_summary": settlement_queue_summary,
             "strategy_proposal": strategy_proposal,
             "strategy_proposal_error": strategy_proposal_error,
             "snapshot": snapshot
         }))
+    }
+
+    pub async fn advance_settlement_queue(&self) -> Value {
+        if !self.settings.settlement_queue_enabled {
+            return json!({"enabled": false, "transitioned_count": 0});
+        }
+        match self
+            .store
+            .advance_settlement_queue(
+                self.settings.settlement_awaiting_grace_minutes,
+                self.settings.settlement_queue_limit,
+            )
+            .await
+        {
+            Ok(summary) => {
+                self.store
+                    .record_audit("settlement_queue_advanced", summary.clone())
+                    .await
+                    .ok();
+                summary
+            }
+            Err(error) => {
+                tracing::warn!(%error, "settlement queue advance failed");
+                json!({
+                    "enabled": true,
+                    "transitioned_count": 0,
+                    "error": error.to_string()
+                })
+            }
+        }
     }
 }
 

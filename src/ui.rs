@@ -8,6 +8,7 @@ pub fn render_index(base_path: &str) -> String {
                 div { class: "toolbar",
                     button { class: "primary", id: "scan", "Scan markets" }
                     button { id: "auto-paper", "Auto paper selected" }
+                    button { id: "queue-settlement", "Queue settlement" }
                     button { id: "refresh", "Refresh" }
                 }
             }
@@ -21,6 +22,7 @@ pub fn render_index(base_path: &str) -> String {
                     div { class: "metric", div { class: "label", "Strategy selected" } div { class: "value", id: "strategy-selected", "-" } }
                     div { class: "metric", div { class: "label", "Strategy rejected" } div { class: "value", id: "strategy-rejected", "-" } }
                     div { class: "metric", div { class: "label", "Auto paper" } div { class: "value", id: "auto-paper-state", "-" } }
+                    div { class: "metric", div { class: "label", "Awaiting result" } div { class: "value", id: "awaiting-result", "-" } }
                     div { class: "metric", div { class: "label", "Open exposure" } div { class: "value", id: "exposure", "-" } }
                     div { class: "metric", div { class: "label", "Paper P/L" } div { class: "value", id: "profit", "-" } }
                     div { class: "metric", div { class: "label", "Real-money placement" } div { class: "value danger", id: "placement", "disabled" } }
@@ -242,7 +244,9 @@ function renderLedger(items) {
     const candidate = item.payload && item.payload.candidate ? item.payload.candidate : {};
     return `${candidate.event_name || item.candidate_id || ""} / ${candidate.outcome_name || ""}`;
   };
-  $("ledger").innerHTML = items.map((item) => `
+  $("ledger").innerHTML = items.map((item) => {
+    const canSettle = ["open", "awaiting_result", "unresolved"].includes(item.status);
+    return `
     <tr>
       <td>${esc(item.created_at)}</td>
       <td>${esc(candidateLabel(item))}<br><span class="label">${esc(item.strategy_id || "")}</span></td>
@@ -251,13 +255,14 @@ function renderLedger(items) {
       <td>${item.profit_loss === null || item.profit_loss === undefined ? "-" : money(item.profit_loss)}</td>
       <td>
         <div class="actions">
-          <button data-settle="${item.id}" data-result="won" ${item.status !== "open" ? "disabled" : ""}>Won</button>
-          <button data-settle="${item.id}" data-result="lost" ${item.status !== "open" ? "disabled" : ""}>Lost</button>
-          <button data-settle="${item.id}" data-result="void" ${item.status !== "open" ? "disabled" : ""}>Void</button>
+          <button data-settle="${item.id}" data-result="won" ${!canSettle ? "disabled" : ""}>Won</button>
+          <button data-settle="${item.id}" data-result="lost" ${!canSettle ? "disabled" : ""}>Lost</button>
+          <button data-settle="${item.id}" data-result="void" ${!canSettle ? "disabled" : ""}>Void</button>
         </div>
       </td>
     </tr>
-  `).join("");
+    `;
+  }).join("");
   document.querySelectorAll("[data-settle]").forEach((button) => {
     button.addEventListener("click", async () => {
       await json(api("/api/ledger/settle"), {
@@ -378,6 +383,7 @@ async function load() {
     ? `${autoPaper.per_scan_limit || 0} x ${money(autoPaper.default_stake || 0)}`
     : "off";
   const summary = await json(api("/api/ledger/summary"));
+  $("awaiting-result").textContent = String((summary.by_status || {}).awaiting_result || 0);
   $("exposure").textContent = money(summary.open_exposure);
   $("profit").textContent = money(summary.profit_loss);
   $("profit").className = Number(summary.profit_loss || 0) >= 0 ? "value ok" : "value danger";
@@ -404,6 +410,11 @@ $("auto-paper").addEventListener("click", async () => {
   $("auto-paper").disabled = true;
   try { await json(api("/api/simulate/selected"), { method: "POST", body: "{}" }); await load(); }
   finally { $("auto-paper").disabled = false; }
+});
+$("queue-settlement").addEventListener("click", async () => {
+  $("queue-settlement").disabled = true;
+  try { await json(api("/api/ledger/queue"), { method: "POST", body: "{}" }); await load(); }
+  finally { $("queue-settlement").disabled = false; }
 });
 $("refresh").addEventListener("click", load);
 load().catch((error) => { $("reasoning").textContent = error.stack || String(error); });

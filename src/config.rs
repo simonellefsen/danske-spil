@@ -16,6 +16,9 @@ pub struct Settings {
     pub auto_paper_enabled: bool,
     pub auto_paper_per_scan_limit: usize,
     pub auto_paper_max_open_exposure: f64,
+    pub settlement_queue_enabled: bool,
+    pub settlement_awaiting_grace_minutes: i64,
+    pub settlement_queue_limit: usize,
     pub database_url: Option<String>,
 }
 
@@ -70,6 +73,17 @@ impl Settings {
                 .ok()
                 .and_then(|v| v.parse().ok())
                 .unwrap_or(100.0),
+            settlement_queue_enabled: bool_env("GAMBLER_SETTLEMENT_QUEUE_ENABLED", true),
+            settlement_awaiting_grace_minutes: env::var(
+                "GAMBLER_SETTLEMENT_AWAITING_GRACE_MINUTES",
+            )
+            .ok()
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(0),
+            settlement_queue_limit: env::var("GAMBLER_SETTLEMENT_QUEUE_LIMIT")
+                .ok()
+                .and_then(|v| v.parse().ok())
+                .unwrap_or(50),
             database_url,
         }
     }

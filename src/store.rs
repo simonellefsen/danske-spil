@@ -1004,6 +1004,122 @@ impl Store {
         Ok(row.get("open_exposure"))
     }
 
+    pub async fn advance_settlement_queue(
+        &self,
+        awaiting_grace_minutes: i64,
+        limit: usize,
+    ) -> anyhow::Result<Value> {
+        if limit == 0 {
+            return Ok(json!({
+                "enabled": true,
+                "transitioned_count": 0,
+                "skipped": true,
+                "reason": "settlement queue limit is zero"
+            }));
+        }
+
+        let client = self.connect().await?;
+        let rows = client
+            .query(
+                r#"
+                WITH eligible AS (
+                  SELECT
+                    sb.id,
+                    cb.event_id,
+                    cb.event_name,
+                    cb.market_name,
+                    cb.outcome_name,
+                    cb.sport_key,
+                    cb.competition,
+                    COALESCE(
+                      se.start_time,
+                      CASE
+                        WHEN cb.feature_snapshot ? 'start_time'
+                         AND cb.feature_snapshot->>'start_time' ~ '^[0-9]{4}-'
+                        THEN (cb.feature_snapshot->>'start_time')::timestamptz
+                        ELSE NULL
+                      END
+                    ) AS event_start_time,
+                    se.status AS event_status,
+                    se.resulted AS event_resulted,
+                    se.settled AS event_settled
+                  FROM simulated_bets sb
+                  JOIN candidate_bets cb ON cb.id = sb.candidate_id
+                  LEFT JOIN sport_events se ON se.id = cb.event_id
+                  WHERE sb.status = 'open'
+                    AND COALESCE(
+                      se.start_time,
+                      CASE
+                        WHEN cb.feature_snapshot ? 'start_time'
+                         AND cb.feature_snapshot->>'start_time' ~ '^[0-9]{4}-'
+                        THEN (cb.feature_snapshot->>'start_time')::timestamptz
+                        ELSE NULL
+                      END
+                    ) <= now() - ($1::int * interval '1 minute')
+                  ORDER BY event_start_time ASC NULLS LAST, sb.created_at ASC
+                  LIMIT $2
+                )
+                UPDATE simulated_bets sb
+                SET status = 'awaiting_result',
+                    settlement_payload = sb.settlement_payload || jsonb_build_object(
+                      'queue_transition',
+                      jsonb_build_object(
+                        'from_status', 'open',
+                        'to_status', 'awaiting_result',
+                        'transitioned_at', now(),
+                        'source', 'settlement_queue',
+                        'event_start_time', eligible.event_start_time,
+                        'event_status', eligible.event_status,
+                        'event_resulted', eligible.event_resulted,
+                        'event_settled', eligible.event_settled,
+                        'paper_only', true
+                      )
+                    )
+                FROM eligible
+                WHERE sb.id = eligible.id
+                RETURNING
+                  sb.id,
+                  eligible.event_id,
+                  eligible.event_name,
+                  eligible.market_name,
+                  eligible.outcome_name,
+                  eligible.sport_key,
+                  eligible.competition,
+                  eligible.event_start_time,
+                  eligible.event_status,
+                  eligible.event_resulted,
+                  eligible.event_settled
+                "#,
+                &[&(awaiting_grace_minutes as i32), &(limit as i64)],
+            )
+            .await?;
+
+        Ok(json!({
+            "enabled": true,
+            "transitioned_count": rows.len(),
+            "awaiting_grace_minutes": awaiting_grace_minutes,
+            "limit": limit,
+            "items": rows.iter().map(|row| {
+                let event_start_time: Option<DateTime<Utc>> = row.get("event_start_time");
+                json!({
+                    "bet_id": row.get::<_, String>("id"),
+                    "event_id": row.get::<_, Option<String>>("event_id"),
+                    "event_name": row.get::<_, Option<String>>("event_name"),
+                    "market_name": row.get::<_, Option<String>>("market_name"),
+                    "outcome_name": row.get::<_, Option<String>>("outcome_name"),
+                    "sport_key": row.get::<_, Option<String>>("sport_key"),
+                    "competition": row.get::<_, Option<String>>("competition"),
+                    "event_start_time": event_start_time,
+                    "event_status": row.get::<_, Option<String>>("event_status"),
+                    "event_resulted": row.get::<_, Option<bool>>("event_resulted"),
+                    "event_settled": row.get::<_, Option<bool>>("event_settled"),
+                    "new_status": "awaiting_result"
+                })
+            }).collect::<Vec<_>>(),
+            "paper_only": true
+        }))
+    }
+
     pub async fn simulated_bets(&self, limit: i64) -> anyhow::Result<Vec<SimulatedBet>> {
         let client = self.connect().await?;
         let rows = client
