@@ -7,7 +7,7 @@ tags:
   - tips
 updated: 2026-05-25
 sources:
-  - /Users/lindau/codex/danske-spil/docs/poc-implementation.md
+  - ../../docs/poc-implementation.md
 ---
 
 # Danske Spil DOM And Content-Service Observations

@@ -12,7 +12,7 @@ Append-only timeline for project wiki maintenance. Use headings with the format 
 
 ## [2026-05-25] scaffold | Initial planning wiki
 
-- Created the initial project wiki structure under [wiki/](/Users/lindau/codex/danske-spil/wiki).
+- Created the initial project wiki structure under [wiki/](.).
 - Added schema, index, source notes, concepts, runbooks, decisions, and experiment landing pages.
 - Added project docs for planning, compliance, browser investigation, Hermes, Kubernetes, and wiki operation.
 - Recorded the research-first and human-approved posture because current Danske Licens Spil terms create clear automation risk.
@@ -66,3 +66,9 @@ Append-only timeline for project wiki maintenance. Use headings with the format 
 - Reimplemented the active `gambler` POC as a Rust service with Axum, Dioxus SSR, Postgres state, and the read-only Danske Spil scanner.
 - Switched deployment to a single Rust binary that can run the API/Hermes web view or the scheduled worker loop.
 - Replaced the Python runtime container with a multi-stage Docker build and `scratch` final image.
+
+## [2026-05-25] documentation | GitHub-ready Start Here links
+
+- Replaced absolute local README links with repository-relative links that work on GitHub.
+- Expanded the README Start Here section with short topic descriptions.
+- Updated wiki link conventions to avoid local-machine paths in Markdown links.

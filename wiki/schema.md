@@ -47,7 +47,7 @@ Recommended `type` values:
 ## Link Rules
 
 - Use relative Markdown links for wiki-to-wiki links.
-- Use Markdown links with absolute local paths for repository files outside `wiki/`.
+- Use repository-relative Markdown links for repository files outside `wiki/`.
 - Prefer linking source files and docs over copying long excerpts.
 - Avoid unresolved wikilinks unless the missing page is intentionally listed as an open task.
 
@@ -58,7 +58,7 @@ Recommended `type` values:
 3. Update affected concept, runbook, decision, or experiment pages.
 4. Update `wiki/index.md`.
 5. Append one entry to `wiki/log.md`.
-6. If the source changes safety or betting behavior, cross-link [docs/compliance-and-safety.md](/Users/lindau/codex/danske-spil/docs/compliance-and-safety.md).
+6. If the source changes safety or betting behavior, cross-link [docs/compliance-and-safety.md](../docs/compliance-and-safety.md).
 
 ## Query Workflow
 

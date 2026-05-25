@@ -6,7 +6,7 @@ tags:
   - operator-review
 updated: 2026-05-25
 sources:
-  - /Users/lindau/codex/danske-spil/docs/web-ui.md
+  - ../../docs/web-ui.md
 ---
 
 # Gambler Web UI

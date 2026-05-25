@@ -40,8 +40,8 @@ Run from the repository root when local markdown search is needed:
 
 ```bash
 rtk qmd init
-rtk qmd collection add /Users/lindau/codex/danske-spil/wiki --name danske-spil-wiki
-rtk qmd collection add /Users/lindau/codex/danske-spil/docs --name danske-spil-docs
+rtk qmd collection add wiki --name danske-spil-wiki
+rtk qmd collection add docs --name danske-spil-docs
 rtk qmd update
 rtk qmd embed -c danske-spil-wiki
 ```

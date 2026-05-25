@@ -7,7 +7,7 @@ tags:
   - settlement
 updated: 2026-05-25
 sources:
-  - /Users/lindau/codex/danske-spil/docs/simulation-ledger.md
+  - ../../docs/simulation-ledger.md
 ---
 
 # Simulation Ledger

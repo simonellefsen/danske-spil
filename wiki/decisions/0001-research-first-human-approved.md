@@ -7,7 +7,7 @@ tags:
 updated: 2026-05-25
 sources:
   - ../sources/danske-spil-netspil-terms.md
-  - /Users/lindau/codex/danske-spil/docs/compliance-and-safety.md
+  - ../../docs/compliance-and-safety.md
 ---
 
 # 0001 Research-First, Human-Approved Posture

@@ -6,7 +6,7 @@ tags:
   - investigation
 updated: 2026-05-25
 sources:
-  - /Users/lindau/codex/danske-spil/docs/browser-investigation.md
+  - ../../docs/browser-investigation.md
   - ../sources/danske-spil-netspil-terms.md
 ---
 

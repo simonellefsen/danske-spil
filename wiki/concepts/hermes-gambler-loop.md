@@ -6,8 +6,8 @@ tags:
   - strategy-learning
 updated: 2026-05-25
 sources:
-  - /Users/lindau/codex/danske-spil/docs/hermes-agent.md
-  - /Users/lindau/codex/danske-spil/docs/compliance-and-safety.md
+  - ../../docs/hermes-agent.md
+  - ../../docs/compliance-and-safety.md
 ---
 
 # Hermes Gambler Loop

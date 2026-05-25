@@ -7,7 +7,7 @@ tags:
   - features
 updated: 2026-05-25
 sources:
-  - /Users/lindau/codex/danske-spil/docs/data-intelligence.md
+  - ../../docs/data-intelligence.md
 ---
 
 # Sports Data Intelligence

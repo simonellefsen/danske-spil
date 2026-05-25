@@ -18,18 +18,20 @@ The initial project goal is to understand the site, maintain a durable LLM wiki,
 
 ## Start Here
 
-- [Project plan](/Users/lindau/codex/danske-spil/docs/project-plan.md)
-- [Compliance and safety](/Users/lindau/codex/danske-spil/docs/compliance-and-safety.md)
-- [Browser investigation](/Users/lindau/codex/danske-spil/docs/browser-investigation.md)
-- [Gambler web UI](/Users/lindau/codex/danske-spil/docs/web-ui.md)
-- [Sports data intelligence](/Users/lindau/codex/danske-spil/docs/data-intelligence.md)
-- [Simulation ledger](/Users/lindau/codex/danske-spil/docs/simulation-ledger.md)
-- [POC implementation notes](/Users/lindau/codex/danske-spil/docs/poc-implementation.md)
-- [POC deployment](/Users/lindau/codex/danske-spil/docs/poc-deployment.md)
-- [ngrok path routing](/Users/lindau/codex/danske-spil/docs/ngrok-path-routing.md)
-- [Hermes and gambler loop](/Users/lindau/codex/danske-spil/docs/hermes-agent.md)
-- [Kubernetes architecture](/Users/lindau/codex/danske-spil/docs/kubernetes-architecture.md)
-- [Project wiki](/Users/lindau/codex/danske-spil/wiki/index.md)
+These topics are the durable map for the project:
+
+- [Project plan](docs/project-plan.md) - Phased roadmap from research and browser investigation through simulation, Hermes experiments, and any future human-approved action surface.
+- [Compliance and safety](docs/compliance-and-safety.md) - Hard guardrails for regulated gambling, credentials, responsible-gambling controls, and the current no-real-money automation posture.
+- [Browser investigation](docs/browser-investigation.md) - Runbook for using `agent-browser` or an equivalent browser engine to learn Oddset and Tips without mutating account state.
+- [Gambler web UI](docs/web-ui.md) - Operator dashboard requirements for observed odds, candidate reasoning, coupon review, Hermes state, audit events, and safety gates.
+- [Sports data intelligence](docs/data-intelligence.md) - Data-ingestion plan for football/soccer, tennis, basketball, Formula 1, golf, and cycling using stats, trends, weather, seasonality, and news.
+- [Simulation ledger](docs/simulation-ledger.md) - Paper-betting model for simulated placements, immutable entry odds, settlement lookup, and simulated performance metrics.
+- [POC implementation notes](docs/poc-implementation.md) - Current Rust/Dioxus service shape, scanner behavior, storage model, API endpoints, and implementation boundaries.
+- [POC deployment](docs/poc-deployment.md) - Local Docker Desktop Kubernetes deployment steps for the gambler API, worker, Hermes POC, and CloudNativePG database.
+- [ngrok path routing](docs/ngrok-path-routing.md) - Shared ngrok hostname routing for `/danske-spil` and `/saxo-daytrader` behind Google SSO.
+- [Hermes and gambler loop](docs/hermes-agent.md) - Safe reinforcement loop design where Hermes can reflect and propose one-variable experiments without browser, secret, or bet-placement access.
+- [Kubernetes architecture](docs/kubernetes-architecture.md) - Namespace layout, workloads, secrets, database cluster, observability expectations, and operational commands.
+- [Project wiki](wiki/index.md) - Maintained knowledge base with concepts, runbooks, decisions, source notes, and experiment records.
 
 ## Operating Rule
 
@@ -49,7 +51,7 @@ rtk cargo test
 
 ## Local Secrets
 
-Create `.env.local` from [.env.example](/Users/lindau/codex/danske-spil/.env.example). Keep all `DANSKESPIL_*`, Hermes keys, database passwords, cookies, and browser session material out of Git.
+Create `.env.local` from [.env.example](.env.example). Keep all `DANSKESPIL_*`, Hermes keys, database passwords, cookies, and browser session material out of Git.
 
 ## First Milestone
 
