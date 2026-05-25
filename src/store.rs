@@ -338,6 +338,21 @@ VALUES (
 )
 ON CONFLICT (id) DO NOTHING;
 
+UPDATE strategy_baselines
+SET config = config || '{
+  "coupon_modes": {
+    "single": true,
+    "double": false,
+    "triple": false,
+    "accumulator": false,
+    "max_legs": 1,
+    "require_provider_accumulator_support": true,
+    "require_same_sport_or_category_when_provider_requires_it": true
+  }
+}'::jsonb
+WHERE strategy_id = 'poc_ranker_v1'
+  AND NOT (config ? 'coupon_modes');
+
 CREATE INDEX IF NOT EXISTS idx_sport_events_sport_key ON sport_events(sport_key);
 CREATE INDEX IF NOT EXISTS idx_sport_events_start_time ON sport_events(start_time);
 CREATE INDEX IF NOT EXISTS idx_market_observations_snapshot ON market_observations(snapshot_id);
