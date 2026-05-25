@@ -35,3 +35,10 @@ Append-only timeline for project wiki maintenance. Use headings with the format 
 - Added the sports intelligence layer for stats, trends, weather, seasonality, news, and availability signals.
 - Set the initial sport scope to football/soccer, tennis, basketball, Formula 1, golf, and cycling.
 - Documented Postgres as the durable state store for normalized entities, source provenance, feature snapshots, and ingestion audit state.
+
+## [2026-05-25] implementation | Agent-browser and content-service POC
+
+- Used a dedicated `agent-browser` session for anonymous Oddset reconnaissance.
+- Observed sport navigation, market chips, event links, odds buttons, and content-service JSON calls.
+- Added POC scripts for browser artifact capture and read-only content-service normalization.
+- Added the first DOM/content-service source note.

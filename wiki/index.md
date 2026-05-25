@@ -20,10 +20,12 @@ Future Codex and Hermes sessions should read this file first for project-history
 - [concepts/simulation-ledger](concepts/simulation-ledger.md) - Paper placements, outcome lookup, settlement, and simulated performance.
 - [concepts/sports-data-intelligence](concepts/sports-data-intelligence.md) - Stats, trends, weather, news, seasonality, and feature snapshots.
 - [concepts/browser-automation-investigation](concepts/browser-automation-investigation.md) - How browser investigation should be run.
+- [sources/danske-spil-dom-observations](sources/danske-spil-dom-observations.md) - Initial agent-browser and content-service observations.
 
 ## Source Notes
 
 - [sources/danske-spil-netspil-terms](sources/danske-spil-netspil-terms.md) - Source-note summary of official terms and responsible-gambling pages reviewed during planning.
+- [sources/danske-spil-dom-observations](sources/danske-spil-dom-observations.md) - Initial website navigation, DOM, and content API observations.
 - [sources/llm-wiki](sources/llm-wiki.md) - Source-note summary for the LLM wiki pattern.
 
 ## Runbooks
