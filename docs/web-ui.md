@@ -15,6 +15,7 @@ The UI is not a marketing site. It is an operational dashboard for repeated revi
 - Browser observation health.
 - Last successful Oddset and Tips snapshots.
 - Candidate count by product, market, confidence, and status.
+- Open simulated placements, unresolved settlements, and settled paper results.
 - Active local limits and whether real-money placement is disabled.
 - Recent warnings, login expiry, maintenance windows, and blocked states.
 
@@ -30,6 +31,7 @@ For each candidate bet or coupon, show:
 - Rejected alternatives and rejection reasons.
 - Risk checks: duplicate exposure, stake limits, loss-cooldown, odds staleness, responsible-gambling flags, and terms/safety gate.
 - Recommendation state: observed, candidate, rejected, needs review, approved for simulation, or promoted baseline.
+- Simulated placement state: not placed, simulated placed, awaiting result, settled won, settled lost, void, or unresolved.
 
 The reasoning panel should show structured rationale and evidence. It should not show hidden chain-of-thought, raw model scratchpads, credentials, cookies, browser profile data, or raw account payloads.
 
@@ -40,6 +42,7 @@ The coupon builder should be read-only or simulation-only by default:
 - Show proposed legs and combined odds.
 - Show each leg's rationale and uncertainty.
 - Show exposure if the coupon were approved.
+- Show whether the coupon would be written to the simulation ledger.
 - Show why any leg was removed or replaced.
 - Keep submission actions disabled while `DANSKESPIL_ALLOW_REAL_MONEY_PLACEMENT=false`.
 
@@ -61,6 +64,8 @@ The audit view should show immutable events:
 
 - Browser observations.
 - Candidate creation.
+- Simulated placement creation.
+- Settlement lookup and grading.
 - Reasoning-trace writes.
 - Safety gate failures.
 - Human review events.
@@ -77,8 +82,13 @@ Candidate tables:
 - `tips_coupons`
 - `candidate_bets`
 - `candidate_coupons`
+- `simulated_bets`
+- `simulated_coupons`
+- `simulated_coupon_legs`
 - `selection_reasoning_traces`
 - `web_review_events`
+- `settlement_observations`
+- `settlement_sources`
 - `hermes_reflections`
 - `strategy_experiments`
 - `strategy_baselines`
@@ -89,6 +99,8 @@ Candidate tables:
 - Never show raw hidden model chain-of-thought.
 - Redact or omit personal account details.
 - Mark stale odds clearly.
+- Label all paper-ledger results as simulated.
+- Keep unresolved or ambiguous outcomes out of performance promotion metrics until reviewed.
 - Show disabled state and reason for any betting-critical action.
 - Default every mutation to review-only until the compliance decision changes.
 

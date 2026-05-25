@@ -23,3 +23,9 @@ Append-only timeline for project wiki maintenance. Use headings with the format 
 - Defined operator views for odds reasoning, coupon review, Hermes reflections, experiment lifecycle, and audit events.
 - Clarified that visible "thinking" means structured rationale and evidence, not hidden model scratchpads.
 - Kept the documentation self-contained for this repository.
+
+## [2026-05-25] planning | Simulation ledger requirement
+
+- Added a dedicated simulation ledger requirement for `gambler`.
+- Clarified that the system should scan and monitor markets, create immutable paper placements, and reconcile final outcomes.
+- Added settlement lookup expectations, grading states, and simulated performance metrics.

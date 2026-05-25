@@ -5,6 +5,7 @@ This document describes the Hermes and `gambler` learning loop for Danske Spil. 
 ## Roles
 
 - `gambler`: reads site state, builds candidate coupons, scores strategies, and writes observations.
+- `gambler`: records simulated bet placements, monitors final outcomes, and maintains the paper ledger.
 - `gambler-mcp`: exposes a narrow, sanitized tool surface to Hermes.
 - `hermes-agent`: reflects on outcomes and proposes one-variable experiments.
 - Operator: decides whether to approve experiments and, if ever enabled, any real-money action.
@@ -17,6 +18,7 @@ The odds-selection view should show:
 
 - Current market and coupon observations.
 - Candidate bets and candidate Tips coupons.
+- Open simulated placements and settled paper results.
 - Selected odds, estimated probability, implied probability, estimated edge, confidence, and stake suggestion when staking is enabled.
 - Rejected alternatives and the reason they were rejected.
 - Responsible-gambling checks, local stake limits, and terms/safety gates.
@@ -91,6 +93,7 @@ Initial tools should be read-mostly:
 - `get_recent_odds_snapshots`
 - `get_recent_tips_coupons`
 - `get_candidate_bets`
+- `get_simulated_ledger`
 - `get_settlement_observations`
 - `list_reflections`
 - `create_reflection`
@@ -117,7 +120,8 @@ sequenceDiagram
   participant O as Operator
 
   B->>G: Read Oddset/Tips state
-  G->>DB: Store snapshots and candidates
+  G->>DB: Store snapshots, candidates, and simulated placements
+  G->>DB: Reconcile final outcomes into paper ledger
   UI->>DB: Show candidates, reasoning traces, and Hermes state
   H->>M: Request sanitized context
   M->>DB: Read observations

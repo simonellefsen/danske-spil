@@ -14,6 +14,7 @@ Initial rules:
 
 - One independent variable per experiment.
 - Simulation/replay evidence before promotion.
+- Settled paper-ledger evidence before promotion.
 - Human approval before baseline changes.
 - No experiment may enable real-money placement by itself.
 

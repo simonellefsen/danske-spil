@@ -8,7 +8,7 @@ Target namespace: `danske-spil`.
 
 - `gambler-api`: future internal API and browser-observation service.
 - `gambler-web`: future operator web UI for candidate odds, reasoning traces, safety gates, and Hermes review.
-- `gambler-worker`: future scheduled observation and strategy scoring worker.
+- `gambler-worker`: future scheduled scanner, monitor, simulation-placement, and settlement worker.
 - `gambler-mcp`: future Hermes-safe MCP adapter.
 - `hermes-agent`: Hermes gateway and reflection engine.
 - `hermes-weekly-reflection`: suspended CronJob until configured.
@@ -57,6 +57,7 @@ Start closed and open narrowly:
 - `hermes-agent` can call `gambler-mcp`.
 - `gambler-mcp` can call Postgres and `gambler-api`.
 - `gambler-api` and `gambler-worker` can call Postgres and `danskespil.dk`.
+- `gambler-worker` may call documented external result sources only for settlement lookup and only when source metadata is recorded.
 - `gambler-web` can call `gambler-api` and Postgres; it should not call `danskespil.dk` directly.
 - No public ingress in the first deployment.
 

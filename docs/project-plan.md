@@ -42,6 +42,7 @@ Deliverables:
 - Kubernetes architecture plan for namespace `danske-spil`.
 - Hermes/gambler goal contract and experiment rules.
 - Web UI requirements for reasoning, candidate review, and Hermes lifecycle visibility.
+- Simulation ledger requirements for paper bet placement, exposure, and outcome reconciliation.
 
 Exit criteria:
 
@@ -69,6 +70,8 @@ Outputs:
 Scope:
 
 - Persist odds snapshots, Tips coupons, event metadata, candidate selections, browser-session metadata, and audit events.
+- Persist simulated bet placements and coupon placements as immutable paper-ledger records.
+- Persist settlement lookups and final win/loss grading for each simulated bet.
 - Add deduplication and timestamps so strategy learning can replay observations.
 - Store no credentials, cookies, MitID data, or raw personally identifying account payloads in Postgres.
 - Store structured decision traces that explain candidate selection without storing private model scratchpads or secrets.
@@ -79,7 +82,11 @@ Candidate tables:
 - `tips_coupons`
 - `candidate_bets`
 - `candidate_coupons`
+- `simulated_bets`
+- `simulated_coupons`
+- `simulated_coupon_legs`
 - `settlement_observations`
+- `settlement_sources`
 - `dom_observations`
 - `browser_session_audit`
 - `selection_reasoning_traces`
@@ -93,6 +100,9 @@ Candidate tables:
 Scope:
 
 - Implement `gambler` as a service that can collect read-only market state, build candidate coupons, score them, and expose sanitized context.
+- Implement scanner loops for Oddset and Tips that monitor configured products, events, markets, coupons, odds changes, and disabled/suspended states.
+- Implement a simulation ledger that records when the system would have taken a bet, at what observed odds, with what hypothetical stake, and under which strategy baseline.
+- Implement a settlement worker that later looks up final outcomes, grades simulated bets and coupon legs, and records simulated P/L.
 - Expose a web UI for operator visibility into candidates, odds, reasoning, safety gates, and Hermes state.
 - Expose a narrow `gambler-mcp` adapter for Hermes.
 - Keep browser cookies and credentials isolated from Hermes.
@@ -130,7 +140,10 @@ Scope:
 
 Scope:
 
-- Build a simulation loop from odds snapshots, candidate bets, and settlement observations.
+- Build a simulation loop from odds snapshots, candidate bets, simulated placements, and settlement observations.
+- Treat simulated placements as immutable: later odds changes should create observations, not rewrite the simulated entry price.
+- Reconcile event outcomes from the most authoritative available source, preferably Danske Spil settlement/result pages when available, and fall back only to documented external result sources.
+- Compute simulated stake, return, profit/loss, hit rate, calibration, drawdown, and coupon-level performance.
 - Let Hermes optimize prompts, thresholds, staking heuristics, or market filters one variable at a time.
 - Require backtest/replay evidence and paper observation before any human can promote a baseline.
 

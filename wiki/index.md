@@ -17,6 +17,7 @@ Future Codex and Hermes sessions should read this file first for project-history
 - [concepts/llm-maintained-project-wiki](concepts/llm-maintained-project-wiki.md) - How this repo uses the LLM wiki pattern.
 - [concepts/hermes-gambler-loop](concepts/hermes-gambler-loop.md) - Safe learning loop for `gambler` and Hermes.
 - [concepts/gambler-web-ui](concepts/gambler-web-ui.md) - Operator dashboard for reasoning, candidate review, and Hermes state.
+- [concepts/simulation-ledger](concepts/simulation-ledger.md) - Paper placements, outcome lookup, settlement, and simulated performance.
 - [concepts/browser-automation-investigation](concepts/browser-automation-investigation.md) - How browser investigation should be run.
 
 ## Source Notes

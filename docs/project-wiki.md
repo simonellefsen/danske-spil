@@ -21,6 +21,7 @@ wiki/
 - Browser investigation findings.
 - Stable DOM/navigation models.
 - Web UI decisions and operator-review flows.
+- Simulation ledger, settlement, and performance methodology.
 - Strategy hypotheses and rejected ideas.
 - Hermes reflections and one-variable experiment summaries.
 - Kubernetes and operations runbooks.
