@@ -81,6 +81,15 @@ Core tables:
 
 Feature snapshots should be immutable and tied to the decision timestamp. If data changes later, create a new snapshot rather than rewriting the old one.
 
+Current POC status:
+
+- `source_registry` records the read-only Danske Spil content-service as a market snapshot source.
+- `ingestion_runs` records scanner runs, the snapshot id, covered sports, event count, and completion status.
+- `feature_snapshots` stores one `market_context_v1` row per observed event per snapshot.
+- The first feature set is intentionally limited to market-feed context: competition, start time, participant count, market count, outcome count, market kinds, external providers, live/result flags, and missing-signal markers.
+- Weather, news, rankings, form, and injury/availability are explicitly marked missing until separate sources are configured and reviewed.
+- Coverage is exposed through `GET /api/intelligence/coverage` and shown in the web UI.
+
 ## Decision-Time Features
 
 Candidate scoring should use only data known at or before the simulated placement timestamp.

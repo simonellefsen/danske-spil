@@ -16,6 +16,7 @@ pub fn render_index(base_path: &str) -> String {
                     div { class: "metric", div { class: "label", "Database" } div { class: "value", id: "database", "-" } }
                     div { class: "metric", div { class: "label", "Latest snapshot" } div { class: "value", id: "snapshot", "-" } }
                     div { class: "metric", div { class: "label", "Catalog events" } div { class: "value", id: "catalog-events", "-" } }
+                    div { class: "metric", div { class: "label", "Feature snapshots" } div { class: "value", id: "feature-snapshots", "-" } }
                     div { class: "metric", div { class: "label", "Open exposure" } div { class: "value", id: "exposure", "-" } }
                     div { class: "metric", div { class: "label", "Paper P/L" } div { class: "value", id: "profit", "-" } }
                     div { class: "metric", div { class: "label", "Real-money placement" } div { class: "value danger", id: "placement", "disabled" } }
@@ -50,6 +51,15 @@ pub fn render_index(base_path: &str) -> String {
                                 th { "Sport" } th { "Events" } th { "Competitions" } th { "Markets" } th { "Outcomes" } th { "Candidates" }
                             } }
                             tbody { id: "coverage" }
+                        }
+                    }
+                    section {
+                        h2 { "Sports intelligence" }
+                        table {
+                            thead { tr {
+                                th { "Sport" } th { "Events" } th { "Features" } th { "Confidence" } th { "Missing" }
+                            } }
+                            tbody { id: "intelligence" }
                         }
                     }
                     section {
@@ -235,6 +245,31 @@ function renderCoverage(coverage) {
     $("coverage").innerHTML = `<tr><td colspan="6" class="muted">No market catalog rows yet. Run a scan.</td></tr>`;
   }
 }
+function renderIntelligence(coverage) {
+  const features = coverage.features || [];
+  const totalFeatures = features.reduce((sum, item) => sum + Number(item.feature_count || 0), 0);
+  $("feature-snapshots").textContent = String(totalFeatures);
+  $("intelligence").innerHTML = features.map((item) => {
+    const missing = [
+      item.missing_weather_count ? `weather ${item.missing_weather_count}` : null,
+      item.missing_news_count ? `news ${item.missing_news_count}` : null,
+      item.missing_rankings_count ? `rankings ${item.missing_rankings_count}` : null,
+      item.missing_form_count ? `form ${item.missing_form_count}` : null
+    ].filter(Boolean).join(", ");
+    return `
+      <tr>
+        <td><span class="pill">${esc(item.sport_key)}</span></td>
+        <td>${esc(item.event_count)}</td>
+        <td>${esc(item.feature_count)}</td>
+        <td>${pct(item.average_confidence)}</td>
+        <td>${esc(missing || "-")}</td>
+      </tr>
+    `;
+  }).join("");
+  if (!features.length) {
+    $("intelligence").innerHTML = `<tr><td colspan="5" class="muted">No feature snapshots yet. Run a scan.</td></tr>`;
+  }
+}
 async function load() {
   const status = await json(api("/api/status"));
   $("mode").textContent = status.mode;
@@ -252,6 +287,8 @@ async function load() {
   renderLedger(ledger.items || []);
   const coverage = await json(api("/api/catalog/coverage"));
   renderCoverage(coverage);
+  const intelligence = await json(api("/api/intelligence/coverage"));
+  renderIntelligence(intelligence);
   const hermes = await json(api("/api/hermes"));
   $("hermes").textContent = JSON.stringify(hermes, null, 2);
 }

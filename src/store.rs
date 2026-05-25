@@ -102,6 +102,47 @@ CREATE TABLE IF NOT EXISTS outcome_observations (
   UNIQUE (snapshot_id, market_observation_id, outcome_id)
 );
 
+CREATE TABLE IF NOT EXISTS source_registry (
+  source_key text PRIMARY KEY,
+  source_name text NOT NULL,
+  source_type text NOT NULL,
+  url_pattern text,
+  sport_scope text[] NOT NULL DEFAULT '{}',
+  reliability numeric NOT NULL DEFAULT 0.5,
+  can_settle boolean NOT NULL DEFAULT false,
+  manual_review_required boolean NOT NULL DEFAULT true,
+  notes text,
+  first_seen_at timestamptz NOT NULL DEFAULT now(),
+  last_seen_at timestamptz NOT NULL DEFAULT now(),
+  payload jsonb NOT NULL DEFAULT '{}'::jsonb
+);
+
+CREATE TABLE IF NOT EXISTS ingestion_runs (
+  id text PRIMARY KEY,
+  source_key text REFERENCES source_registry(source_key),
+  snapshot_id text REFERENCES odds_snapshots(id) ON DELETE SET NULL,
+  started_at timestamptz NOT NULL DEFAULT now(),
+  completed_at timestamptz NOT NULL DEFAULT now(),
+  status text NOT NULL,
+  sport_keys text[] NOT NULL DEFAULT '{}',
+  event_count integer NOT NULL DEFAULT 0,
+  payload jsonb NOT NULL DEFAULT '{}'::jsonb
+);
+
+CREATE TABLE IF NOT EXISTS feature_snapshots (
+  id text PRIMARY KEY,
+  snapshot_id text NOT NULL REFERENCES odds_snapshots(id) ON DELETE CASCADE,
+  event_id text NOT NULL REFERENCES sport_events(id) ON DELETE CASCADE,
+  sport_key text NOT NULL REFERENCES sports(sport_key) ON DELETE CASCADE,
+  feature_set text NOT NULL,
+  source_key text REFERENCES source_registry(source_key),
+  created_at timestamptz NOT NULL DEFAULT now(),
+  confidence numeric NOT NULL,
+  missing_signals jsonb NOT NULL DEFAULT '[]'::jsonb,
+  features jsonb NOT NULL,
+  UNIQUE (snapshot_id, event_id, feature_set)
+);
+
 CREATE TABLE IF NOT EXISTS candidate_bets (
   id text PRIMARY KEY,
   snapshot_id text REFERENCES odds_snapshots(id) ON DELETE CASCADE,
@@ -187,6 +228,8 @@ CREATE INDEX IF NOT EXISTS idx_sport_events_start_time ON sport_events(start_tim
 CREATE INDEX IF NOT EXISTS idx_market_observations_snapshot ON market_observations(snapshot_id);
 CREATE INDEX IF NOT EXISTS idx_market_observations_kind ON market_observations(market_kind);
 CREATE INDEX IF NOT EXISTS idx_outcome_observations_snapshot ON outcome_observations(snapshot_id);
+CREATE INDEX IF NOT EXISTS idx_feature_snapshots_snapshot ON feature_snapshots(snapshot_id);
+CREATE INDEX IF NOT EXISTS idx_feature_snapshots_sport_key ON feature_snapshots(sport_key);
 "#;
 
 #[derive(Clone)]
@@ -305,7 +348,31 @@ impl Store {
                 ],
             )
             .await?;
+        save_source_registry(&transaction, &sport_keys).await?;
         save_market_catalog(&transaction, &snapshot_id, payload).await?;
+        transaction
+            .execute(
+                r#"
+                INSERT INTO ingestion_runs (
+                  id, source_key, snapshot_id, status, sport_keys, event_count, payload
+                )
+                VALUES ($1,$2,$3,$4,$5,$6,$7)
+                "#,
+                &[
+                    &new_id(),
+                    &"danskespil_content_service",
+                    &snapshot_id,
+                    &"completed",
+                    &sport_keys,
+                    &event_count,
+                    &json!({
+                        "mode": payload.get("mode").cloned().unwrap_or(Value::Null),
+                        "source": payload.get("source").cloned().unwrap_or(Value::Null),
+                        "paper_only": true
+                    }),
+                ],
+            )
+            .await?;
         for candidate in candidates {
             transaction
                 .execute(
@@ -586,6 +653,93 @@ impl Store {
         }))
     }
 
+    pub async fn intelligence_coverage(&self) -> anyhow::Result<Value> {
+        let client = self.connect().await?;
+        let sources = client
+            .query(
+                r#"
+                SELECT source_key, source_name, source_type, reliability::float8 AS reliability,
+                       can_settle, manual_review_required, last_seen_at
+                FROM source_registry
+                ORDER BY source_key
+                "#,
+                &[],
+            )
+            .await?;
+        let features = client
+            .query(
+                r#"
+                SELECT
+                  sport_key,
+                  count(*)::int AS feature_count,
+                  count(DISTINCT event_id)::int AS event_count,
+                  avg(confidence)::float8 AS average_confidence,
+                  count(*) FILTER (WHERE missing_signals ? 'weather')::int AS missing_weather_count,
+                  count(*) FILTER (WHERE missing_signals ? 'news')::int AS missing_news_count,
+                  count(*) FILTER (WHERE missing_signals ? 'rankings')::int AS missing_rankings_count,
+                  count(*) FILTER (WHERE missing_signals ? 'form')::int AS missing_form_count,
+                  max(created_at) AS last_created_at
+                FROM feature_snapshots
+                GROUP BY sport_key
+                ORDER BY sport_key
+                "#,
+                &[],
+            )
+            .await?;
+        let runs = client
+            .query(
+                r#"
+                SELECT id, source_key, snapshot_id, completed_at, status, sport_keys, event_count, payload
+                FROM ingestion_runs
+                ORDER BY completed_at DESC
+                LIMIT 10
+                "#,
+                &[],
+            )
+            .await?;
+        Ok(json!({
+            "sources": sources.iter().map(|row| {
+                let last_seen_at: DateTime<Utc> = row.get("last_seen_at");
+                json!({
+                    "source_key": row.get::<_, String>("source_key"),
+                    "source_name": row.get::<_, String>("source_name"),
+                    "source_type": row.get::<_, String>("source_type"),
+                    "reliability": row.get::<_, f64>("reliability"),
+                    "can_settle": row.get::<_, bool>("can_settle"),
+                    "manual_review_required": row.get::<_, bool>("manual_review_required"),
+                    "last_seen_at": last_seen_at
+                })
+            }).collect::<Vec<_>>(),
+            "features": features.iter().map(|row| {
+                let last_created_at: DateTime<Utc> = row.get("last_created_at");
+                json!({
+                    "sport_key": row.get::<_, String>("sport_key"),
+                    "feature_count": row.get::<_, i32>("feature_count"),
+                    "event_count": row.get::<_, i32>("event_count"),
+                    "average_confidence": row.get::<_, Option<f64>>("average_confidence"),
+                    "missing_weather_count": row.get::<_, i32>("missing_weather_count"),
+                    "missing_news_count": row.get::<_, i32>("missing_news_count"),
+                    "missing_rankings_count": row.get::<_, i32>("missing_rankings_count"),
+                    "missing_form_count": row.get::<_, i32>("missing_form_count"),
+                    "last_created_at": last_created_at
+                })
+            }).collect::<Vec<_>>(),
+            "recent_runs": runs.iter().map(|row| {
+                let completed_at: DateTime<Utc> = row.get("completed_at");
+                json!({
+                    "id": row.get::<_, String>("id"),
+                    "source_key": row.get::<_, Option<String>>("source_key"),
+                    "snapshot_id": row.get::<_, Option<String>>("snapshot_id"),
+                    "completed_at": completed_at,
+                    "status": row.get::<_, String>("status"),
+                    "sport_keys": row.get::<_, Vec<String>>("sport_keys"),
+                    "event_count": row.get::<_, i32>("event_count"),
+                    "payload": row.get::<_, Value>("payload")
+                })
+            }).collect::<Vec<_>>()
+        }))
+    }
+
     pub async fn settle_simulated_bet(
         &self,
         bet_id: &str,
@@ -717,6 +871,40 @@ impl Store {
         });
         Ok(client)
     }
+}
+
+async fn save_source_registry(
+    transaction: &Transaction<'_>,
+    sport_keys: &[String],
+) -> anyhow::Result<()> {
+    transaction
+        .execute(
+            r#"
+            INSERT INTO source_registry (
+              source_key, source_name, source_type, url_pattern, sport_scope,
+              reliability, can_settle, manual_review_required, notes, payload
+            )
+            VALUES ($1,$2,$3,$4,$5,($6::float8)::numeric,$7,$8,$9,$10)
+            ON CONFLICT (source_key) DO UPDATE
+            SET sport_scope = EXCLUDED.sport_scope,
+                last_seen_at = now(),
+                payload = EXCLUDED.payload
+            "#,
+            &[
+                &"danskespil_content_service",
+                &"Danske Spil content-service",
+                &"market_snapshot",
+                &"https://content.sb.danskespil.dk/content-service/api/v1/q/*",
+                &sport_keys,
+                &0.78_f64,
+                &false,
+                &true,
+                &"Read-only anonymous market metadata source. Useful for odds, markets, and event state; not sufficient alone for final settlement.",
+                &json!({"runtime": "rust-dioxus", "paper_only": true}),
+            ],
+        )
+        .await?;
+    Ok(())
 }
 
 async fn save_market_catalog(
@@ -960,9 +1148,164 @@ async fn save_market_catalog(
                         .await?;
                 }
             }
+            let features = event_feature_snapshot(sport_key, event);
+            transaction
+                .execute(
+                    r#"
+                    INSERT INTO feature_snapshots (
+                      id, snapshot_id, event_id, sport_key, feature_set, source_key,
+                      confidence, missing_signals, features
+                    )
+                    VALUES ($1,$2,$3,$4,$5,$6,($7::float8)::numeric,$8,$9)
+                    ON CONFLICT (snapshot_id, event_id, feature_set) DO UPDATE
+                    SET confidence = EXCLUDED.confidence,
+                        missing_signals = EXCLUDED.missing_signals,
+                        features = EXCLUDED.features
+                    "#,
+                    &[
+                        &new_id(),
+                        &snapshot_id,
+                        &event_id,
+                        &sport_key,
+                        &"market_context_v1",
+                        &"danskespil_content_service",
+                        &features
+                            .get("confidence")
+                            .and_then(Value::as_f64)
+                            .unwrap_or(0.0),
+                        &features
+                            .get("missing_signals")
+                            .cloned()
+                            .unwrap_or_else(|| json!([])),
+                        &features,
+                    ],
+                )
+                .await?;
         }
     }
     Ok(())
+}
+
+fn event_feature_snapshot(sport_key: &str, event: &Value) -> Value {
+    let teams = event
+        .get("teams")
+        .and_then(Value::as_array)
+        .cloned()
+        .unwrap_or_default();
+    let markets = event
+        .get("markets")
+        .and_then(Value::as_array)
+        .cloned()
+        .unwrap_or_default();
+    let scoreboard_facts = event
+        .get("scoreboard_facts")
+        .and_then(Value::as_array)
+        .cloned()
+        .unwrap_or_default();
+    let external_ids = event
+        .get("external_ids")
+        .and_then(Value::as_array)
+        .cloned()
+        .unwrap_or_default();
+    let market_kinds = unique_strings(markets.iter().filter_map(|market| text(market, "kind")));
+    let external_providers = unique_strings(
+        external_ids
+            .iter()
+            .filter_map(|external_id| text(external_id, "provider")),
+    );
+
+    let mut missing = Vec::new();
+    if text(event, "competition").is_none() {
+        missing.push("competition");
+    }
+    if event.get("start_time").unwrap_or(&Value::Null).is_null() {
+        missing.push("start_time");
+    }
+    if teams.is_empty() && !matches!(sport_key, "formula1" | "golf" | "cycling") {
+        missing.push("participants");
+    }
+    if external_ids.is_empty() {
+        missing.push("external_ids");
+    }
+    if markets.is_empty() {
+        missing.push("markets");
+    }
+    if scoreboard_facts.is_empty() && bool_value(event, "live_now") {
+        missing.push("live_scoreboard");
+    }
+    // Placeholders for the next ingestion layers. Keeping them explicit makes
+    // candidate reasoning honest until those sources are wired in.
+    missing.extend(["form", "weather", "news", "rankings", "injury_availability"]);
+    missing.sort();
+    missing.dedup();
+
+    let outcome_count: usize = markets
+        .iter()
+        .map(|market| {
+            market
+                .get("outcomes")
+                .and_then(Value::as_array)
+                .map(Vec::len)
+                .unwrap_or_default()
+        })
+        .sum();
+    let confidence = (0.25_f64
+        + if text(event, "competition").is_some() {
+            0.12
+        } else {
+            0.0
+        }
+        + if !event.get("start_time").unwrap_or(&Value::Null).is_null() {
+            0.12
+        } else {
+            0.0
+        }
+        + if !markets.is_empty() { 0.16 } else { 0.0 }
+        + if outcome_count > 0 { 0.12 } else { 0.0 }
+        + if !external_ids.is_empty() { 0.08 } else { 0.0 }
+        + if !teams.is_empty() { 0.08 } else { 0.0 }
+        + if !scoreboard_facts.is_empty() {
+            0.04
+        } else {
+            0.0
+        })
+    .clamp(0.1, 0.82);
+
+    json!({
+        "feature_set": "market_context_v1",
+        "source_key": "danskespil_content_service",
+        "sport_key": sport_key,
+        "event_id": event.get("id").cloned().unwrap_or(Value::Null),
+        "event_name": event.get("name").cloned().unwrap_or(Value::Null),
+        "competition": event.get("competition").cloned().unwrap_or(Value::Null),
+        "class_name": event.get("class_name").cloned().unwrap_or(Value::Null),
+        "start_time": event.get("start_time").cloned().unwrap_or(Value::Null),
+        "live_now": bool_value(event, "live_now"),
+        "started": bool_value(event, "started"),
+        "resulted": bool_value(event, "resulted"),
+        "settled": bool_value(event, "settled"),
+        "participant_count": teams.len(),
+        "market_count": markets.len(),
+        "outcome_count": outcome_count,
+        "market_kinds": market_kinds,
+        "scoreboard_fact_count": scoreboard_facts.len(),
+        "external_provider_count": external_providers.len(),
+        "external_providers": external_providers,
+        "missing_signals": missing,
+        "confidence": confidence,
+        "limits": {
+            "paper_only": true,
+            "not_settlement_grade": true,
+            "uses_only_market_feed": true
+        }
+    })
+}
+
+fn unique_strings<'a>(values: impl Iterator<Item = &'a str>) -> Vec<String> {
+    let mut values: Vec<String> = values.map(str::to_string).collect();
+    values.sort();
+    values.dedup();
+    values
 }
 
 fn sport_events(sport: &Value) -> impl Iterator<Item = &Value> {

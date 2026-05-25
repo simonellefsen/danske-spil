@@ -104,6 +104,22 @@ GET /api/catalog/coverage
 
 This endpoint is meant for feed-quality inspection before strategy work. It shows whether the scanner is actually identifying sports, competitions, market kinds, outcomes, and candidates across the configured sport scope.
 
+## Sports Intelligence Feature Snapshots
+
+The scanner also creates a first decision-time feature snapshot per observed event:
+
+- Source registry row for the read-only Danske Spil content-service.
+- Ingestion run metadata tied to the snapshot id.
+- `market_context_v1` feature rows with event metadata, participant count, market count, outcome count, market kinds, external provider coverage, live/result flags, and missing-signal markers.
+
+The feature snapshots are not a predictive model. They make the POC honest about what information is currently available and what is still missing. Weather, news, rankings, form, and injury/availability are recorded as missing until real sources are added.
+
+Coverage is available at:
+
+```text
+GET /api/intelligence/coverage
+```
+
 ## Safety Boundary
 
 Do not click odds or `Tilføj kupon` during POC runs. The POC should only read navigation, DOM, and content-service data.
