@@ -37,7 +37,24 @@ async fn main() -> anyhow::Result<()> {
 
     let settings = Settings::load();
     let store = Store::new(settings.database_url.clone());
-    store.init_schema().await?;
+    if let Err(error) = store.init_schema().await {
+        tracing::warn!(%error, "initial schema setup failed; service will keep retrying");
+    }
+    let schema_store = store.clone();
+    tokio::spawn(async move {
+        loop {
+            match schema_store.init_schema().await {
+                Ok(()) => {
+                    tracing::info!("schema setup available");
+                    return;
+                }
+                Err(error) => {
+                    tracing::warn!(%error, "schema setup retry failed");
+                    tokio::time::sleep(Duration::from_secs(10)).await;
+                }
+            }
+        }
+    });
     let service = GamblerService::new(settings.clone(), store);
 
     match std::env::args().nth(1).as_deref() {
