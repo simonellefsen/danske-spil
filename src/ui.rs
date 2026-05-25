@@ -70,6 +70,15 @@ pub fn render_index(base_path: &str) -> String {
                         }
                     }
                     section {
+                        h2 { "Strategies played" }
+                        table {
+                            thead { tr {
+                                th { "Strategy" } th { "Played" } th { "Open" } th { "Awaiting" } th { "P/L" }
+                            } }
+                            tbody { id: "played" }
+                        }
+                    }
+                    section {
                         h2 { "Market coverage" }
                         table {
                             thead { tr {
@@ -315,6 +324,21 @@ function renderLedger(items) {
     });
   });
 }
+function renderPlayed(summary) {
+  const items = summary.by_strategy || [];
+  $("played").innerHTML = items.map((item) => `
+    <tr>
+      <td>${esc(item.strategy_id)}<br><span class="label">duplicates ${esc(item.duplicate_void_count || 0)}</span></td>
+      <td>${esc(item.played_count)}</td>
+      <td>${esc(item.open_count)}<br><span class="muted">${money(item.open_exposure)}</span></td>
+      <td>${esc(item.awaiting_result_count)}</td>
+      <td>${money(item.profit_loss)}</td>
+    </tr>
+  `).join("");
+  if (!items.length) {
+    $("played").innerHTML = `<tr><td colspan="5" class="muted">No paper strategy placements yet.</td></tr>`;
+  }
+}
 function renderCoverage(coverage) {
   const sports = coverage.sports || [];
   const totalEvents = sports.reduce((sum, item) => sum + Number(item.event_count || 0), 0);
@@ -432,6 +456,8 @@ async function load() {
   renderCoupons(coupons.items || []);
   const ledger = await json(api("/api/ledger"));
   renderLedger(ledger.items || []);
+  const played = await json(api("/api/strategy/played"));
+  renderPlayed(played);
   const coverage = await json(api("/api/catalog/coverage"));
   renderCoverage(coverage);
   const intelligence = await json(api("/api/intelligence/coverage"));

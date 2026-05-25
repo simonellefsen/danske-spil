@@ -227,6 +227,35 @@ ALTER TABLE simulated_bets ADD COLUMN IF NOT EXISTS simulated_return numeric;
 ALTER TABLE simulated_bets ADD COLUMN IF NOT EXISTS profit_loss numeric;
 ALTER TABLE simulated_bets ADD COLUMN IF NOT EXISTS settlement_payload jsonb NOT NULL DEFAULT '{}'::jsonb;
 
+WITH ranked AS (
+  SELECT
+    id,
+    row_number() OVER (PARTITION BY candidate_id ORDER BY created_at ASC, id ASC) AS duplicate_rank
+  FROM simulated_bets
+  WHERE candidate_id IS NOT NULL
+    AND status <> 'duplicate_void'
+)
+UPDATE simulated_bets sb
+SET status = 'duplicate_void',
+    settled_at = COALESCE(sb.settled_at, now()),
+    simulated_return = COALESCE(sb.simulated_return, sb.hypothetical_stake),
+    profit_loss = COALESCE(sb.profit_loss, 0),
+    settlement_payload = sb.settlement_payload || jsonb_build_object(
+      'duplicate_candidate_void',
+      jsonb_build_object(
+        'reason', 'duplicate paper placement for candidate_id',
+        'deduped_at', now(),
+        'paper_only', true
+      )
+    )
+FROM ranked
+WHERE sb.id = ranked.id
+  AND ranked.duplicate_rank > 1;
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_simulated_bets_one_normal_per_candidate
+ON simulated_bets(candidate_id)
+WHERE candidate_id IS NOT NULL AND status <> 'duplicate_void';
+
 CREATE TABLE IF NOT EXISTS settlement_observations (
   id text PRIMARY KEY,
   simulated_bet_id text REFERENCES simulated_bets(id) ON DELETE CASCADE,
@@ -1167,7 +1196,7 @@ impl Store {
         let payload =
             json!({"candidate": candidate, "paper_only": true, "strategy_id": "poc_ranker_v1"});
         let client = self.connect().await?;
-        client
+        let affected = client
             .execute(
                 r#"
                 INSERT INTO simulated_bets (
@@ -1175,6 +1204,7 @@ impl Store {
                   strategy_id, settlement_payload, payload
                 )
                 VALUES ($1,$2,($3::float8)::numeric,($4::float8)::numeric,$5,$6,$7,$8)
+                ON CONFLICT (candidate_id) WHERE status <> 'duplicate_void' DO NOTHING
                 "#,
                 &[
                     &id,
@@ -1188,6 +1218,14 @@ impl Store {
                 ],
             )
             .await?;
+        if affected == 0 {
+            return self
+                .simulated_bet_by_candidate(candidate_id)
+                .await?
+                .ok_or_else(|| {
+                    anyhow!("simulated bet insert skipped but existing row was not found")
+                });
+        }
         self.simulated_bets(1)
             .await?
             .into_iter()
@@ -1297,26 +1335,33 @@ impl Store {
             client
                 .execute(
                     r#"
-                    INSERT INTO simulated_bets (
-                      id, candidate_id, hypothetical_stake, observed_decimal_odds, status,
-                      strategy_id, settlement_payload, payload
-                    )
-                    SELECT $1,$2,($3::float8)::numeric,($4::float8)::numeric,$5,$6,$7,$8
-                    WHERE NOT EXISTS (
-                      SELECT 1 FROM simulated_bets WHERE candidate_id = $2
-                    )
-                    "#,
-                    &[
+                INSERT INTO simulated_bets (
+                  id, candidate_id, hypothetical_stake, observed_decimal_odds, status,
+                  strategy_id, settlement_payload, payload
+                )
+                SELECT $1,$2,($3::float8)::numeric,($4::float8)::numeric,$5,$6,$7,$8
+                WHERE NOT EXISTS (
+                  SELECT 1 FROM simulated_bets WHERE candidate_id = $2 AND status <> 'duplicate_void'
+                )
+                AND (
+                  SELECT COALESCE(sum(hypothetical_stake), 0)
+                  FROM simulated_bets
+                  WHERE status IN ('open', 'awaiting_result', 'unresolved')
+                ) + ($3::float8)::numeric <= ($9::float8)::numeric
+                ON CONFLICT (candidate_id) WHERE status <> 'duplicate_void' DO NOTHING
+                "#,
+                &[
                         &id,
                         &candidate.id,
                         &stake,
                         &candidate.decimal_odds,
                         &"open",
-                        &strategy_id,
-                        &json!({}),
-                        &payload,
-                    ],
-                )
+                    &strategy_id,
+                    &json!({}),
+                    &payload,
+                    &max_open_exposure,
+                ],
+            )
                 .await?;
             if let Some(item) = self.simulated_bet_by_candidate(&candidate.id).await? {
                 placed.push(json!({
@@ -1541,6 +1586,9 @@ impl Store {
         let mut odds_count = 0usize;
         for bet in &bets {
             *summary.by_status.entry(bet.status.clone()).or_default() += 1;
+            if bet.status == "duplicate_void" {
+                continue;
+            }
             summary.turnover += bet.hypothetical_stake;
             summary.simulated_return += bet.simulated_return.unwrap_or_default();
             summary.profit_loss += bet.profit_loss.unwrap_or_default();
@@ -1574,6 +1622,108 @@ impl Store {
             summary.average_odds = Some(odds_total / odds_count as f64);
         }
         Ok(summary)
+    }
+
+    pub async fn strategy_played_summary(&self) -> anyhow::Result<Value> {
+        let client = self.connect().await?;
+        let by_strategy = client
+            .query(
+                r#"
+                SELECT
+                  sb.strategy_id,
+                  count(*) FILTER (WHERE sb.status <> 'duplicate_void')::int AS played_count,
+                  count(*) FILTER (WHERE sb.status IN ('open', 'awaiting_result', 'unresolved'))::int AS open_count,
+                  count(*) FILTER (WHERE sb.status = 'awaiting_result')::int AS awaiting_result_count,
+                  count(*) FILTER (WHERE sb.status = 'duplicate_void')::int AS duplicate_void_count,
+                  COALESCE(sum(sb.hypothetical_stake) FILTER (WHERE sb.status IN ('open', 'awaiting_result', 'unresolved')), 0)::float8 AS open_exposure,
+                  COALESCE(sum(sb.profit_loss) FILTER (WHERE sb.status <> 'duplicate_void'), 0)::float8 AS profit_loss
+                FROM simulated_bets sb
+                GROUP BY sb.strategy_id
+                ORDER BY played_count DESC, sb.strategy_id
+                "#,
+                &[],
+            )
+            .await?;
+        let by_sport = client
+            .query(
+                r#"
+                SELECT
+                  cb.sport_key,
+                  sb.status,
+                  count(*)::int AS count,
+                  COALESCE(sum(sb.hypothetical_stake), 0)::float8 AS stake
+                FROM simulated_bets sb
+                LEFT JOIN candidate_bets cb ON cb.id = sb.candidate_id
+                WHERE sb.status <> 'duplicate_void'
+                GROUP BY cb.sport_key, sb.status
+                ORDER BY cb.sport_key, sb.status
+                "#,
+                &[],
+            )
+            .await?;
+        let recent = client
+            .query(
+                r#"
+                SELECT
+                  sb.id,
+                  sb.created_at,
+                  sb.strategy_id,
+                  sb.status,
+                  sb.hypothetical_stake::float8 AS hypothetical_stake,
+                  sb.observed_decimal_odds::float8 AS observed_decimal_odds,
+                  cb.sport_key,
+                  cb.event_name,
+                  cb.competition,
+                  cb.market_kind,
+                  cb.market_name,
+                  cb.outcome_name,
+                  cb.score::float8 AS score,
+                  cb.confidence::float8 AS confidence
+                FROM simulated_bets sb
+                LEFT JOIN candidate_bets cb ON cb.id = sb.candidate_id
+                ORDER BY sb.created_at DESC
+                LIMIT 25
+                "#,
+                &[],
+            )
+            .await?;
+        Ok(json!({
+            "by_strategy": by_strategy.iter().map(|row| json!({
+                "strategy_id": row.get::<_, String>("strategy_id"),
+                "played_count": row.get::<_, i32>("played_count"),
+                "open_count": row.get::<_, i32>("open_count"),
+                "awaiting_result_count": row.get::<_, i32>("awaiting_result_count"),
+                "duplicate_void_count": row.get::<_, i32>("duplicate_void_count"),
+                "open_exposure": row.get::<_, f64>("open_exposure"),
+                "profit_loss": row.get::<_, f64>("profit_loss")
+            })).collect::<Vec<_>>(),
+            "by_sport_status": by_sport.iter().map(|row| json!({
+                "sport_key": row.get::<_, Option<String>>("sport_key"),
+                "status": row.get::<_, String>("status"),
+                "count": row.get::<_, i32>("count"),
+                "stake": row.get::<_, f64>("stake")
+            })).collect::<Vec<_>>(),
+            "recent": recent.iter().map(|row| {
+                let created_at: DateTime<Utc> = row.get("created_at");
+                json!({
+                    "id": row.get::<_, String>("id"),
+                    "created_at": created_at,
+                    "strategy_id": row.get::<_, String>("strategy_id"),
+                    "status": row.get::<_, String>("status"),
+                    "hypothetical_stake": row.get::<_, f64>("hypothetical_stake"),
+                    "observed_decimal_odds": row.get::<_, Option<f64>>("observed_decimal_odds"),
+                    "sport_key": row.get::<_, Option<String>>("sport_key"),
+                    "event_name": row.get::<_, Option<String>>("event_name"),
+                    "competition": row.get::<_, Option<String>>("competition"),
+                    "market_kind": row.get::<_, Option<String>>("market_kind"),
+                    "market_name": row.get::<_, Option<String>>("market_name"),
+                    "outcome_name": row.get::<_, Option<String>>("outcome_name"),
+                    "score": row.get::<_, Option<f64>>("score"),
+                    "confidence": row.get::<_, Option<f64>>("confidence")
+                })
+            }).collect::<Vec<_>>(),
+            "paper_only": true
+        }))
     }
 
     pub async fn market_catalog_coverage(&self) -> anyhow::Result<Value> {

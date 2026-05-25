@@ -164,6 +164,10 @@ async fn get_handler(State(state): State<Arc<AppState>>, uri: OriginalUri) -> Re
             Ok(decisions) => Json(decisions).into_response(),
             Err(error) => error_response(StatusCode::INTERNAL_SERVER_ERROR, error),
         },
+        "/api/strategy/played" => match state.service.store().strategy_played_summary().await {
+            Ok(summary) => Json(summary).into_response(),
+            Err(error) => error_response(StatusCode::INTERNAL_SERVER_ERROR, error),
+        },
         "/api/hermes/reflections" => match state.service.store().hermes_reflections(25).await {
             Ok(reflections) => Json(json!({
                 "mode": "poc_view",
