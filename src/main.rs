@@ -120,6 +120,10 @@ async fn get_handler(State(state): State<Arc<AppState>>, uri: OriginalUri) -> Re
             Ok(items) => Json(json!({"items": items})).into_response(),
             Err(error) => error_response(StatusCode::INTERNAL_SERVER_ERROR, error),
         },
+        "/api/coupons" => match state.service.store().candidate_coupons(25).await {
+            Ok(items) => Json(items).into_response(),
+            Err(error) => error_response(StatusCode::INTERNAL_SERVER_ERROR, error),
+        },
         "/api/ledger" => match state.service.store().simulated_bets(50).await {
             Ok(items) => Json(json!({"items": items})).into_response(),
             Err(error) => error_response(StatusCode::INTERNAL_SERVER_ERROR, error),
@@ -247,6 +251,52 @@ async fn post_handler(
                         .service
                         .store()
                         .record_audit("paper_selected_auto_placed", summary.clone())
+                        .await
+                        .ok();
+                    Json(summary).into_response()
+                }
+                Err(error) => error_response(StatusCode::BAD_REQUEST, error),
+            }
+        }
+        "/api/coupons/generate" => {
+            let snapshot_id = payload
+                .get("snapshot_id")
+                .and_then(Value::as_str)
+                .map(str::to_string);
+            let snapshot_id = match snapshot_id {
+                Some(value) if !value.is_empty() => value,
+                _ => match state.service.store().latest_snapshot().await {
+                    Ok(Some(item)) => item
+                        .get("id")
+                        .and_then(Value::as_str)
+                        .unwrap_or_default()
+                        .to_string(),
+                    Ok(None) => String::new(),
+                    Err(error) => return error_response(StatusCode::INTERNAL_SERVER_ERROR, error),
+                },
+            };
+            if snapshot_id.is_empty() {
+                return error_response(
+                    StatusCode::BAD_REQUEST,
+                    anyhow::anyhow!("no snapshot available"),
+                );
+            }
+            let limit = payload
+                .get("limit")
+                .and_then(Value::as_u64)
+                .map(|value| value as usize)
+                .unwrap_or(10);
+            match state
+                .service
+                .store()
+                .generate_candidate_coupons(&snapshot_id, limit)
+                .await
+            {
+                Ok(summary) => {
+                    state
+                        .service
+                        .store()
+                        .record_audit("candidate_coupons_generated", summary.clone())
                         .await
                         .ok();
                     Json(summary).into_response()

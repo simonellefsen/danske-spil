@@ -8,6 +8,7 @@ pub fn render_index(base_path: &str) -> String {
                 div { class: "toolbar",
                     button { class: "primary", id: "scan", "Scan markets" }
                     button { id: "auto-paper", "Auto paper selected" }
+                    button { id: "generate-coupons", "Generate coupons" }
                     button { id: "queue-settlement", "Queue settlement" }
                     button { id: "refresh", "Refresh" }
                 }
@@ -44,6 +45,15 @@ pub fn render_index(base_path: &str) -> String {
                                 th { "Decision" } th { "Selection" } th { "Odds" } th { "Score" } th { "Reasons" }
                             } }
                             tbody { id: "strategy-decisions" }
+                        }
+                    }
+                    section {
+                        h2 { "Candidate coupons" }
+                        table {
+                            thead { tr {
+                                th { "Type" } th { "Legs" } th { "Combined odds" } th { "Score" } th { "Rule evidence" }
+                            } }
+                            tbody { id: "coupons" }
                         }
                     }
                     section {
@@ -239,6 +249,33 @@ function renderStrategyDecisions(items) {
     $("strategy-decisions").innerHTML = `<tr><td colspan="5" class="muted">No strategy decisions yet. Run a scan.</td></tr>`;
   }
 }
+function renderCoupons(items) {
+  $("coupons").innerHTML = items.map((item) => {
+    const evidence = item.provider_rule_evidence || {};
+    const legs = item.legs || [];
+    const legLabels = legs.map((leg) => {
+      const candidate = leg.payload && leg.payload.candidate ? leg.payload.candidate : {};
+      return `${candidate.event_name || leg.candidate_id || ""} / ${candidate.outcome_name || ""}`;
+    }).join("<br>");
+    const ruleText = [
+      evidence.sport_key ? `sport ${evidence.sport_key}` : null,
+      evidence.same_sport_validation ? "same sport" : null,
+      evidence.distinct_event_validation ? "distinct events" : null
+    ].filter(Boolean).join(", ");
+    return `
+      <tr>
+        <td><span class="pill">${esc(item.coupon_type)}</span><br><span class="label">${esc(item.status)}</span></td>
+        <td>${legLabels || esc(item.leg_count)}</td>
+        <td>${num(item.combined_decimal_odds)}</td>
+        <td>${num(item.score)}<br><span class="muted">conf ${pct(item.confidence)}</span></td>
+        <td>${esc(ruleText || "not verified")}</td>
+      </tr>
+    `;
+  }).join("");
+  if (!items.length) {
+    $("coupons").innerHTML = `<tr><td colspan="5" class="muted">No multi-leg coupon candidates yet. They remain disabled unless the active baseline enables them.</td></tr>`;
+  }
+}
 function renderLedger(items) {
   const candidateLabel = (item) => {
     const candidate = item.payload && item.payload.candidate ? item.payload.candidate : {};
@@ -391,6 +428,8 @@ async function load() {
   renderRows(candidates.items || []);
   const decisions = await json(api("/api/strategy/decisions"));
   renderStrategyDecisions(decisions.items || []);
+  const coupons = await json(api("/api/coupons"));
+  renderCoupons(coupons.items || []);
   const ledger = await json(api("/api/ledger"));
   renderLedger(ledger.items || []);
   const coverage = await json(api("/api/catalog/coverage"));
@@ -410,6 +449,11 @@ $("auto-paper").addEventListener("click", async () => {
   $("auto-paper").disabled = true;
   try { await json(api("/api/simulate/selected"), { method: "POST", body: "{}" }); await load(); }
   finally { $("auto-paper").disabled = false; }
+});
+$("generate-coupons").addEventListener("click", async () => {
+  $("generate-coupons").disabled = true;
+  try { await json(api("/api/coupons/generate"), { method: "POST", body: "{}" }); await load(); }
+  finally { $("generate-coupons").disabled = false; }
 });
 $("queue-settlement").addEventListener("click", async () => {
   $("queue-settlement").disabled = true;

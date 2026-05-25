@@ -90,6 +90,22 @@ impl GamblerService {
                 })
             }
         };
+        let coupon_candidate_summary = match self
+            .store
+            .generate_candidate_coupons(&snapshot_id, 10)
+            .await
+        {
+            Ok(summary) => summary,
+            Err(error) => {
+                tracing::warn!(%error, snapshot_id = %snapshot_id, "coupon candidate generation failed");
+                json!({
+                    "enabled": false,
+                    "snapshot_id": snapshot_id,
+                    "generated_count": 0,
+                    "error": error.to_string()
+                })
+            }
+        };
         let auto_paper_summary = if self.settings.auto_paper_enabled {
             match self
                 .store
@@ -133,6 +149,7 @@ impl GamblerService {
                     "snapshot_id": snapshot_id,
                     "candidate_count": candidates.len(),
                     "strategy_decision_summary": strategy_decision_summary,
+                    "coupon_candidate_summary": coupon_candidate_summary,
                     "auto_paper_summary": auto_paper_summary,
                     "settlement_queue_summary": settlement_queue_summary,
                     "include_live": include_live,
@@ -146,6 +163,7 @@ impl GamblerService {
             "snapshot_id": snapshot_id,
             "candidate_count": candidates.len(),
             "strategy_decision_summary": strategy_decision_summary,
+            "coupon_candidate_summary": coupon_candidate_summary,
             "auto_paper_summary": auto_paper_summary,
             "settlement_queue_summary": settlement_queue_summary,
             "strategy_proposal": strategy_proposal,
@@ -357,6 +375,8 @@ fn candidate_features(sport: &Value, event: &Value, market: &Value, outcome: &Va
         "scoreboard_fact_count": scoreboard_facts,
         "market_kind": market_kind,
         "market_group_code": market.get("group_code").cloned().unwrap_or(Value::Null),
+        "minimum_accumulator": market.get("minimum_accumulator").cloned().unwrap_or(Value::Null),
+        "maximum_accumulator": market.get("maximum_accumulator").cloned().unwrap_or(Value::Null),
         "handicap_low": outcome.get("handicap_low").cloned().unwrap_or(Value::Null),
         "handicap_high": outcome.get("handicap_high").cloned().unwrap_or(Value::Null),
         "risk_flags": risk_flags

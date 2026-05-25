@@ -176,6 +176,36 @@ ALTER TABLE candidate_bets ADD COLUMN IF NOT EXISTS score numeric;
 ALTER TABLE candidate_bets ADD COLUMN IF NOT EXISTS risk_flags jsonb NOT NULL DEFAULT '[]'::jsonb;
 ALTER TABLE candidate_bets ADD COLUMN IF NOT EXISTS feature_snapshot jsonb NOT NULL DEFAULT '{}'::jsonb;
 
+CREATE TABLE IF NOT EXISTS candidate_coupons (
+  id text PRIMARY KEY,
+  snapshot_id text REFERENCES odds_snapshots(id) ON DELETE CASCADE,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  coupon_type text NOT NULL,
+  leg_count integer NOT NULL,
+  leg_signature text NOT NULL,
+  combined_decimal_odds numeric,
+  score numeric,
+  confidence numeric,
+  status text NOT NULL DEFAULT 'candidate',
+  strategy_id text NOT NULL DEFAULT 'poc_ranker_v1',
+  strategy_baseline_id text,
+  strategy_version integer,
+  provider_rule_evidence jsonb NOT NULL DEFAULT '{}'::jsonb,
+  rationale jsonb NOT NULL DEFAULT '{}'::jsonb,
+  UNIQUE (snapshot_id, coupon_type, leg_signature)
+);
+
+CREATE TABLE IF NOT EXISTS candidate_coupon_legs (
+  id text PRIMARY KEY,
+  coupon_id text NOT NULL REFERENCES candidate_coupons(id) ON DELETE CASCADE,
+  candidate_id text NOT NULL REFERENCES candidate_bets(id) ON DELETE CASCADE,
+  leg_index integer NOT NULL,
+  observed_decimal_odds numeric,
+  payload jsonb NOT NULL DEFAULT '{}'::jsonb,
+  UNIQUE (coupon_id, leg_index),
+  UNIQUE (coupon_id, candidate_id)
+);
+
 CREATE TABLE IF NOT EXISTS simulated_bets (
   id text PRIMARY KEY,
   candidate_id text REFERENCES candidate_bets(id),
@@ -765,6 +795,332 @@ impl Store {
                         "outcome_name": row.get::<_, Option<String>>("outcome_name"),
                         "decimal_odds": row.get::<_, Option<f64>>("decimal_odds")
                     }
+                })
+            }).collect::<Vec<_>>()
+        }))
+    }
+
+    pub async fn generate_candidate_coupons(
+        &self,
+        snapshot_id: &str,
+        per_mode_limit: usize,
+    ) -> anyhow::Result<Value> {
+        if per_mode_limit == 0 {
+            return Ok(json!({
+                "enabled": true,
+                "snapshot_id": snapshot_id,
+                "generated_count": 0,
+                "skipped": true,
+                "reason": "per_mode_limit is zero"
+            }));
+        }
+
+        let client = self.connect().await?;
+        let Some(baseline) = client
+            .query_opt(
+                r#"
+                SELECT id, strategy_id, version, config
+                FROM strategy_baselines
+                WHERE active = true
+                ORDER BY created_at DESC
+                LIMIT 1
+                "#,
+                &[],
+            )
+            .await?
+        else {
+            return Ok(json!({
+                "enabled": false,
+                "snapshot_id": snapshot_id,
+                "generated_count": 0,
+                "skipped": true,
+                "reason": "no active strategy baseline"
+            }));
+        };
+        let strategy_baseline_id: String = baseline.get("id");
+        let strategy_id: String = baseline.get("strategy_id");
+        let strategy_version: i32 = baseline.get("version");
+        let config: Value = baseline.get("config");
+        let coupon_modes = config.get("coupon_modes").unwrap_or(&Value::Null);
+        let max_legs = coupon_modes
+            .get("max_legs")
+            .and_then(Value::as_u64)
+            .unwrap_or(1) as usize;
+        let modes = [
+            ("double", 2usize),
+            ("triple", 3usize),
+            ("accumulator", 4usize),
+        ];
+        let enabled_modes: Vec<(&str, usize)> = modes
+            .into_iter()
+            .filter(|(mode, leg_count)| {
+                coupon_modes
+                    .get(*mode)
+                    .and_then(Value::as_bool)
+                    .unwrap_or(false)
+                    && *leg_count <= max_legs
+            })
+            .collect();
+        if enabled_modes.is_empty() {
+            return Ok(json!({
+                "enabled": false,
+                "snapshot_id": snapshot_id,
+                "generated_count": 0,
+                "skipped": true,
+                "reason": "multi-leg coupon modes disabled by active baseline",
+                "coupon_modes": coupon_modes
+            }));
+        }
+
+        let rows = client
+            .query(
+                r#"
+                SELECT cb.id, cb.snapshot_id, cb.created_at, cb.sport_key, cb.event_id, cb.event_name,
+                       cb.competition, cb.market_id, cb.market_name, cb.market_kind, cb.outcome_id,
+                       cb.outcome_name, cb.decimal_odds::float8 AS decimal_odds, cb.rationale,
+                       cb.implied_probability::float8 AS implied_probability,
+                       cb.model_probability::float8 AS model_probability,
+                       cb.expected_value::float8 AS expected_value,
+                       cb.confidence::float8 AS confidence,
+                       cb.score::float8 AS score,
+                       cb.risk_flags, cb.feature_snapshot, cb.status
+                FROM strategy_candidate_decisions d
+                JOIN candidate_bets cb ON cb.id = d.candidate_id
+                WHERE d.snapshot_id = $1
+                  AND d.decision = 'selected'
+                  AND cb.status = 'selected'
+                  AND cb.decimal_odds IS NOT NULL
+                ORDER BY d.score DESC NULLS LAST, d.created_at ASC
+                LIMIT 200
+                "#,
+                &[&snapshot_id],
+            )
+            .await?;
+        let mut by_sport: BTreeMap<String, Vec<CandidateBet>> = BTreeMap::new();
+        for row in rows {
+            let candidate = candidate_from_row(&row);
+            by_sport
+                .entry(candidate.sport_key.clone())
+                .or_default()
+                .push(candidate);
+        }
+
+        let mut generated = Vec::new();
+        let mut generated_count = 0usize;
+        for (coupon_type, leg_count) in enabled_modes {
+            let mut mode_count = 0usize;
+            for (sport_key, candidates) in &by_sport {
+                if mode_count >= per_mode_limit {
+                    break;
+                }
+                let eligible: Vec<&CandidateBet> = candidates
+                    .iter()
+                    .filter(|candidate| accumulator_allowed(candidate, leg_count))
+                    .collect();
+                if eligible.len() < leg_count {
+                    continue;
+                }
+                for combo in combinations(&eligible, leg_count) {
+                    if mode_count >= per_mode_limit {
+                        break;
+                    }
+                    if !distinct_events(&combo) {
+                        continue;
+                    }
+                    let leg_signature = coupon_leg_signature(&combo);
+                    let combined_decimal_odds = combo
+                        .iter()
+                        .filter_map(|candidate| candidate.decimal_odds)
+                        .product::<f64>();
+                    let score = combo
+                        .iter()
+                        .filter_map(|candidate| candidate.score)
+                        .sum::<f64>()
+                        / leg_count as f64;
+                    let confidence = combo
+                        .iter()
+                        .filter_map(|candidate| candidate.confidence)
+                        .fold(1.0_f64, f64::min);
+                    let provider_rule_evidence = json!({
+                        "source": "normalized_danskespil_market_metadata",
+                        "sport_key": sport_key,
+                        "coupon_type": coupon_type,
+                        "leg_count": leg_count,
+                        "same_sport_validation": true,
+                        "distinct_event_validation": true,
+                        "requires_provider_accumulator_support": true,
+                        "legs": combo.iter().map(|candidate| json!({
+                            "candidate_id": candidate.id,
+                            "event_id": candidate.event_id,
+                            "market_id": candidate.market_id,
+                            "minimum_accumulator": candidate.feature_snapshot.get("minimum_accumulator").cloned().unwrap_or(Value::Null),
+                            "maximum_accumulator": candidate.feature_snapshot.get("maximum_accumulator").cloned().unwrap_or(Value::Null)
+                        })).collect::<Vec<_>>()
+                    });
+                    let rationale = json!({
+                        "paper_only": true,
+                        "selection_basis": "Provider-supported same-sport multi-leg coupon candidate from active strategy-selected single legs.",
+                        "safety": "Real-money placement is disabled; coupon can only be reviewed or paper-ledgered after coupon simulation is implemented.",
+                        "combined_decimal_odds": combined_decimal_odds,
+                        "strategy_id": strategy_id,
+                        "strategy_baseline_id": strategy_baseline_id,
+                        "strategy_version": strategy_version
+                    });
+                    let coupon_id = new_id();
+                    let affected = client
+                        .execute(
+                            r#"
+                            INSERT INTO candidate_coupons (
+                              id, snapshot_id, coupon_type, leg_count, leg_signature,
+                              combined_decimal_odds, score, confidence, status,
+                              strategy_id, strategy_baseline_id, strategy_version,
+                              provider_rule_evidence, rationale
+                            )
+                            VALUES (
+                              $1,$2,$3,$4,$5,
+                              ($6::float8)::numeric,
+                              ($7::float8)::numeric,
+                              ($8::float8)::numeric,
+                              $9,$10,$11,$12,$13,$14
+                            )
+                            ON CONFLICT (snapshot_id, coupon_type, leg_signature) DO NOTHING
+                            "#,
+                            &[
+                                &coupon_id,
+                                &snapshot_id,
+                                &coupon_type,
+                                &(leg_count as i32),
+                                &leg_signature,
+                                &combined_decimal_odds,
+                                &score,
+                                &confidence,
+                                &"candidate",
+                                &strategy_id,
+                                &strategy_baseline_id,
+                                &strategy_version,
+                                &provider_rule_evidence,
+                                &rationale,
+                            ],
+                        )
+                        .await?;
+                    let row = client
+                        .query_one(
+                            r#"
+                            SELECT id
+                            FROM candidate_coupons
+                            WHERE snapshot_id = $1 AND coupon_type = $2 AND leg_signature = $3
+                            "#,
+                            &[&snapshot_id, &coupon_type, &leg_signature],
+                        )
+                        .await?;
+                    let stored_coupon_id: String = row.get("id");
+                    for (index, candidate) in combo.iter().enumerate() {
+                        client
+                            .execute(
+                                r#"
+                                INSERT INTO candidate_coupon_legs (
+                                  id, coupon_id, candidate_id, leg_index, observed_decimal_odds, payload
+                                )
+                                VALUES ($1,$2,$3,$4,($5::float8)::numeric,$6)
+                                ON CONFLICT (coupon_id, candidate_id) DO NOTHING
+                                "#,
+                                &[
+                                    &new_id(),
+                                    &stored_coupon_id,
+                                    &candidate.id,
+                                    &(index as i32),
+                                    &candidate.decimal_odds,
+                                    &json!({
+                                        "candidate": candidate,
+                                        "paper_only": true
+                                    }),
+                                ],
+                            )
+                            .await?;
+                    }
+                    if affected > 0 {
+                        generated_count += 1;
+                        mode_count += 1;
+                    }
+                    generated.push(json!({
+                        "coupon_id": stored_coupon_id,
+                        "coupon_type": coupon_type,
+                        "leg_count": leg_count,
+                        "combined_decimal_odds": combined_decimal_odds,
+                        "score": score,
+                        "confidence": confidence,
+                        "inserted": affected > 0,
+                        "sport_key": sport_key,
+                        "leg_signature": leg_signature
+                    }));
+                }
+            }
+        }
+
+        Ok(json!({
+            "enabled": true,
+            "snapshot_id": snapshot_id,
+            "generated_count": generated_count,
+            "returned_count": generated.len(),
+            "per_mode_limit": per_mode_limit,
+            "coupon_modes": coupon_modes,
+            "items": generated,
+            "paper_only": true
+        }))
+    }
+
+    pub async fn candidate_coupons(&self, limit: i64) -> anyhow::Result<Value> {
+        let client = self.connect().await?;
+        let rows = client
+            .query(
+                r#"
+                SELECT
+                  cc.id, cc.snapshot_id, cc.created_at, cc.coupon_type, cc.leg_count,
+                  cc.combined_decimal_odds::float8 AS combined_decimal_odds,
+                  cc.score::float8 AS score,
+                  cc.confidence::float8 AS confidence,
+                  cc.status, cc.strategy_id, cc.strategy_baseline_id, cc.strategy_version,
+                  cc.provider_rule_evidence, cc.rationale,
+                  COALESCE(
+                    jsonb_agg(
+                      jsonb_build_object(
+                        'candidate_id', ccl.candidate_id,
+                        'leg_index', ccl.leg_index,
+                        'observed_decimal_odds', ccl.observed_decimal_odds::float8,
+                        'payload', ccl.payload
+                      )
+                      ORDER BY ccl.leg_index
+                    ) FILTER (WHERE ccl.id IS NOT NULL),
+                    '[]'::jsonb
+                  ) AS legs
+                FROM candidate_coupons cc
+                LEFT JOIN candidate_coupon_legs ccl ON ccl.coupon_id = cc.id
+                GROUP BY cc.id
+                ORDER BY cc.created_at DESC, cc.score DESC NULLS LAST
+                LIMIT $1
+                "#,
+                &[&limit],
+            )
+            .await?;
+        Ok(json!({
+            "items": rows.iter().map(|row| {
+                let created_at: DateTime<Utc> = row.get("created_at");
+                json!({
+                    "id": row.get::<_, String>("id"),
+                    "snapshot_id": row.get::<_, Option<String>>("snapshot_id"),
+                    "created_at": created_at,
+                    "coupon_type": row.get::<_, String>("coupon_type"),
+                    "leg_count": row.get::<_, i32>("leg_count"),
+                    "combined_decimal_odds": row.get::<_, Option<f64>>("combined_decimal_odds"),
+                    "score": row.get::<_, Option<f64>>("score"),
+                    "confidence": row.get::<_, Option<f64>>("confidence"),
+                    "status": row.get::<_, String>("status"),
+                    "strategy_id": row.get::<_, String>("strategy_id"),
+                    "strategy_baseline_id": row.get::<_, Option<String>>("strategy_baseline_id"),
+                    "strategy_version": row.get::<_, Option<i32>>("strategy_version"),
+                    "provider_rule_evidence": row.get::<_, Value>("provider_rule_evidence"),
+                    "rationale": row.get::<_, Value>("rationale"),
+                    "legs": row.get::<_, Value>("legs")
                 })
             }).collect::<Vec<_>>()
         }))
@@ -2334,6 +2690,75 @@ fn optional_bool(value: &Value, key: &str) -> Option<bool> {
 
 fn number(value: &Value, key: &str) -> Option<f64> {
     value.get(key).and_then(Value::as_f64)
+}
+
+fn accumulator_allowed(candidate: &CandidateBet, leg_count: usize) -> bool {
+    let minimum = json_usize(candidate.feature_snapshot.get("minimum_accumulator"));
+    let maximum = json_usize(candidate.feature_snapshot.get("maximum_accumulator"));
+    match (minimum, maximum) {
+        (Some(minimum), Some(maximum)) => minimum <= leg_count && leg_count <= maximum,
+        _ => false,
+    }
+}
+
+fn json_usize(value: Option<&Value>) -> Option<usize> {
+    value.and_then(|value| {
+        value
+            .as_u64()
+            .map(|value| value as usize)
+            .or_else(|| value.as_str().and_then(|text| text.parse::<usize>().ok()))
+    })
+}
+
+fn distinct_events(candidates: &[&CandidateBet]) -> bool {
+    let mut seen = HashSet::new();
+    for candidate in candidates {
+        let Some(event_id) = candidate.event_id.as_deref() else {
+            return false;
+        };
+        if !seen.insert(event_id) {
+            return false;
+        }
+    }
+    true
+}
+
+fn coupon_leg_signature(candidates: &[&CandidateBet]) -> String {
+    let mut ids: Vec<&str> = candidates
+        .iter()
+        .map(|candidate| candidate.id.as_str())
+        .collect();
+    ids.sort_unstable();
+    ids.join("+")
+}
+
+fn combinations<'a>(items: &[&'a CandidateBet], leg_count: usize) -> Vec<Vec<&'a CandidateBet>> {
+    fn walk<'a>(
+        items: &[&'a CandidateBet],
+        leg_count: usize,
+        start: usize,
+        current: &mut Vec<&'a CandidateBet>,
+        output: &mut Vec<Vec<&'a CandidateBet>>,
+    ) {
+        if current.len() == leg_count {
+            output.push(current.clone());
+            return;
+        }
+        let remaining_needed = leg_count - current.len();
+        if items.len().saturating_sub(start) < remaining_needed {
+            return;
+        }
+        for index in start..items.len() {
+            current.push(items[index]);
+            walk(items, leg_count, index + 1, current, output);
+            current.pop();
+        }
+    }
+
+    let mut output = Vec::new();
+    let mut current = Vec::new();
+    walk(items, leg_count, 0, &mut current, &mut output);
+    output
 }
 
 fn candidate_from_row(row: &Row) -> CandidateBet {

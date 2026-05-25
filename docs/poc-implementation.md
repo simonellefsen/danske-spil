@@ -196,6 +196,15 @@ Multi-leg candidates should store:
 
 The web UI should label these as simulated coupons and keep real submission disabled.
 
+Current implementation status:
+
+- `candidate_coupons` and `candidate_coupon_legs` are initialized in Postgres.
+- Scans attempt coupon-candidate generation after single-leg strategy decisions are stored.
+- `/api/coupons` lists stored multi-leg coupon proposals.
+- `/api/coupons/generate` re-runs generation for the latest or supplied snapshot.
+- The Dioxus UI shows a candidate-coupons table with coupon type, legs, combined odds, score, and provider-rule evidence.
+- The default baseline still disables doubles, triples, and accumulators, so generation is inactive until a reviewed strategy baseline enables the relevant mode.
+
 ## Paper Settlement POC
 
 The web UI can manually settle paper-ledger rows as won, lost, void, pushed, or unresolved. This writes settlement metadata and simulated return/profit-loss fields to Postgres. Manual settlement is a placeholder for the planned result-lookup worker; it should only be used when the operator has verified the result from an acceptable source.
