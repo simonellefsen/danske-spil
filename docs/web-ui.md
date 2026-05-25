@@ -41,8 +41,10 @@ The reasoning panel should show structured rationale and evidence. It should not
 
 The coupon builder should be read-only or simulation-only by default:
 
+- Support single, double, triple, and larger accumulator views when the provider allows those combinations.
 - Show proposed legs and combined odds.
 - Show each leg's rationale and uncertainty.
+- Show provider rule evidence for why the selected legs can be combined, including any same-sport or same-category restriction.
 - Show exposure if the coupon were approved.
 - Show whether the coupon would be written to the simulation ledger.
 - Show why any leg was removed or replaced.

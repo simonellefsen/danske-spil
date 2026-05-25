@@ -45,6 +45,8 @@ Each simulated placement should record:
 
 - Product: Oddset or Tips.
 - Event, market, selection, and coupon leg metadata.
+- Coupon type: single, double, triple, or larger accumulator.
+- Provider combination-rule evidence, including min/max accumulator legs and same-sport or same-category requirements.
 - Observed odds and observed timestamp.
 - Hypothetical stake.
 - Strategy baseline id.
@@ -84,6 +86,7 @@ Current POC status:
 - Manual settlement writes `settlement_observations` and computed simulated return/profit-loss.
 - Strategy selection is stored in `strategy_candidate_decisions`; rejected candidates are preserved for review but blocked from paper-ledger placement.
 - Selected candidates can be auto-paper-placed into `simulated_bets` with per-scan and max-open-exposure caps. This is idempotent per candidate and remains simulation-only.
+- Multi-leg coupons are planned but not yet automated. They should only be paper-ledgered after provider accumulator support and category restrictions are verified from observed data.
 - Open paper bets move to `awaiting_result` after the event start time has passed. This queues them for result lookup without grading the outcome.
 - The intended worker cadence is roughly every 15 minutes: scan for new opportunities, auto-place eligible paper bets, queue finished or likely-finished bets, and re-check awaiting-result bets for verified outcomes.
 - Automated result lookup is still pending and should use the source ordering above.
@@ -116,6 +119,8 @@ Current POC metrics are exposed through `/api/ledger/summary`:
 
 Candidate tables:
 
+- `candidate_coupons`
+- `candidate_coupon_legs`
 - `simulated_bets`
 - `simulated_coupons`
 - `simulated_coupon_legs`

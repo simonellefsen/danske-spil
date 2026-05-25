@@ -111,6 +111,7 @@ After scans, the POC can propose a conservative one-variable experiment when the
 
 - Long-price exposure: `max_decimal_odds: 8.0 -> 6.0`.
 - Specialized-market exposure: `excluded_market_kinds: [] -> ["goal", "corners", "half_time", "period_or_quarter", "set_or_game"]`.
+- Coupon composition: keep singles only, or propose doubles/triples/accumulators after provider combination rules and paper-ledger settlement coverage are available.
 
 This does not change live behavior automatically. It stays in `proposed` until an operator reviews it in the web UI.
 

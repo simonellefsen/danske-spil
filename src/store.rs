@@ -292,6 +292,15 @@ VALUES (
     "min_confidence": 0.10,
     "excluded_market_kinds": [],
     "allow_live_markets": false,
+    "coupon_modes": {
+      "single": true,
+      "double": false,
+      "triple": false,
+      "accumulator": false,
+      "max_legs": 1,
+      "require_provider_accumulator_support": true,
+      "require_same_sport_or_category_when_provider_requires_it": true
+    },
     "paper_only": true,
     "one_variable_only": true
   }'::jsonb,

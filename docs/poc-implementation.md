@@ -179,6 +179,23 @@ Stored candidate fields include:
 
 The ranker intentionally uses weak, transparent heuristics until sports intelligence ingestion is wired in. Later model versions should replace these heuristics with feature snapshots from stats, news, weather, form, and settlement history.
 
+## Coupon Strategy POC
+
+The strategy model should support single-leg candidates and provider-supported multi-leg coupon candidates. The initial baseline keeps only singles enabled, but the config shape reserves explicit switches for doubles, triples, and larger accumulators.
+
+Before a strategy can create a multi-leg paper coupon, it must prove from the observed market metadata that the provider allows the legs to be combined. The normalized Danske Spil market payload already preserves `minimum_accumulator` and `maximum_accumulator`; the next implementation should also persist any sport, category, product, and market-combination restrictions detected during browser or feed investigation.
+
+Multi-leg candidates should store:
+
+- Coupon type: single, double, triple, or accumulator.
+- Leg count, combined decimal odds, and per-leg observed odds.
+- Provider rule evidence that allowed the combination.
+- Same-sport or same-category validation result where required.
+- Leg-level rationale, risk flags, and settlement state.
+- Coupon-level simulated stake, return, and profit/loss.
+
+The web UI should label these as simulated coupons and keep real submission disabled.
+
 ## Paper Settlement POC
 
 The web UI can manually settle paper-ledger rows as won, lost, void, pushed, or unresolved. This writes settlement metadata and simulated return/profit-loss fields to Postgres. Manual settlement is a placeholder for the planned result-lookup worker; it should only be used when the operator has verified the result from an acceptable source.

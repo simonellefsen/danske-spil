@@ -84,6 +84,7 @@ Candidate tables:
 - `tips_coupons`
 - `candidate_bets`
 - `candidate_coupons`
+- `candidate_coupon_legs`
 - `simulated_bets`
 - `simulated_coupons`
 - `simulated_coupon_legs`
@@ -120,6 +121,8 @@ Scope:
 - Implement data-ingestion loops for relevant leagues, teams, players, drivers, golfers, riders, and events in the initial sports scope.
 - Normalize stats, weather, news, trend, and seasonality inputs into Postgres with source provenance and timestamps.
 - Implement a simulation ledger that records when the system would have taken a bet, at what observed odds, with what hypothetical stake, and under which strategy baseline.
+- Allow strategy baselines to propose singles, doubles, triples, and larger accumulator-style coupons only when the observed provider rules allow the selected legs to be combined.
+- Record provider accumulator constraints, including minimum legs, maximum legs, and same-sport or same-category restrictions, before creating any candidate coupon.
 - Store an expected finish timestamp or result-check-after timestamp for each simulated bet, derived from sport, league, market type, event start, and known event duration where possible.
 - Implement a settlement worker that checks queued paper bets about every 15 minutes, looks up verified final outcomes, grades simulated bets and coupon legs, and records simulated P/L.
 - Treat cancelled, postponed, abandoned, voided, pushed, and agency-refunded outcomes as first-class settlement states instead of forcing them into won/lost.
@@ -161,6 +164,7 @@ Scope:
 Scope:
 
 - Build a simulation loop from odds snapshots, candidate bets, simulated placements, and settlement observations.
+- Extend the simulation loop from single-leg bets to multi-leg paper coupons, with leg-level settlement and coupon-level return calculation.
 - Join candidate decisions to the relevant historical stats, form, news, weather, rankings, and seasonality features available at decision time.
 - Treat simulated placements as immutable: later odds changes should create observations, not rewrite the simulated entry price.
 - Reconcile event outcomes from the most authoritative available source, preferably Danske Spil settlement/result pages when available, and fall back only to documented external result sources.
