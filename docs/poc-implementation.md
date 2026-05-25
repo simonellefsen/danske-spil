@@ -139,7 +139,7 @@ Each scan also applies the active baseline to every generated candidate and reco
 
 Rejected candidates cannot be added to the paper ledger through the API. This keeps manual simulation aligned with the active strategy while still preserving the rejected alternatives for review.
 
-When `GAMBLER_AUTO_PAPER_ENABLED=true`, each scan automatically paper-places the top selected candidates up to `GAMBLER_AUTO_PAPER_PER_SCAN_LIMIT` and the `GAMBLER_AUTO_PAPER_MAX_OPEN_EXPOSURE` cap. The placement writes only to `simulated_bets`; it never clicks Danske Spil odds or submits a coupon. Operators can also trigger the same idempotent flow with:
+When `GAMBLER_AUTO_PAPER_ENABLED=true`, each scan automatically paper-places the top selected candidates up to `GAMBLER_AUTO_PAPER_PER_SCAN_LIMIT` and the `GAMBLER_AUTO_PAPER_MAX_OPEN_EXPOSURE` cap. The Kubernetes worker currently runs this loop every 900 seconds, so the intended POC cadence is roughly every 15 minutes. The placement writes only to `simulated_bets`; it never clicks Danske Spil odds or submits a coupon. Operators can also trigger the same idempotent flow with:
 
 ```text
 POST /api/simulate/selected
@@ -152,7 +152,7 @@ GET  /api/ledger/queue
 POST /api/ledger/queue
 ```
 
-This is only a queue transition. It does not grade a bet as won, lost, or void.
+This is only a queue transition. It does not grade a bet as won, lost, or void. The next settlement implementation should store an expected result-check-after time per paper bet, then re-check awaiting-result bets on the same 15-minute worker cadence until the result is verified or the item needs manual review.
 
 Strategy state is available at:
 
@@ -181,4 +181,6 @@ The ranker intentionally uses weak, transparent heuristics until sports intellig
 
 ## Paper Settlement POC
 
-The web UI can manually settle paper-ledger rows as won, lost, or void. This writes settlement metadata and simulated return/profit-loss fields to Postgres. Manual settlement is a placeholder for the planned result-lookup worker; it should only be used when the operator has verified the result from an acceptable source.
+The web UI can manually settle paper-ledger rows as won, lost, void, pushed, or unresolved. This writes settlement metadata and simulated return/profit-loss fields to Postgres. Manual settlement is a placeholder for the planned result-lookup worker; it should only be used when the operator has verified the result from an acceptable source.
+
+The planned automated settlement worker should handle normal final results plus cancelled, postponed, abandoned, voided, pushed, and agency-refunded outcomes. These states should keep their source evidence and grading rule in Postgres so simulation metrics can distinguish real losses from stake returns or unresolved events.

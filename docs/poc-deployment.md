@@ -8,7 +8,7 @@ The active runtime is a Rust binary. The Dockerfile builds it in a Rust builder 
 
 - `danske-spil-postgres`: CloudNativePG cluster with two instances.
 - `gambler-api`: API and web UI.
-- `gambler-worker`: scheduled observe-only scanner loop.
+- `gambler-worker`: scheduled observe-only scanner loop. The default Kubernetes cadence is `GAMBLER_SCAN_INTERVAL_SECONDS=900`, or roughly every 15 minutes.
 - `hermes-agent`: POC read-only Hermes view backed by the same API image. It does not receive browser control or credentials.
 
 ## Deploy
@@ -38,4 +38,4 @@ rtk kubectl --context docker-desktop -n danske-spil logs deployment/gambler-work
 rtk kubectl --context docker-desktop -n danske-spil logs deployment/hermes-agent --tail=120
 ```
 
-The web UI can trigger a scan, show normalized candidate odds, display structured rationale, and create paper-ledger entries. There is no endpoint that submits real bets.
+The web UI can trigger a scan, show normalized candidate odds, display structured rationale, and create paper-ledger entries. The worker also runs the scan loop on its configured cadence and advances finished paper bets into the awaiting-result queue. There is no endpoint that submits real bets.

@@ -32,6 +32,9 @@ flowchart LR
 - Later odds changes create new observations, not edits to old paper entries.
 - Settlement should prefer Danske Spil settlement/result views when available, then official event sources, then documented third-party sources.
 - Ambiguous results stay unresolved or require operator review.
+- Each paper bet should track when the match or bet is expected to be finished so result lookup can start at the right time.
+- The worker should run roughly every 15 minutes to find new opportunities and re-check queued bets for verified outcomes.
+- Cancelled, postponed, abandoned, voided, pushed, and agency-refunded outcomes are distinct settlement states.
 - Performance metrics must clearly be labeled simulated.
 - Paper placement uses active strategy decisions; rejected candidates remain visible but cannot be simulated.
 - Auto-paper placement writes only to the simulation ledger and is capped by per-scan count and open exposure.

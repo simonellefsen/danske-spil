@@ -116,11 +116,13 @@ Candidate tables:
 Scope:
 
 - Implement `gambler` as a service that can collect read-only market state, build candidate coupons, score them, and expose sanitized context.
-- Implement scanner loops for Oddset and Tips that monitor configured products, events, markets, coupons, odds changes, and disabled/suspended states.
+- Implement scanner loops for Oddset and Tips that monitor configured products, events, markets, coupons, odds changes, and disabled/suspended states about every 15 minutes.
 - Implement data-ingestion loops for relevant leagues, teams, players, drivers, golfers, riders, and events in the initial sports scope.
 - Normalize stats, weather, news, trend, and seasonality inputs into Postgres with source provenance and timestamps.
 - Implement a simulation ledger that records when the system would have taken a bet, at what observed odds, with what hypothetical stake, and under which strategy baseline.
-- Implement a settlement worker that later looks up final outcomes, grades simulated bets and coupon legs, and records simulated P/L.
+- Store an expected finish timestamp or result-check-after timestamp for each simulated bet, derived from sport, league, market type, event start, and known event duration where possible.
+- Implement a settlement worker that checks queued paper bets about every 15 minutes, looks up verified final outcomes, grades simulated bets and coupon legs, and records simulated P/L.
+- Treat cancelled, postponed, abandoned, voided, pushed, and agency-refunded outcomes as first-class settlement states instead of forcing them into won/lost.
 - Expose a web UI for operator visibility into candidates, odds, reasoning, safety gates, and Hermes state.
 - Expose a narrow `gambler-mcp` adapter for Hermes.
 - Keep browser cookies and credentials isolated from Hermes.
@@ -162,6 +164,7 @@ Scope:
 - Join candidate decisions to the relevant historical stats, form, news, weather, rankings, and seasonality features available at decision time.
 - Treat simulated placements as immutable: later odds changes should create observations, not rewrite the simulated entry price.
 - Reconcile event outcomes from the most authoritative available source, preferably Danske Spil settlement/result pages when available, and fall back only to documented external result sources.
+- Re-check unresolved or awaiting-result paper bets on the same roughly 15-minute worker cadence until they are verified, cancelled, postponed, refunded, voided, or escalated for manual review.
 - Compute simulated stake, return, profit/loss, hit rate, calibration, drawdown, and coupon-level performance.
 - Let Hermes optimize prompts, thresholds, staking heuristics, or market filters one variable at a time.
 - Require backtest/replay evidence and paper observation before any human can promote a baseline.

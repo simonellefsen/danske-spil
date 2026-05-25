@@ -68,11 +68,14 @@ Every settlement observation should record:
 - Source name and URL pattern.
 - Observed result.
 - Observed timestamp.
+- Expected finish or result-check-after timestamp used to decide when lookup should start.
 - Confidence.
 - Grading rule used.
 - Any ambiguity or manual-review flag.
 
 Ambiguous outcomes should stay unresolved or require operator review. The system should not silently guess.
+
+The settlement model must explicitly handle cancelled, postponed, abandoned, voided, pushed, and agency-refunded outcomes. A refund or void should preserve the stake-return rule and source evidence instead of being recorded as an ordinary win or loss.
 
 Current POC status:
 
@@ -82,6 +85,7 @@ Current POC status:
 - Strategy selection is stored in `strategy_candidate_decisions`; rejected candidates are preserved for review but blocked from paper-ledger placement.
 - Selected candidates can be auto-paper-placed into `simulated_bets` with per-scan and max-open-exposure caps. This is idempotent per candidate and remains simulation-only.
 - Open paper bets move to `awaiting_result` after the event start time has passed. This queues them for result lookup without grading the outcome.
+- The intended worker cadence is roughly every 15 minutes: scan for new opportunities, auto-place eligible paper bets, queue finished or likely-finished bets, and re-check awaiting-result bets for verified outcomes.
 - Automated result lookup is still pending and should use the source ordering above.
 
 ## Metrics
