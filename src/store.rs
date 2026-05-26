@@ -1,6 +1,6 @@
 use crate::models::{CandidateBet, HermesReflection, LedgerSummary, SimulatedBet};
 use anyhow::{anyhow, Context};
-use chrono::{DateTime, Utc};
+use chrono::{DateTime, Duration, Utc};
 use serde_json::{json, Value};
 use std::collections::{BTreeMap, HashMap, HashSet};
 use tokio_postgres::{Client, NoTls, Row, Transaction};
@@ -226,6 +226,8 @@ ALTER TABLE simulated_bets ADD COLUMN IF NOT EXISTS settled_at timestamptz;
 ALTER TABLE simulated_bets ADD COLUMN IF NOT EXISTS simulated_return numeric;
 ALTER TABLE simulated_bets ADD COLUMN IF NOT EXISTS profit_loss numeric;
 ALTER TABLE simulated_bets ADD COLUMN IF NOT EXISTS settlement_payload jsonb NOT NULL DEFAULT '{}'::jsonb;
+ALTER TABLE simulated_bets ADD COLUMN IF NOT EXISTS event_start_time timestamptz;
+ALTER TABLE simulated_bets ADD COLUMN IF NOT EXISTS expected_result_check_after timestamptz;
 
 CREATE TABLE IF NOT EXISTS simulated_coupons (
   id text PRIMARY KEY,
@@ -260,6 +262,11 @@ ALTER TABLE simulated_coupons ADD COLUMN IF NOT EXISTS settled_at timestamptz;
 ALTER TABLE simulated_coupons ADD COLUMN IF NOT EXISTS simulated_return numeric;
 ALTER TABLE simulated_coupons ADD COLUMN IF NOT EXISTS profit_loss numeric;
 ALTER TABLE simulated_coupons ADD COLUMN IF NOT EXISTS settlement_payload jsonb NOT NULL DEFAULT '{}'::jsonb;
+ALTER TABLE simulated_coupons ADD COLUMN IF NOT EXISTS latest_event_start_time timestamptz;
+ALTER TABLE simulated_coupons ADD COLUMN IF NOT EXISTS expected_result_check_after timestamptz;
+
+ALTER TABLE simulated_coupon_legs ADD COLUMN IF NOT EXISTS event_start_time timestamptz;
+ALTER TABLE simulated_coupon_legs ADD COLUMN IF NOT EXISTS expected_result_check_after timestamptz;
 
 CREATE UNIQUE INDEX IF NOT EXISTS idx_simulated_coupons_one_normal_per_coupon
 ON simulated_coupons(coupon_id)
@@ -1252,6 +1259,8 @@ impl Store {
                   sc.hypothetical_stake::float8 AS hypothetical_stake,
                   sc.observed_combined_decimal_odds::float8 AS observed_combined_decimal_odds,
                   sc.status, sc.strategy_id, sc.settled_at,
+                  sc.latest_event_start_time,
+                  sc.expected_result_check_after,
                   sc.simulated_return::float8 AS simulated_return,
                   sc.profit_loss::float8 AS profit_loss,
                   sc.settlement_payload, sc.payload,
@@ -1262,6 +1271,8 @@ impl Store {
                         'leg_index', scl.leg_index,
                         'observed_decimal_odds', scl.observed_decimal_odds::float8,
                         'status', scl.status,
+                        'event_start_time', scl.event_start_time,
+                        'expected_result_check_after', scl.expected_result_check_after,
                         'settlement_payload', scl.settlement_payload,
                         'payload', scl.payload
                       )
@@ -1283,6 +1294,8 @@ impl Store {
             "items": rows.iter().map(|row| {
                 let created_at: DateTime<Utc> = row.get("created_at");
                 let settled_at: Option<DateTime<Utc>> = row.get("settled_at");
+                let latest_event_start_time: Option<DateTime<Utc>> = row.get("latest_event_start_time");
+                let expected_result_check_after: Option<DateTime<Utc>> = row.get("expected_result_check_after");
                 json!({
                     "id": row.get::<_, String>("id"),
                     "coupon_id": row.get::<_, Option<String>>("coupon_id"),
@@ -1291,6 +1304,8 @@ impl Store {
                     "observed_combined_decimal_odds": row.get::<_, Option<f64>>("observed_combined_decimal_odds"),
                     "status": row.get::<_, String>("status"),
                     "strategy_id": row.get::<_, String>("strategy_id"),
+                    "latest_event_start_time": latest_event_start_time,
+                    "expected_result_check_after": expected_result_check_after,
                     "settled_at": settled_at,
                     "simulated_return": row.get::<_, Option<f64>>("simulated_return"),
                     "profit_loss": row.get::<_, Option<f64>>("profit_loss"),
@@ -1346,6 +1361,8 @@ impl Store {
             return Err(anyhow!("coupon must have at least two legs: {coupon_id}"));
         }
         let combined_decimal_odds = coupon.get("combined_decimal_odds").and_then(Value::as_f64);
+        let latest_event_start_time = coupon_latest_event_start_time(&legs);
+        let expected_result_check_after = coupon_expected_result_check_after(&legs);
         let strategy_id = coupon
             .get("strategy_id")
             .and_then(Value::as_str)
@@ -1366,9 +1383,10 @@ impl Store {
                 r#"
                 INSERT INTO simulated_coupons (
                   id, coupon_id, hypothetical_stake, observed_combined_decimal_odds,
-                  status, strategy_id, settlement_payload, payload
+                  status, strategy_id, latest_event_start_time, expected_result_check_after,
+                  settlement_payload, payload
                 )
-                VALUES ($1,$2,($3::float8)::numeric,($4::float8)::numeric,$5,$6,$7,$8)
+                VALUES ($1,$2,($3::float8)::numeric,($4::float8)::numeric,$5,$6,$7,$8,$9,$10)
                 ON CONFLICT DO NOTHING
                 "#,
                 &[
@@ -1378,6 +1396,8 @@ impl Store {
                     &combined_decimal_odds,
                     &"open",
                     &strategy_id,
+                    &latest_event_start_time,
+                    &expected_result_check_after,
                     &json!({}),
                     &payload,
                 ],
@@ -1395,14 +1415,17 @@ impl Store {
                     .unwrap_or_default() as i32;
                 let observed_decimal_odds =
                     leg.get("observed_decimal_odds").and_then(Value::as_f64);
+                let event_start_time = leg_event_start_time(&leg);
+                let expected_result_check_after = leg_expected_result_check_after(&leg);
                 transaction
                     .execute(
                         r#"
                         INSERT INTO simulated_coupon_legs (
                           id, simulated_coupon_id, candidate_id, leg_index,
-                          observed_decimal_odds, status, settlement_payload, payload
+                          observed_decimal_odds, status, event_start_time,
+                          expected_result_check_after, settlement_payload, payload
                         )
-                        VALUES ($1,$2,$3,$4,($5::float8)::numeric,$6,$7,$8)
+                        VALUES ($1,$2,$3,$4,($5::float8)::numeric,$6,$7,$8,$9,$10)
                         ON CONFLICT DO NOTHING
                         "#,
                         &[
@@ -1412,6 +1435,8 @@ impl Store {
                             &leg_index,
                             &observed_decimal_odds,
                             &"open",
+                            &event_start_time,
+                            &expected_result_check_after,
                             &json!({}),
                             &leg,
                         ],
@@ -1486,6 +1511,9 @@ impl Store {
             return Ok(existing);
         }
         let id = new_id();
+        let event_start_time = candidate_event_start_time(&candidate);
+        let expected_result_check_after =
+            expected_result_check_after_for_sport(&candidate.sport_key, event_start_time);
         let payload =
             json!({"candidate": candidate, "paper_only": true, "strategy_id": "poc_ranker_v1"});
         let client = self.connect().await?;
@@ -1494,9 +1522,10 @@ impl Store {
                 r#"
                 INSERT INTO simulated_bets (
                   id, candidate_id, hypothetical_stake, observed_decimal_odds, status,
-                  strategy_id, settlement_payload, payload
+                  strategy_id, event_start_time, expected_result_check_after, settlement_payload,
+                  payload
                 )
-                VALUES ($1,$2,($3::float8)::numeric,($4::float8)::numeric,$5,$6,$7,$8)
+                VALUES ($1,$2,($3::float8)::numeric,($4::float8)::numeric,$5,$6,$7,$8,$9,$10)
                 ON CONFLICT DO NOTHING
                 "#,
                 &[
@@ -1506,6 +1535,8 @@ impl Store {
                     &candidate.decimal_odds,
                     &"open",
                     &"poc_ranker_v1",
+                    &event_start_time,
+                    &expected_result_check_after,
                     &json!({}),
                     &payload,
                 ],
@@ -1615,6 +1646,9 @@ impl Store {
             let strategy_baseline_id: String = row.get("strategy_baseline_id");
             let strategy_version: i32 = row.get("strategy_version");
             let decision_evidence: Value = row.get("decision_evidence");
+            let event_start_time = candidate_event_start_time(&candidate);
+            let expected_result_check_after =
+                expected_result_check_after_for_sport(&candidate.sport_key, event_start_time);
             let id = new_id();
             let payload = json!({
                 "candidate": candidate,
@@ -1631,9 +1665,10 @@ impl Store {
                     r#"
                 INSERT INTO simulated_bets (
                   id, candidate_id, hypothetical_stake, observed_decimal_odds, status,
-                  strategy_id, settlement_payload, payload
+                  strategy_id, event_start_time, expected_result_check_after,
+                  settlement_payload, payload
                 )
-                SELECT $1,$2,($3::float8)::numeric,($4::float8)::numeric,$5,$6,$7,$8
+                SELECT $1,$2,($3::float8)::numeric,($4::float8)::numeric,$5,$6,$7,$8,$9,$10
                 WHERE NOT EXISTS (
                   SELECT 1 FROM simulated_bets WHERE candidate_id = $2 AND status <> 'duplicate_void'
                 )
@@ -1641,16 +1676,16 @@ impl Store {
                   SELECT 1
                   FROM simulated_bets sb
                   JOIN candidate_bets existing ON existing.id = sb.candidate_id
-                  WHERE existing.event_id = $10
-                    AND existing.market_id = $11
-                    AND existing.outcome_id = $12
+                  WHERE existing.event_id = $12
+                    AND existing.market_id = $13
+                    AND existing.outcome_id = $14
                     AND sb.status <> 'duplicate_void'
                 )
                 AND (
                   SELECT COALESCE(sum(hypothetical_stake), 0)
                   FROM simulated_bets
                   WHERE status IN ('open', 'awaiting_result', 'unresolved')
-                ) + ($3::float8)::numeric <= ($9::float8)::numeric
+                ) + ($3::float8)::numeric <= ($11::float8)::numeric
                 ON CONFLICT DO NOTHING
                 "#,
                 &[
@@ -1660,6 +1695,8 @@ impl Store {
                         &candidate.decimal_odds,
                         &"open",
                     &strategy_id,
+                    &event_start_time,
+                    &expected_result_check_after,
                     &json!({}),
                     &payload,
                     &max_open_exposure,
@@ -1705,7 +1742,7 @@ impl Store {
                 r#"
                 SELECT id, candidate_id, created_at, hypothetical_stake::float8 AS hypothetical_stake,
                        observed_decimal_odds::float8 AS observed_decimal_odds, status,
-                       strategy_id, settled_at,
+                       strategy_id, event_start_time, expected_result_check_after, settled_at,
                        simulated_return::float8 AS simulated_return,
                        profit_loss::float8 AS profit_loss,
                        settlement_payload, payload
@@ -1738,7 +1775,8 @@ impl Store {
                 SELECT sb.id, sb.candidate_id, sb.created_at,
                        sb.hypothetical_stake::float8 AS hypothetical_stake,
                        sb.observed_decimal_odds::float8 AS observed_decimal_odds,
-                       sb.status, sb.strategy_id, sb.settled_at,
+                       sb.status, sb.strategy_id, sb.event_start_time,
+                       sb.expected_result_check_after, sb.settled_at,
                        sb.simulated_return::float8 AS simulated_return,
                        sb.profit_loss::float8 AS profit_loss,
                        sb.settlement_payload, sb.payload
@@ -1807,6 +1845,7 @@ impl Store {
                     cb.sport_key,
                     cb.competition,
                     COALESCE(
+                      sb.event_start_time,
                       se.start_time,
                       CASE
                         WHEN cb.feature_snapshot ? 'start_time'
@@ -1815,6 +1854,26 @@ impl Store {
                         ELSE NULL
                       END
                     ) AS event_start_time,
+                    COALESCE(
+                      sb.expected_result_check_after,
+                      CASE
+                        WHEN COALESCE(
+                          sb.event_start_time,
+                          se.start_time,
+                          CASE
+                            WHEN cb.feature_snapshot ? 'start_time'
+                             AND cb.feature_snapshot->>'start_time' ~ '^[0-9]{4}-'
+                            THEN (cb.feature_snapshot->>'start_time')::timestamptz
+                            ELSE NULL
+                          END
+                        ) IS NULL THEN NULL
+                        WHEN cb.sport_key = 'football' THEN COALESCE(sb.event_start_time, se.start_time, (cb.feature_snapshot->>'start_time')::timestamptz) + interval '130 minutes'
+                        WHEN cb.sport_key = 'basketball' THEN COALESCE(sb.event_start_time, se.start_time, (cb.feature_snapshot->>'start_time')::timestamptz) + interval '150 minutes'
+                        WHEN cb.sport_key = 'tennis' THEN COALESCE(sb.event_start_time, se.start_time, (cb.feature_snapshot->>'start_time')::timestamptz) + interval '240 minutes'
+                        WHEN cb.sport_key IN ('formula1', 'golf', 'cycling') THEN COALESCE(sb.event_start_time, se.start_time, (cb.feature_snapshot->>'start_time')::timestamptz) + interval '1 day'
+                        ELSE COALESCE(sb.event_start_time, se.start_time, (cb.feature_snapshot->>'start_time')::timestamptz) + interval '4 hours'
+                      END
+                    ) AS expected_result_check_after,
                     se.status AS event_status,
                     se.resulted AS event_resulted,
                     se.settled AS event_settled
@@ -1823,6 +1882,7 @@ impl Store {
                   LEFT JOIN sport_events se ON se.id = cb.event_id
                   WHERE sb.status = 'open'
                     AND COALESCE(
+                      sb.event_start_time,
                       se.start_time,
                       CASE
                         WHEN cb.feature_snapshot ? 'start_time'
@@ -1836,6 +1896,11 @@ impl Store {
                 )
                 UPDATE simulated_bets sb
                 SET status = 'awaiting_result',
+                    event_start_time = COALESCE(sb.event_start_time, eligible.event_start_time),
+                    expected_result_check_after = COALESCE(
+                      sb.expected_result_check_after,
+                      eligible.expected_result_check_after
+                    ),
                     settlement_payload = sb.settlement_payload || jsonb_build_object(
                       'queue_transition',
                       jsonb_build_object(
@@ -1844,6 +1909,7 @@ impl Store {
                         'transitioned_at', now(),
                         'source', 'settlement_queue',
                         'event_start_time', eligible.event_start_time,
+                        'expected_result_check_after', eligible.expected_result_check_after,
                         'event_status', eligible.event_status,
                         'event_resulted', eligible.event_resulted,
                         'event_settled', eligible.event_settled,
@@ -1861,6 +1927,7 @@ impl Store {
                   eligible.sport_key,
                   eligible.competition,
                   eligible.event_start_time,
+                  eligible.expected_result_check_after,
                   eligible.event_status,
                   eligible.event_resulted,
                   eligible.event_settled
@@ -1881,6 +1948,7 @@ impl Store {
                     cc.strategy_id,
                     max(
                       COALESCE(
+                        scl.event_start_time,
                         se.start_time,
                         CASE
                           WHEN cb.feature_snapshot ? 'start_time'
@@ -1890,6 +1958,28 @@ impl Store {
                         END
                       )
                     ) AS event_start_time,
+                    max(
+                      COALESCE(
+                        scl.expected_result_check_after,
+                        CASE
+                          WHEN COALESCE(
+                            scl.event_start_time,
+                            se.start_time,
+                            CASE
+                              WHEN cb.feature_snapshot ? 'start_time'
+                               AND cb.feature_snapshot->>'start_time' ~ '^[0-9]{4}-'
+                              THEN (cb.feature_snapshot->>'start_time')::timestamptz
+                              ELSE NULL
+                            END
+                          ) IS NULL THEN NULL
+                          WHEN cb.sport_key = 'football' THEN COALESCE(scl.event_start_time, se.start_time, (cb.feature_snapshot->>'start_time')::timestamptz) + interval '130 minutes'
+                          WHEN cb.sport_key = 'basketball' THEN COALESCE(scl.event_start_time, se.start_time, (cb.feature_snapshot->>'start_time')::timestamptz) + interval '150 minutes'
+                          WHEN cb.sport_key = 'tennis' THEN COALESCE(scl.event_start_time, se.start_time, (cb.feature_snapshot->>'start_time')::timestamptz) + interval '240 minutes'
+                          WHEN cb.sport_key IN ('formula1', 'golf', 'cycling') THEN COALESCE(scl.event_start_time, se.start_time, (cb.feature_snapshot->>'start_time')::timestamptz) + interval '1 day'
+                          ELSE COALESCE(scl.event_start_time, se.start_time, (cb.feature_snapshot->>'start_time')::timestamptz) + interval '4 hours'
+                        END
+                      )
+                    ) AS expected_result_check_after,
                     jsonb_agg(
                       jsonb_build_object(
                         'candidate_id', cb.id,
@@ -1901,12 +1991,33 @@ impl Store {
                         'market_name', cb.market_name,
                         'outcome_name', cb.outcome_name,
                         'event_start_time', COALESCE(
+                          scl.event_start_time,
                           se.start_time,
                           CASE
                             WHEN cb.feature_snapshot ? 'start_time'
                              AND cb.feature_snapshot->>'start_time' ~ '^[0-9]{4}-'
                             THEN (cb.feature_snapshot->>'start_time')::timestamptz
                             ELSE NULL
+                          END
+                        ),
+                        'expected_result_check_after', COALESCE(
+                          scl.expected_result_check_after,
+                          CASE
+                            WHEN COALESCE(
+                              scl.event_start_time,
+                              se.start_time,
+                              CASE
+                                WHEN cb.feature_snapshot ? 'start_time'
+                                 AND cb.feature_snapshot->>'start_time' ~ '^[0-9]{4}-'
+                                THEN (cb.feature_snapshot->>'start_time')::timestamptz
+                                ELSE NULL
+                              END
+                            ) IS NULL THEN NULL
+                            WHEN cb.sport_key = 'football' THEN COALESCE(scl.event_start_time, se.start_time, (cb.feature_snapshot->>'start_time')::timestamptz) + interval '130 minutes'
+                            WHEN cb.sport_key = 'basketball' THEN COALESCE(scl.event_start_time, se.start_time, (cb.feature_snapshot->>'start_time')::timestamptz) + interval '150 minutes'
+                            WHEN cb.sport_key = 'tennis' THEN COALESCE(scl.event_start_time, se.start_time, (cb.feature_snapshot->>'start_time')::timestamptz) + interval '240 minutes'
+                            WHEN cb.sport_key IN ('formula1', 'golf', 'cycling') THEN COALESCE(scl.event_start_time, se.start_time, (cb.feature_snapshot->>'start_time')::timestamptz) + interval '1 day'
+                            ELSE COALESCE(scl.event_start_time, se.start_time, (cb.feature_snapshot->>'start_time')::timestamptz) + interval '4 hours'
                           END
                         ),
                         'event_status', se.status,
@@ -1939,6 +2050,14 @@ impl Store {
                 )
                 UPDATE simulated_coupons sc
                 SET status = 'awaiting_result',
+                    latest_event_start_time = COALESCE(
+                      sc.latest_event_start_time,
+                      eligible.event_start_time
+                    ),
+                    expected_result_check_after = COALESCE(
+                      sc.expected_result_check_after,
+                      eligible.expected_result_check_after
+                    ),
                     settlement_payload = sc.settlement_payload || jsonb_build_object(
                       'queue_transition',
                       jsonb_build_object(
@@ -1949,6 +2068,7 @@ impl Store {
                         'coupon_type', eligible.coupon_type,
                         'leg_count', eligible.leg_count,
                         'event_start_time', eligible.event_start_time,
+                        'expected_result_check_after', eligible.expected_result_check_after,
                         'legs', eligible.legs,
                         'paper_only', true
                       )
@@ -1963,6 +2083,7 @@ impl Store {
                   eligible.combined_decimal_odds,
                   eligible.strategy_id,
                   eligible.event_start_time,
+                  eligible.expected_result_check_after,
                   eligible.legs
                 "#,
                 &[&(awaiting_grace_minutes as i32), &(limit as i64)],
@@ -1982,6 +2103,8 @@ impl Store {
             .iter()
             .map(|row| {
                 let event_start_time: Option<DateTime<Utc>> = row.get("event_start_time");
+                let expected_result_check_after: Option<DateTime<Utc>> =
+                    row.get("expected_result_check_after");
                 json!({
                     "item_type": "single",
                     "bet_id": row.get::<_, String>("id"),
@@ -1992,6 +2115,7 @@ impl Store {
                     "sport_key": row.get::<_, Option<String>>("sport_key"),
                     "competition": row.get::<_, Option<String>>("competition"),
                     "event_start_time": event_start_time,
+                    "expected_result_check_after": expected_result_check_after,
                     "event_status": row.get::<_, Option<String>>("event_status"),
                     "event_resulted": row.get::<_, Option<bool>>("event_resulted"),
                     "event_settled": row.get::<_, Option<bool>>("event_settled"),
@@ -2001,6 +2125,8 @@ impl Store {
             .collect();
         items.extend(coupon_rows.iter().map(|row| {
             let event_start_time: Option<DateTime<Utc>> = row.get("event_start_time");
+            let expected_result_check_after: Option<DateTime<Utc>> =
+                row.get("expected_result_check_after");
             json!({
                 "item_type": "coupon",
                 "coupon_simulation_id": row.get::<_, String>("id"),
@@ -2010,6 +2136,7 @@ impl Store {
                 "combined_decimal_odds": row.get::<_, Option<f64>>("combined_decimal_odds"),
                 "strategy_id": row.get::<_, String>("strategy_id"),
                 "event_start_time": event_start_time,
+                "expected_result_check_after": expected_result_check_after,
                 "legs": row.get::<_, Value>("legs"),
                 "new_status": "awaiting_result"
             })
@@ -2056,7 +2183,7 @@ impl Store {
                     cb.outcome_id,
                     cb.outcome_name,
                     cb.decimal_odds::float8 AS observed_decimal_odds,
-                    se.start_time,
+                    COALESCE(sb.event_start_time, se.start_time) AS start_time,
                     se.status AS event_status,
                     se.resulted AS event_resulted,
                     se.settled AS event_settled,
@@ -2071,14 +2198,17 @@ impl Store {
                     oo.displayed AS latest_outcome_displayed,
                     oo.decimal_odds::float8 AS latest_decimal_odds,
                     oo.payload AS latest_outcome_payload,
-                    CASE
-                      WHEN se.start_time IS NULL THEN NULL
-                      WHEN cb.sport_key = 'football' THEN se.start_time + interval '130 minutes'
-                      WHEN cb.sport_key = 'basketball' THEN se.start_time + interval '150 minutes'
-                      WHEN cb.sport_key = 'tennis' THEN se.start_time + interval '240 minutes'
-                      WHEN cb.sport_key IN ('formula1', 'golf', 'cycling') THEN se.start_time + interval '1 day'
-                      ELSE se.start_time + interval '4 hours'
-                    END AS expected_result_check_after
+                    COALESCE(
+                      sb.expected_result_check_after,
+                      CASE
+                        WHEN COALESCE(sb.event_start_time, se.start_time) IS NULL THEN NULL
+                        WHEN cb.sport_key = 'football' THEN COALESCE(sb.event_start_time, se.start_time) + interval '130 minutes'
+                        WHEN cb.sport_key = 'basketball' THEN COALESCE(sb.event_start_time, se.start_time) + interval '150 minutes'
+                        WHEN cb.sport_key = 'tennis' THEN COALESCE(sb.event_start_time, se.start_time) + interval '240 minutes'
+                        WHEN cb.sport_key IN ('formula1', 'golf', 'cycling') THEN COALESCE(sb.event_start_time, se.start_time) + interval '1 day'
+                        ELSE COALESCE(sb.event_start_time, se.start_time) + interval '4 hours'
+                      END
+                    ) AS expected_result_check_after
                   FROM simulated_bets sb
                   JOIN candidate_bets cb ON cb.id = sb.candidate_id
                   LEFT JOIN sport_events se ON se.id = cb.event_id
@@ -2103,7 +2233,12 @@ impl Store {
                   LIMIT $1
                 )
                 UPDATE simulated_bets sb
-                SET settlement_payload = sb.settlement_payload || jsonb_build_object(
+                SET event_start_time = COALESCE(sb.event_start_time, review.start_time),
+                    expected_result_check_after = COALESCE(
+                      sb.expected_result_check_after,
+                      review.expected_result_check_after
+                    ),
+                    settlement_payload = sb.settlement_payload || jsonb_build_object(
                   'review_evidence',
                   jsonb_build_object(
                     'source', 'danskespil_content_service',
@@ -2191,7 +2326,7 @@ impl Store {
                     cb.outcome_id,
                     cb.outcome_name,
                     cb.decimal_odds::float8 AS observed_decimal_odds,
-                    se.start_time,
+                    COALESCE(scl.event_start_time, se.start_time) AS start_time,
                     se.status AS event_status,
                     se.resulted AS event_resulted,
                     se.settled AS event_settled,
@@ -2201,14 +2336,17 @@ impl Store {
                     oo.displayed AS latest_outcome_displayed,
                     oo.decimal_odds::float8 AS latest_decimal_odds,
                     oo.payload AS latest_outcome_payload,
-                    CASE
-                      WHEN se.start_time IS NULL THEN NULL
-                      WHEN cb.sport_key = 'football' THEN se.start_time + interval '130 minutes'
-                      WHEN cb.sport_key = 'basketball' THEN se.start_time + interval '150 minutes'
-                      WHEN cb.sport_key = 'tennis' THEN se.start_time + interval '240 minutes'
-                      WHEN cb.sport_key IN ('formula1', 'golf', 'cycling') THEN se.start_time + interval '1 day'
-                      ELSE se.start_time + interval '4 hours'
-                    END AS expected_result_check_after
+                    COALESCE(
+                      scl.expected_result_check_after,
+                      CASE
+                        WHEN COALESCE(scl.event_start_time, se.start_time) IS NULL THEN NULL
+                        WHEN cb.sport_key = 'football' THEN COALESCE(scl.event_start_time, se.start_time) + interval '130 minutes'
+                        WHEN cb.sport_key = 'basketball' THEN COALESCE(scl.event_start_time, se.start_time) + interval '150 minutes'
+                        WHEN cb.sport_key = 'tennis' THEN COALESCE(scl.event_start_time, se.start_time) + interval '240 minutes'
+                        WHEN cb.sport_key IN ('formula1', 'golf', 'cycling') THEN COALESCE(scl.event_start_time, se.start_time) + interval '1 day'
+                        ELSE COALESCE(scl.event_start_time, se.start_time) + interval '4 hours'
+                      END
+                    ) AS expected_result_check_after
                   FROM simulated_coupons sc
                   JOIN candidate_coupons cc ON cc.id = sc.coupon_id
                   JOIN simulated_coupon_legs scl ON scl.simulated_coupon_id = sc.id
@@ -2278,7 +2416,15 @@ impl Store {
                   LIMIT $1
                 )
                 UPDATE simulated_coupons sc
-                SET settlement_payload = sc.settlement_payload || jsonb_build_object(
+                SET latest_event_start_time = COALESCE(
+                      sc.latest_event_start_time,
+                      (SELECT max((leg->>'start_time')::timestamptz) FROM jsonb_array_elements(review.legs) leg WHERE leg ? 'start_time')
+                    ),
+                    expected_result_check_after = COALESCE(
+                      sc.expected_result_check_after,
+                      review.expected_result_check_after
+                    ),
+                    settlement_payload = sc.settlement_payload || jsonb_build_object(
                   'review_evidence',
                   jsonb_build_object(
                     'source', 'danskespil_content_service',
@@ -2397,7 +2543,7 @@ impl Store {
                 r#"
                 SELECT id, candidate_id, created_at, hypothetical_stake::float8 AS hypothetical_stake,
                        observed_decimal_odds::float8 AS observed_decimal_odds, status,
-                       strategy_id, settled_at,
+                       strategy_id, event_start_time, expected_result_check_after, settled_at,
                        simulated_return::float8 AS simulated_return,
                        profit_loss::float8 AS profit_loss,
                        settlement_payload, payload
@@ -4413,12 +4559,72 @@ fn simulated_bet_from_row(row: &Row) -> SimulatedBet {
         observed_decimal_odds: row.get("observed_decimal_odds"),
         status: row.get("status"),
         strategy_id: row.get("strategy_id"),
+        event_start_time: row.get("event_start_time"),
+        expected_result_check_after: row.get("expected_result_check_after"),
         settled_at: row.get("settled_at"),
         simulated_return: row.get("simulated_return"),
         profit_loss: row.get("profit_loss"),
         settlement_payload: row.get("settlement_payload"),
         payload: row.get("payload"),
     }
+}
+
+fn candidate_event_start_time(candidate: &CandidateBet) -> Option<DateTime<Utc>> {
+    candidate
+        .feature_snapshot
+        .get("start_time")
+        .and_then(Value::as_str)
+        .and_then(parse_rfc3339_utc)
+}
+
+fn leg_event_start_time(leg: &Value) -> Option<DateTime<Utc>> {
+    leg.get("payload")
+        .and_then(|payload| payload.get("candidate"))
+        .and_then(|candidate| candidate.get("feature_snapshot"))
+        .and_then(|features| features.get("start_time"))
+        .and_then(Value::as_str)
+        .and_then(parse_rfc3339_utc)
+}
+
+fn leg_expected_result_check_after(leg: &Value) -> Option<DateTime<Utc>> {
+    let sport_key = leg
+        .get("payload")
+        .and_then(|payload| payload.get("candidate"))
+        .and_then(|candidate| candidate.get("sport_key"))
+        .and_then(Value::as_str)
+        .unwrap_or_default();
+    expected_result_check_after_for_sport(sport_key, leg_event_start_time(leg))
+}
+
+fn coupon_latest_event_start_time(legs: &[Value]) -> Option<DateTime<Utc>> {
+    legs.iter().filter_map(leg_event_start_time).max()
+}
+
+fn coupon_expected_result_check_after(legs: &[Value]) -> Option<DateTime<Utc>> {
+    legs.iter()
+        .filter_map(leg_expected_result_check_after)
+        .max()
+}
+
+fn expected_result_check_after_for_sport(
+    sport_key: &str,
+    event_start_time: Option<DateTime<Utc>>,
+) -> Option<DateTime<Utc>> {
+    let start = event_start_time?;
+    let duration = match sport_key {
+        "football" => Duration::minutes(130),
+        "basketball" => Duration::minutes(150),
+        "tennis" => Duration::minutes(240),
+        "formula1" | "golf" | "cycling" => Duration::days(1),
+        _ => Duration::hours(4),
+    };
+    Some(start + duration)
+}
+
+fn parse_rfc3339_utc(value: &str) -> Option<DateTime<Utc>> {
+    DateTime::parse_from_rfc3339(value)
+        .ok()
+        .map(|timestamp| timestamp.with_timezone(&Utc))
 }
 
 fn strategy_experiment_from_row(row: &Row) -> Value {

@@ -61,7 +61,7 @@ pub fn render_index(base_path: &str) -> String {
                         h2 { "Simulated coupons" }
                         table {
                             thead { tr {
-                                th { "Created" } th { "Coupon" } th { "Stake" } th { "Status" } th { "P/L" } th {}
+                                th { "Created" } th { "Coupon" } th { "Stake" } th { "Expected" } th { "Status" } th { "P/L" } th {}
                             } }
                             tbody { id: "simulated-coupons" }
                         }
@@ -74,7 +74,7 @@ pub fn render_index(base_path: &str) -> String {
                         h2 { "Paper ledger" }
                         table {
                             thead { tr {
-                                th { "Created" } th { "Selection" } th { "Stake" } th { "Status" } th { "P/L" } th {}
+                                th { "Created" } th { "Selection" } th { "Stake" } th { "Expected" } th { "Status" } th { "P/L" } th {}
                             } }
                             tbody { id: "ledger" }
                         }
@@ -331,6 +331,7 @@ function renderSimulatedCoupons(items) {
         <td>${esc(item.created_at)}</td>
         <td>${couponLabel(item)}<br><span class="label">${esc(item.strategy_id || "")}</span></td>
         <td>${money(item.hypothetical_stake)}<br><span class="muted">@ ${item.observed_combined_decimal_odds ?? "-"}</span></td>
+        <td>${esc(item.expected_result_check_after || "-")}<br><span class="muted">${esc(item.latest_event_start_time || "")}</span></td>
         <td>${esc(item.status)}</td>
         <td>${item.profit_loss === null || item.profit_loss === undefined ? "-" : money(item.profit_loss)}</td>
         <td>
@@ -344,7 +345,7 @@ function renderSimulatedCoupons(items) {
     `;
   }).join("");
   if (!items.length) {
-    $("simulated-coupons").innerHTML = `<tr><td colspan="6" class="muted">No paper coupons have been simulated yet.</td></tr>`;
+    $("simulated-coupons").innerHTML = `<tr><td colspan="7" class="muted">No paper coupons have been simulated yet.</td></tr>`;
   }
   document.querySelectorAll("[data-coupon-settle]").forEach((button) => {
     button.addEventListener("click", async () => {
@@ -373,6 +374,7 @@ function renderLedger(items) {
       <td>${esc(item.created_at)}</td>
       <td>${esc(candidateLabel(item))}<br><span class="label">${esc(item.strategy_id || "")}</span></td>
       <td>${money(item.hypothetical_stake)}<br><span class="muted">@ ${item.observed_decimal_odds ?? "-"}</span></td>
+      <td>${esc(item.expected_result_check_after || "-")}<br><span class="muted">${esc(item.event_start_time || "")}</span></td>
       <td>${esc(item.status)}</td>
       <td>${item.profit_loss === null || item.profit_loss === undefined ? "-" : money(item.profit_loss)}</td>
       <td>

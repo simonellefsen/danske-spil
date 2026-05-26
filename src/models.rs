@@ -38,6 +38,8 @@ pub struct SimulatedBet {
     pub observed_decimal_odds: Option<f64>,
     pub status: String,
     pub strategy_id: String,
+    pub event_start_time: Option<DateTime<Utc>>,
+    pub expected_result_check_after: Option<DateTime<Utc>>,
     pub settled_at: Option<DateTime<Utc>>,
     pub simulated_return: Option<f64>,
     pub profit_loss: Option<f64>,

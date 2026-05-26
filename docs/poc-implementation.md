@@ -154,7 +154,7 @@ GET  /api/ledger/queue
 POST /api/ledger/queue
 ```
 
-This is only a queue transition. It does not grade a bet as won, lost, or void. The next settlement implementation should store an expected result-check-after time per paper bet, then re-check awaiting-result bets on the same 15-minute worker cadence until the result is verified or the item needs manual review.
+This is only a queue transition. It does not grade a bet as won, lost, or void. Paper bets and paper coupons now store the observed event start time and an expected result-check-after timestamp, then re-check awaiting-result items on the same 15-minute worker cadence until the result is verified or the item needs manual review.
 
 Strategy state is available at:
 
@@ -224,6 +224,7 @@ Current result-review status:
 - `GET/POST /api/settlement/review` refreshes review evidence for `awaiting_result` and `unresolved` paper bets.
 - The same review endpoint also refreshes simulated coupon evidence with leg-level event, market, outcome, latest price, and result-state metadata.
 - The worker runs the same review refresh after advancing the settlement queue.
+- `simulated_bets`, `simulated_coupons`, and `simulated_coupon_legs` preserve event start and expected result-check-after timestamps for operator scheduling.
 - Review evidence is written into each bet's `settlement_payload.review_evidence`.
 - Coupon review evidence is written into each simulated coupon's `settlement_payload.review_evidence`.
 - The review queue joins paper bets to the latest observed event, market, and outcome payloads from the Danske Spil content feed.

@@ -88,6 +88,7 @@ Current POC status:
 - Selected candidates can be auto-paper-placed into `simulated_bets` with per-scan and max-open-exposure caps. This is idempotent per candidate and remains simulation-only.
 - Multi-leg coupons are planned but not yet automated. They should only be paper-ledgered after provider accumulator support and category restrictions are verified from observed data.
 - Open paper bets move to `awaiting_result` after the event start time has passed. This queues them for result lookup without grading the outcome.
+- Open paper bets and paper coupons store the event start time and expected result-check-after timestamp so the operator can see when each simulated position should be reviewed.
 - The intended worker cadence is roughly every 15 minutes: scan for new opportunities, auto-place eligible paper bets, queue finished or likely-finished bets, and re-check awaiting-result bets for verified outcomes.
 - Automated result lookup is still pending and should use the source ordering above.
 
