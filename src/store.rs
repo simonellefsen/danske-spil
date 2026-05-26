@@ -3554,6 +3554,48 @@ impl Store {
         }))
     }
 
+    async fn settlement_source_record(&self, source_key: &str) -> anyhow::Result<Value> {
+        if source_key.is_empty() {
+            return Err(anyhow!("settlement source is required"));
+        }
+        let client = self.connect().await?;
+        let row = client
+            .query_opt(
+                r#"
+                SELECT
+                  source_key,
+                  source_name,
+                  source_type,
+                  url_pattern,
+                  sport_scope,
+                  reliability::float8 AS reliability,
+                  manual_review_required,
+                  notes,
+                  last_seen_at,
+                  payload
+                FROM source_registry
+                WHERE source_key = $1
+                  AND can_settle = true
+                "#,
+                &[&source_key],
+            )
+            .await?
+            .ok_or_else(|| anyhow!("unsupported settlement source: {source_key}"))?;
+        let last_seen_at: DateTime<Utc> = row.get("last_seen_at");
+        Ok(json!({
+            "source_key": row.get::<_, String>("source_key"),
+            "source_name": row.get::<_, String>("source_name"),
+            "source_type": row.get::<_, String>("source_type"),
+            "url_pattern": row.get::<_, Option<String>>("url_pattern"),
+            "sport_scope": row.get::<_, Vec<String>>("sport_scope"),
+            "reliability": row.get::<_, f64>("reliability"),
+            "manual_review_required": row.get::<_, bool>("manual_review_required"),
+            "notes": row.get::<_, Option<String>>("notes"),
+            "last_seen_at": last_seen_at,
+            "payload": row.get::<_, Value>("payload")
+        }))
+    }
+
     pub async fn settle_simulated_bet(
         &self,
         bet_id: &str,
@@ -3586,6 +3628,7 @@ impl Store {
         ) {
             return Err(anyhow!("simulated bet is already settled: {bet_id}"));
         }
+        let source_record = self.settlement_source_record(source).await?;
         let (simulated_return, profit_loss) = match result {
             "won" => {
                 let returned =
@@ -3598,13 +3641,27 @@ impl Store {
             }
             _ => (None, None),
         };
-        let settlement_payload = json!({
+        let manual_settlement = json!({
             "source": source,
+            "source_policy": source_record,
             "observed_result": result,
             "confidence": confidence,
             "notes": notes,
+            "settled_at": Utc::now(),
             "paper_only": true
         });
+        let mut settlement_payload = bet.settlement_payload.clone();
+        merge_json_object(
+            &mut settlement_payload,
+            json!({
+                "source": source,
+                "observed_result": result,
+                "confidence": confidence,
+                "notes": notes,
+                "paper_only": true,
+                "manual_settlement": manual_settlement
+            }),
+        );
         let settled_at = Utc::now();
         let mut client = self.connect().await?;
         let transaction = client.transaction().await?;
@@ -3703,14 +3760,33 @@ impl Store {
             "void" | "pushed" | "cancelled" | "abandoned" | "refunded" => (Some(stake), Some(0.0)),
             _ => (None, None),
         };
-        let settlement_payload = json!({
+        let source_record = self.settlement_source_record(source).await?;
+        let manual_settlement = json!({
             "source": source,
+            "source_policy": source_record,
             "observed_result": result,
             "confidence": confidence,
             "notes": notes,
+            "settled_at": Utc::now(),
             "paper_only": true,
             "coupon_level": true
         });
+        let mut settlement_payload = coupon
+            .get("settlement_payload")
+            .cloned()
+            .unwrap_or_else(|| json!({}));
+        merge_json_object(
+            &mut settlement_payload,
+            json!({
+                "source": source,
+                "observed_result": result,
+                "confidence": confidence,
+                "notes": notes,
+                "paper_only": true,
+                "coupon_level": true,
+                "manual_settlement": manual_settlement
+            }),
+        );
         let settled_at = Utc::now();
         let mut client = self.connect().await?;
         let transaction = client.transaction().await?;
@@ -5285,6 +5361,17 @@ fn parse_rfc3339_utc(value: &str) -> Option<DateTime<Utc>> {
     DateTime::parse_from_rfc3339(value)
         .ok()
         .map(|timestamp| timestamp.with_timezone(&Utc))
+}
+
+fn merge_json_object(target: &mut Value, patch: Value) {
+    if !target.is_object() {
+        *target = json!({});
+    }
+    if let (Some(target), Some(patch)) = (target.as_object_mut(), patch.as_object()) {
+        for (key, value) in patch {
+            target.insert(key.clone(), value.clone());
+        }
+    }
 }
 
 fn strategy_experiment_from_row(row: &Row) -> Value {

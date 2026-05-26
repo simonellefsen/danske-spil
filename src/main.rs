@@ -408,7 +408,7 @@ async fn post_handler(
             let source = payload
                 .get("source")
                 .and_then(Value::as_str)
-                .unwrap_or("manual_operator_review");
+                .unwrap_or("danskespil_account_history");
             let confidence = payload
                 .get("confidence")
                 .and_then(Value::as_f64)
@@ -450,7 +450,7 @@ async fn post_handler(
             let source = payload
                 .get("source")
                 .and_then(Value::as_str)
-                .unwrap_or("manual_operator_review");
+                .unwrap_or("danskespil_account_history");
             let confidence = payload
                 .get("confidence")
                 .and_then(Value::as_f64)

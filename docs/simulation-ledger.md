@@ -95,6 +95,7 @@ Current POC status:
 - Manual settlement writes `settlement_observations` and computed simulated return/profit-loss.
 - The web UI shows configured settlement-capable source classes next to the review queue so manual grading can cite an approved source class.
 - Settlement review evidence persists the approved source policy order into each paper bet or coupon payload.
+- Manual settlement validates the cited source against `source_registry.can_settle` and stores the selected policy record without deleting prior review evidence.
 - Strategy selection is stored in `strategy_candidate_decisions`; rejected candidates are preserved for review but blocked from paper-ledger placement.
 - Selected candidates can be auto-paper-placed into `simulated_bets` with per-scan and max-open-exposure caps. This is idempotent per candidate and remains simulation-only.
 - Multi-leg coupons are auto-paper-placed only after the active strategy baseline enables the coupon mode and provider accumulator support is verified from observed data.

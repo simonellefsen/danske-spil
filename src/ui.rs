@@ -265,6 +265,11 @@ const settlementActions = [
 const settlementButtons = (attribute, id, disabled) => settlementActions.map(([result, label]) =>
   `<button ${attribute}="${esc(id || "")}" data-result="${result}" ${disabled || !id ? "disabled" : ""}>${label}</button>`
 ).join("");
+let currentSettlementSourceKey = "danskespil_account_history";
+const settlementSourceKey = (policy) => {
+  const preferred = ((policy || {}).items || [])[0] || {};
+  return preferred.source_key || currentSettlementSourceKey;
+};
 const json = (url, options = {}) => fetch(url, {
   headers: { "content-type": "application/json" },
   ...options
@@ -404,7 +409,7 @@ function renderSimulatedCoupons(items) {
         body: JSON.stringify({
           coupon_id: button.dataset.couponSettle,
           result: button.dataset.result,
-          source: "manual_operator_review",
+          source: currentSettlementSourceKey,
           confidence: 1
         })
       });
@@ -442,7 +447,7 @@ function renderLedger(items) {
         body: JSON.stringify({
           bet_id: button.dataset.settle,
           result: button.dataset.result,
-          source: "manual_operator_review",
+          source: currentSettlementSourceKey,
           confidence: 1
         })
       });
@@ -494,7 +499,7 @@ function renderSettlementReview(summary) {
         body: JSON.stringify({
           bet_id: button.dataset.reviewSettle,
           result: button.dataset.result,
-          source: "manual_operator_review",
+          source: settlementSourceKey(summary.settlement_source_policy),
           confidence: 1
         })
       });
@@ -508,7 +513,7 @@ function renderSettlementReview(summary) {
         body: JSON.stringify({
           coupon_id: button.dataset.reviewCouponSettle,
           result: button.dataset.result,
-          source: "manual_operator_review",
+          source: settlementSourceKey(summary.settlement_source_policy),
           confidence: 1
         })
       });
@@ -518,6 +523,7 @@ function renderSettlementReview(summary) {
 }
 function renderSettlementSources(sources) {
   const items = sources.items || [];
+  currentSettlementSourceKey = settlementSourceKey(sources);
   $("settlement-sources").innerHTML = items.map((item) => {
     const payload = item.payload || {};
     return `
@@ -738,14 +744,14 @@ async function load() {
   renderStrategyDecisions(decisions.items || []);
   const coupons = await json(api("/api/coupons"));
   renderCoupons(coupons.items || []);
+  const settlementSources = await json(api("/api/settlement/sources"));
+  renderSettlementSources(settlementSources);
   const simulatedCoupons = await json(api("/api/coupons/simulated"));
   renderSimulatedCoupons(simulatedCoupons.items || []);
   const ledger = await json(api("/api/ledger"));
   renderLedger(ledger.items || []);
   const settlementReview = await json(api("/api/settlement/review"));
   renderSettlementReview(settlementReview);
-  const settlementSources = await json(api("/api/settlement/sources"));
-  renderSettlementSources(settlementSources);
   const played = await json(api("/api/strategy/played"));
   renderPlayed(played);
   const performance = await json(api("/api/performance"));

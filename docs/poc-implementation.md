@@ -251,6 +251,7 @@ Current result-review status:
 - `simulated_bets`, `simulated_coupons`, and `simulated_coupon_legs` preserve event start and expected result-check-after timestamps for operator scheduling.
 - Review evidence is written into each bet's `settlement_payload.review_evidence`, including the approved settlement source policy order used for manual grading.
 - Coupon review evidence is written into each simulated coupon's `settlement_payload.review_evidence`, including the same settlement source policy order.
+- Manual settlement must cite a `source_registry` row where `can_settle=true`; the settlement payload preserves earlier review evidence and adds the selected source policy under `manual_settlement.source_policy`.
 - The review queue joins paper bets to the latest observed event, market, and outcome payloads from the Danske Spil content feed.
 - The system recommends `manual_grade_ready`, `manual_void_or_refund_review`, `expected_finish_passed_recheck`, or `await_more_evidence`.
 - It still does not auto-grade won/lost because the feed outcome result semantics have not been proven for each market type.
