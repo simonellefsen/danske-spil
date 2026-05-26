@@ -456,6 +456,8 @@ function renderSettlementReview(summary) {
     const isCoupon = item.item_type === "coupon";
     const legs = item.legs || [];
     const firstLeg = legs[0] || {};
+    const policy = item.settlement_source_policy || summary.settlement_source_policy || {};
+    const preferredSource = (policy.items || [])[0] || {};
     const selection = isCoupon
       ? `${item.coupon_type || "coupon"} (${item.leg_count || legs.length})`
       : `${item.event_name || item.bet_id || ""}`;
@@ -476,6 +478,7 @@ function renderSettlementReview(summary) {
         <td>${esc(item.event_status || firstLeg.event_status || "-")}<br><span class="muted">${esc(state)}</span></td>
         <td>
           <span class="pill">${esc(item.recommendation || "await_more_evidence")}</span>
+          <br><span class="muted">source: ${esc(preferredSource.source_key || "-")}</span>
           <div class="actions">${settlementButtons(actionAttribute, actionId, !canSettle)}</div>
         </td>
       </tr>

@@ -2378,6 +2378,7 @@ impl Store {
             }));
         }
 
+        let settlement_source_policy = self.settlement_sources().await?;
         let client = self.connect().await?;
         let rows = client
             .query(
@@ -2460,6 +2461,7 @@ impl Store {
                     'paper_only', true,
                     'not_auto_graded', true,
                     'requires_manual_grade', true,
+                    'settlement_source_policy', $2::jsonb,
                     'bet_status', review.bet_status,
                     'sport_key', review.sport_key,
                     'event_id', review.event_id,
@@ -2512,7 +2514,7 @@ impl Store {
                   review.latest_decimal_odds,
                   review.latest_outcome_payload
                 "#,
-                &[&(limit as i64)],
+                &[&(limit as i64), &settlement_source_policy],
             )
             .await?;
         let coupon_rows = client
@@ -2646,6 +2648,7 @@ impl Store {
                     'paper_only', true,
                     'not_auto_graded', true,
                     'requires_manual_grade', true,
+                    'settlement_source_policy', $2::jsonb,
                     'coupon_status', review.coupon_status,
                     'coupon_id', review.coupon_id,
                     'coupon_type', review.coupon_type,
@@ -2668,7 +2671,7 @@ impl Store {
                   review.expected_result_check_after,
                   review.legs
                 "#,
-                &[&(limit as i64)],
+                &[&(limit as i64), &settlement_source_policy],
             )
             .await?;
 
@@ -2713,6 +2716,7 @@ impl Store {
                     "latest_outcome_displayed": row.get::<_, Option<bool>>("latest_outcome_displayed"),
                     "latest_decimal_odds": row.get::<_, Option<f64>>("latest_decimal_odds"),
                     "latest_outcome_payload": row.get::<_, Option<Value>>("latest_outcome_payload"),
+                    "settlement_source_policy": settlement_source_policy.clone(),
                     "recommendation": recommendation
                 })
             })
@@ -2734,6 +2738,7 @@ impl Store {
                 "strategy_id": row.get::<_, String>("strategy_id"),
                 "expected_result_check_after": expected_result_check_after,
                 "legs": legs,
+                "settlement_source_policy": settlement_source_policy.clone(),
                 "recommendation": recommendation
             })
         }));
@@ -2745,6 +2750,7 @@ impl Store {
             "coupon_review_count": coupon_rows.len(),
             "limit": limit,
             "items": items,
+            "settlement_source_policy": settlement_source_policy,
             "paper_only": true,
             "not_auto_graded": true
         }))
