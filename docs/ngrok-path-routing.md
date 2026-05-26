@@ -31,3 +31,5 @@ rtk bash scripts/patch_ngrok_path_routing.sh
 ```
 
 The script sets the public endpoint default upstream to `gambler-api.danske-spil:8080`. The `danske-spil` UI is configured with `GAMBLER_BASE_PATH=/danske-spil`, so it can serve its HTML and API under the path prefix without stripping the prefix at ngrok. This avoids consuming an additional ngrok internal endpoint for `danske-spil`.
+
+`scripts/deploy_local_k8s.sh` also runs the patch automatically when the ngrok endpoint and traffic policy resources are present. Set `PATCH_NGROK_PATH_ROUTING=0` before running the deploy script to skip this step.
