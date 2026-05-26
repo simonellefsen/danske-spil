@@ -2,7 +2,7 @@ use crate::models::{CandidateBet, HermesReflection, LedgerSummary, SimulatedBet}
 use anyhow::{anyhow, Context};
 use chrono::{DateTime, Utc};
 use serde_json::{json, Value};
-use std::collections::{BTreeMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use tokio_postgres::{Client, NoTls, Row, Transaction};
 use uuid::Uuid;
 
@@ -3343,6 +3343,157 @@ impl Store {
             .ok_or_else(|| anyhow!("created strategy experiment not found"))
     }
 
+    async fn strategy_experiment_replay(&self, experiment_id: &str) -> anyhow::Result<Value> {
+        let client = self.connect().await?;
+        let experiment = client
+            .query_one(
+                r#"
+                SELECT variable_name, proposed_value, baseline_strategy_id, evidence
+                FROM strategy_experiments
+                WHERE id = $1
+                "#,
+                &[&experiment_id],
+            )
+            .await
+            .context("strategy experiment not found")?;
+        let variable_name: String = experiment.get("variable_name");
+        let proposed_value: Value = experiment.get("proposed_value");
+        let baseline_strategy_id: String = experiment.get("baseline_strategy_id");
+        let evidence: Value = experiment.get("evidence");
+        let baseline = client
+            .query_one(
+                r#"
+                SELECT id, version, config
+                FROM strategy_baselines
+                WHERE strategy_id = $1 AND active = true
+                ORDER BY created_at DESC
+                LIMIT 1
+                "#,
+                &[&baseline_strategy_id],
+            )
+            .await
+            .context("active baseline not found")?;
+        let baseline_id: String = baseline.get("id");
+        let baseline_version: i32 = baseline.get("version");
+        let baseline_config: Value = baseline.get("config");
+        let proposed_config =
+            strategy_config_with_change(&baseline_config, &variable_name, proposed_value);
+        let evidence_snapshot_id = evidence.get("snapshot_id").and_then(Value::as_str);
+        let rows = if let Some(snapshot_id) = evidence_snapshot_id {
+            client
+                .query(
+                    r#"
+                    SELECT id, snapshot_id, created_at, sport_key, event_id, event_name, competition,
+                           market_id, market_name, market_kind, outcome_id, outcome_name,
+                           decimal_odds::float8 AS decimal_odds, rationale,
+                           implied_probability::float8 AS implied_probability,
+                           model_probability::float8 AS model_probability,
+                           expected_value::float8 AS expected_value,
+                           confidence::float8 AS confidence,
+                           score::float8 AS score,
+                           risk_flags, feature_snapshot, status
+                    FROM candidate_bets
+                    WHERE snapshot_id = $1
+                    ORDER BY score DESC NULLS LAST, created_at ASC
+                    LIMIT 500
+                    "#,
+                    &[&snapshot_id],
+                )
+                .await?
+        } else {
+            client
+                .query(
+                    r#"
+                    SELECT id, snapshot_id, created_at, sport_key, event_id, event_name, competition,
+                           market_id, market_name, market_kind, outcome_id, outcome_name,
+                           decimal_odds::float8 AS decimal_odds, rationale,
+                           implied_probability::float8 AS implied_probability,
+                           model_probability::float8 AS model_probability,
+                           expected_value::float8 AS expected_value,
+                           confidence::float8 AS confidence,
+                           score::float8 AS score,
+                           risk_flags, feature_snapshot, status
+                    FROM candidate_bets
+                    ORDER BY created_at DESC, score DESC NULLS LAST
+                    LIMIT 500
+                    "#,
+                    &[],
+                )
+                .await?
+        };
+        let candidates: Vec<CandidateBet> = rows.iter().map(candidate_from_row).collect();
+        let baseline_eval = strategy_eval_for_config(&candidates, &baseline_config);
+        let proposed_eval = strategy_eval_for_config(&candidates, &proposed_config);
+        let candidate_count = candidates.len();
+
+        let mut newly_selected = Vec::new();
+        let mut newly_rejected = Vec::new();
+        for candidate in &candidates {
+            let baseline_decision = baseline_eval
+                .decisions
+                .get(candidate.id.as_str())
+                .map(|decision| decision.decision.as_str())
+                .unwrap_or("rejected");
+            let proposed_decision = proposed_eval
+                .decisions
+                .get(candidate.id.as_str())
+                .map(|decision| decision.decision.as_str())
+                .unwrap_or("rejected");
+            if baseline_decision != proposed_decision && proposed_decision == "selected" {
+                newly_selected.push(strategy_replay_candidate_example(candidate));
+            }
+            if baseline_decision != proposed_decision && proposed_decision == "rejected" {
+                let mut example = strategy_replay_candidate_example(candidate);
+                if let Some(decision) = proposed_eval.decisions.get(candidate.id.as_str()) {
+                    example["rejection_reasons"] = json!(decision.rejection_reasons);
+                }
+                newly_rejected.push(example);
+            }
+        }
+
+        let replay_evidence = json!({
+            "source": "strategy_experiment_replay",
+            "experiment_id": experiment_id,
+            "replayed_at": Utc::now(),
+            "paper_only": true,
+            "baseline_strategy_id": baseline_strategy_id,
+            "baseline_id": baseline_id,
+            "baseline_version": baseline_version,
+            "variable_name": variable_name,
+            "candidate_count": candidate_count,
+            "snapshot_id": evidence_snapshot_id,
+            "baseline": baseline_eval.summary_json(),
+            "proposed": proposed_eval.summary_json(),
+            "delta": {
+                "selected_count": proposed_eval.selected_count as i64 - baseline_eval.selected_count as i64,
+                "rejected_count": proposed_eval.rejected_count as i64 - baseline_eval.rejected_count as i64,
+                "newly_selected_count": newly_selected.len(),
+                "newly_rejected_count": newly_rejected.len()
+            },
+            "examples": {
+                "newly_selected": newly_selected.into_iter().take(8).collect::<Vec<_>>(),
+                "newly_rejected": newly_rejected.into_iter().take(8).collect::<Vec<_>>()
+            },
+            "safety": {
+                "does_not_enable_real_money": true,
+                "does_not_place_paper_bets": true,
+                "requires_operator_review": true
+            }
+        });
+        client
+            .execute(
+                r#"
+                UPDATE strategy_experiments
+                SET updated_at = now(),
+                    decision_payload = decision_payload || jsonb_build_object('replay_evidence', $1::jsonb)
+                WHERE id = $2
+                "#,
+                &[&replay_evidence, &experiment_id],
+            )
+            .await?;
+        Ok(replay_evidence)
+    }
+
     pub async fn review_strategy_experiment(
         &self,
         experiment_id: &str,
@@ -3352,13 +3503,10 @@ impl Store {
         if experiment_id.is_empty() {
             return Err(anyhow!("experiment_id is required"));
         }
-        let status = match action {
-            "approve" => "approved_for_replay",
-            "reject" => "rejected",
-            "activate" => "active_simulation",
-            "promote" => "promoted",
-            "rollback" => "rolled_back",
-            _ => return Err(anyhow!("unsupported experiment review action: {action}")),
+        let replay_evidence = if matches!(action, "replay" | "activate" | "promote") {
+            Some(self.strategy_experiment_replay(experiment_id).await?)
+        } else {
+            None
         };
         let mut client = self.connect().await?;
         let transaction = client.transaction().await?;
@@ -3373,13 +3521,25 @@ impl Store {
         let variable_name: String = previous.get("variable_name");
         let proposed_value: Value = previous.get("proposed_value");
         let baseline_strategy_id: String = previous.get("baseline_strategy_id");
-        let decision_payload = json!({
+        let status = match action {
+            "approve" => "approved_for_replay".to_string(),
+            "reject" => "rejected".to_string(),
+            "replay" => previous_status.clone(),
+            "activate" => "active_simulation".to_string(),
+            "promote" => "promoted".to_string(),
+            "rollback" => "rolled_back".to_string(),
+            _ => return Err(anyhow!("unsupported experiment review action: {action}")),
+        };
+        let mut decision_payload = json!({
             "action": action,
             "previous_status": previous_status,
             "notes": notes,
             "reviewed_at": Utc::now(),
             "paper_only": true
         });
+        if let Some(replay_evidence) = replay_evidence {
+            decision_payload["replay_evidence"] = replay_evidence;
+        }
         transaction
             .execute(
                 r#"
@@ -4083,6 +4243,138 @@ fn coupon_settlement_review_recommendation(
         return "expected_finish_passed_recheck";
     }
     "await_more_evidence"
+}
+
+#[derive(Debug, Clone)]
+struct StrategyEvalDecision {
+    decision: String,
+    rejection_reasons: Vec<String>,
+}
+
+#[derive(Debug, Clone)]
+struct StrategyEval {
+    selected_count: usize,
+    rejected_count: usize,
+    reason_counts: BTreeMap<String, usize>,
+    decisions: HashMap<String, StrategyEvalDecision>,
+}
+
+impl StrategyEval {
+    fn summary_json(&self) -> Value {
+        json!({
+            "selected_count": self.selected_count,
+            "rejected_count": self.rejected_count,
+            "rejection_reason_counts": self.reason_counts
+        })
+    }
+}
+
+fn strategy_eval_for_config(candidates: &[CandidateBet], config: &Value) -> StrategyEval {
+    let mut eval = StrategyEval {
+        selected_count: 0,
+        rejected_count: 0,
+        reason_counts: BTreeMap::new(),
+        decisions: HashMap::new(),
+    };
+    for candidate in candidates {
+        let rejection_reasons = strategy_rejection_reasons(candidate, config);
+        let decision = if rejection_reasons.is_empty() {
+            eval.selected_count += 1;
+            "selected"
+        } else {
+            eval.rejected_count += 1;
+            for reason in &rejection_reasons {
+                *eval.reason_counts.entry(reason.clone()).or_default() += 1;
+            }
+            "rejected"
+        };
+        eval.decisions.insert(
+            candidate.id.clone(),
+            StrategyEvalDecision {
+                decision: decision.to_string(),
+                rejection_reasons,
+            },
+        );
+    }
+    eval
+}
+
+fn strategy_rejection_reasons(candidate: &CandidateBet, config: &Value) -> Vec<String> {
+    let max_decimal_odds = config
+        .get("max_decimal_odds")
+        .and_then(Value::as_f64)
+        .unwrap_or(8.0);
+    let min_confidence = config
+        .get("min_confidence")
+        .and_then(Value::as_f64)
+        .unwrap_or(0.1);
+    let allow_live_markets = config
+        .get("allow_live_markets")
+        .and_then(Value::as_bool)
+        .unwrap_or(false);
+    let excluded_market_kinds: HashSet<String> = config
+        .get("excluded_market_kinds")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter_map(Value::as_str)
+        .map(str::to_string)
+        .collect();
+
+    let mut reasons = Vec::new();
+    match candidate.decimal_odds {
+        Some(odds) if odds > max_decimal_odds => reasons.push("above_max_decimal_odds".to_string()),
+        Some(_) => {}
+        None => reasons.push("missing_decimal_odds".to_string()),
+    }
+    if candidate.confidence.unwrap_or_default() < min_confidence {
+        reasons.push("below_min_confidence".to_string());
+    }
+    if candidate
+        .market_kind
+        .as_ref()
+        .is_some_and(|kind| excluded_market_kinds.contains(kind))
+    {
+        reasons.push("excluded_market_kind".to_string());
+    }
+    if !allow_live_markets
+        && candidate
+            .feature_snapshot
+            .get("live_now")
+            .and_then(Value::as_bool)
+            .unwrap_or(false)
+    {
+        reasons.push("live_market_disabled".to_string());
+    }
+    reasons
+}
+
+fn strategy_config_with_change(
+    baseline_config: &Value,
+    variable_name: &str,
+    proposed_value: Value,
+) -> Value {
+    let mut config = baseline_config.clone();
+    if let Some(object) = config.as_object_mut() {
+        object.insert(variable_name.to_string(), proposed_value);
+    }
+    config
+}
+
+fn strategy_replay_candidate_example(candidate: &CandidateBet) -> Value {
+    json!({
+        "candidate_id": candidate.id,
+        "sport_key": candidate.sport_key,
+        "event_name": candidate.event_name,
+        "competition": candidate.competition,
+        "market_kind": candidate.market_kind,
+        "market_name": candidate.market_name,
+        "outcome_name": candidate.outcome_name,
+        "decimal_odds": candidate.decimal_odds,
+        "score": candidate.score,
+        "confidence": candidate.confidence,
+        "risk_flags": candidate.risk_flags
+    })
 }
 
 fn candidate_from_row(row: &Row) -> CandidateBet {

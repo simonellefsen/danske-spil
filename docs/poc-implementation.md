@@ -132,6 +132,8 @@ The service persists a paper-only `poc_ranker_v1` baseline and one-variable stra
 
 The current automatic proposals are deliberately conservative. If a scan produces enough long-price candidate risk, the service proposes lowering `max_decimal_odds` from `8.0` to `6.0`. If specialized-market exposure is more visible, the service proposes excluding those market kinds until settlement and feature coverage are stronger. The proposal is evidence for review, not an autonomous behavior change.
 
+Approved experiments can be replayed before activation or promotion. Replay compares the active baseline config with the proposed one over the proposal snapshot, stores selected/rejected deltas in `strategy_experiments.decision_payload.replay_evidence`, and does not place paper bets or change the active baseline. The UI only enables activation or promotion once replay evidence is present.
+
 Each scan also applies the active baseline to every generated candidate and records a paper-only decision:
 
 - `selected`: candidate is eligible for paper-ledger simulation.
@@ -159,6 +161,7 @@ Strategy state is available at:
 ```text
 GET /api/strategy
 GET /api/strategy/decisions
+POST /api/strategy/experiment/review  # actions: approve, reject, replay, activate, promote, rollback
 ```
 
 ## Safety Boundary

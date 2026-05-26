@@ -122,7 +122,7 @@ GET  /api/strategy
 POST /api/strategy/experiment/review
 ```
 
-Allowed review actions are `approve`, `reject`, `activate`, `promote`, and `rollback`. Promotion creates a new active baseline version, but it remains paper-only and does not enable real-money placement.
+Allowed review actions are `approve`, `reject`, `replay`, `activate`, `promote`, and `rollback`. Replay stores proposal-vs-baseline evidence without placing paper bets or changing the active baseline. Promotion creates a new active baseline version, but it remains paper-only and does not enable real-money placement.
 
 ## Safe MCP Tool Surface
 

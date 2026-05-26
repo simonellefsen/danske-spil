@@ -498,10 +498,20 @@ function renderStrategy(strategy) {
     if (evidence.specialized_market_candidate_count !== undefined) {
       evidenceParts.push(`${evidence.specialized_market_candidate_count} specialized`);
     }
+    if (evidence.provider_supported_double_candidate_count !== undefined) {
+      evidenceParts.push(`${evidence.provider_supported_double_candidate_count} double-ready`);
+    }
+    const replay = item.decision_payload && item.decision_payload.replay_evidence
+      ? item.decision_payload.replay_evidence
+      : null;
+    if (replay && replay.delta) {
+      evidenceParts.push(`replay ${replay.delta.selected_count >= 0 ? "+" : ""}${replay.delta.selected_count} selected`);
+    }
     const evidenceText = evidenceParts.length ? evidenceParts.join(", ") : `${evidence.candidate_count ?? "-"} candidates`;
     const canApprove = item.status === "proposed";
-    const canActivate = item.status === "approved_for_replay";
-    const canPromote = item.status === "active_simulation";
+    const canReplay = ["proposed", "approved_for_replay", "active_simulation"].includes(item.status);
+    const canActivate = item.status === "approved_for_replay" && !!replay;
+    const canPromote = item.status === "active_simulation" && !!replay;
     return `
       <tr>
         <td>${esc(item.status)}</td>
@@ -512,6 +522,7 @@ function renderStrategy(strategy) {
           <div class="actions">
             <button data-exp="${item.id}" data-action="approve" ${!canApprove ? "disabled" : ""}>Approve</button>
             <button data-exp="${item.id}" data-action="reject" ${!canApprove ? "disabled" : ""}>Reject</button>
+            <button data-exp="${item.id}" data-action="replay" ${!canReplay ? "disabled" : ""}>Replay</button>
             <button data-exp="${item.id}" data-action="activate" ${!canActivate ? "disabled" : ""}>Activate</button>
             <button data-exp="${item.id}" data-action="promote" ${!canPromote ? "disabled" : ""}>Promote</button>
           </div>
