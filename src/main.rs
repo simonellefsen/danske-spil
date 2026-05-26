@@ -144,6 +144,7 @@ async fn get_handler(State(state): State<Arc<AppState>>, uri: OriginalUri) -> Re
             Ok(summary) => Json(summary).into_response(),
             Err(error) => error_response(StatusCode::INTERNAL_SERVER_ERROR, error),
         },
+        "/api/performance" => Json(state.service.performance_report().await).into_response(),
         "/api/ledger/queue" => Json(state.service.advance_settlement_queue().await).into_response(),
         "/api/settlement/review" => {
             Json(state.service.refresh_settlement_review_queue().await).into_response()

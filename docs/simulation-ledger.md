@@ -116,6 +116,19 @@ Current POC metrics are exposed through `/api/ledger/summary`:
 - Average observed odds.
 - Status breakdown.
 
+`/api/performance` adds an operational performance and opportunity report:
+
+- Latest scan candidate intake by selected/rejected status.
+- Selected but unplaced candidates from the latest snapshot.
+- Remaining paper placement capacity and exposure-cap blocker state.
+- Awaiting-result items due for review.
+- Paper performance by sport and strategy.
+
+Auto-paper placement walks a wider ranked selection window than the per-scan
+placement limit. This lets it skip opportunities already represented by
+existing non-void simulated exposure and still fill the available paper slots
+from lower-ranked eligible candidates.
+
 ## Data Model
 
 Candidate tables:

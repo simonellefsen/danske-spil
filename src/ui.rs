@@ -24,7 +24,9 @@ pub fn render_index(base_path: &str) -> String {
                     div { class: "metric", div { class: "label", "Strategy selected" } div { class: "value", id: "strategy-selected", "-" } }
                     div { class: "metric", div { class: "label", "Strategy rejected" } div { class: "value", id: "strategy-rejected", "-" } }
                     div { class: "metric", div { class: "label", "Auto paper" } div { class: "value", id: "auto-paper-state", "-" } }
+                    div { class: "metric", div { class: "label", "Next capacity" } div { class: "value", id: "next-capacity", "-" } }
                     div { class: "metric", div { class: "label", "Awaiting result" } div { class: "value", id: "awaiting-result", "-" } }
+                    div { class: "metric", div { class: "label", "Due review" } div { class: "value", id: "due-review", "-" } }
                     div { class: "metric", div { class: "label", "Open exposure" } div { class: "value", id: "exposure", "-" } }
                     div { class: "metric", div { class: "label", "Paper P/L" } div { class: "value", id: "profit", "-" } }
                     div { class: "metric", div { class: "label", "Real-money placement" } div { class: "value danger", id: "placement", "disabled" } }
@@ -95,6 +97,24 @@ pub fn render_index(base_path: &str) -> String {
                                 th { "Strategy" } th { "Played" } th { "Open" } th { "Awaiting" } th { "P/L" }
                             } }
                             tbody { id: "played" }
+                        }
+                    }
+                    section {
+                        h2 { "Performance" }
+                        table {
+                            thead { tr {
+                                th { "Sport" } th { "Played" } th { "Open" } th { "Due" } th { "P/L" } th { "Hit rate" }
+                            } }
+                            tbody { id: "performance" }
+                        }
+                    }
+                    section {
+                        h2 { "Opportunity intake" }
+                        table {
+                            thead { tr {
+                                th { "State" } th { "Count" } th { "Avg score" } th { "Avg confidence" }
+                            } }
+                            tbody { id: "opportunity-intake" }
                         }
                     }
                     section {
@@ -445,6 +465,46 @@ function renderPlayed(summary) {
     $("played").innerHTML = `<tr><td colspan="5" class="muted">No paper strategy placements yet.</td></tr>`;
   }
 }
+function renderPerformance(report) {
+  const capacity = report.placement_capacity || {};
+  const settlement = report.settlement_work || {};
+  $("next-capacity").textContent = `${capacity.next_scan_capacity ?? 0}/${capacity.per_scan_limit ?? 0}`;
+  $("next-capacity").className = capacity.blocked ? "value danger" : "value ok";
+  $("due-review").textContent = String(settlement.due_total || 0);
+  $("due-review").className = Number(settlement.due_total || 0) > 0 ? "value danger" : "value ok";
+
+  const dueBySport = {};
+  (settlement.stale_awaiting || []).forEach((item) => {
+    const sport = item.sport_key || "unknown";
+    dueBySport[sport] = (dueBySport[sport] || 0) + 1;
+  });
+  $("performance").innerHTML = (report.by_sport || []).map((item) => `
+    <tr>
+      <td><span class="pill">${esc(item.sport_key)}</span><br><span class="label">avg @ ${item.average_odds ? num(item.average_odds) : "-"}</span></td>
+      <td>${esc(item.played_count)}<br><span class="muted">${money(item.turnover)}</span></td>
+      <td>${esc(item.open_count)}<br><span class="muted">${money(item.open_exposure)}</span></td>
+      <td>${esc(dueBySport[item.sport_key] || 0)}</td>
+      <td>${money(item.profit_loss)}</td>
+      <td>${pct(item.hit_rate)}</td>
+    </tr>
+  `).join("");
+  if (!(report.by_sport || []).length) {
+    $("performance").innerHTML = `<tr><td colspan="6" class="muted">No paper performance yet.</td></tr>`;
+  }
+
+  const intake = report.opportunity_intake || {};
+  $("opportunity-intake").innerHTML = (intake.latest_candidate_status || []).map((item) => `
+    <tr>
+      <td><span class="pill">${esc(item.status)}</span></td>
+      <td>${esc(item.count)}</td>
+      <td>${num(item.average_score)}</td>
+      <td>${pct(item.average_confidence)}</td>
+    </tr>
+  `).join("");
+  if (!(intake.latest_candidate_status || []).length) {
+    $("opportunity-intake").innerHTML = `<tr><td colspan="4" class="muted">No latest candidate intake yet. Run a scan.</td></tr>`;
+  }
+}
 function renderCoverage(coverage) {
   const sports = coverage.sports || [];
   const totalEvents = sports.reduce((sum, item) => sum + Number(item.event_count || 0), 0);
@@ -579,6 +639,8 @@ async function load() {
   renderSettlementReview(settlementReview);
   const played = await json(api("/api/strategy/played"));
   renderPlayed(played);
+  const performance = await json(api("/api/performance"));
+  renderPerformance(performance);
   const coverage = await json(api("/api/catalog/coverage"));
   renderCoverage(coverage);
   const intelligence = await json(api("/api/intelligence/coverage"));

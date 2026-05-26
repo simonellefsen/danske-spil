@@ -1604,6 +1604,7 @@ impl Store {
                 "reason": "open exposure cap reached"
             }));
         }
+        let candidate_search_limit = (place_limit.saturating_mul(25)).clamp(place_limit, 200);
 
         let rows = client
             .query(
@@ -1629,17 +1630,23 @@ impl Store {
                   AND d.decision = 'selected'
                   AND cb.status = 'selected'
                   AND NOT EXISTS (
-                    SELECT 1 FROM simulated_bets sb WHERE sb.candidate_id = cb.id
+                    SELECT 1 FROM simulated_bets sb
+                    WHERE sb.candidate_id = cb.id
+                      AND sb.status <> 'duplicate_void'
                   )
                 ORDER BY d.score DESC NULLS LAST, d.created_at ASC
                 LIMIT $2
                 "#,
-                &[&snapshot_id, &(place_limit as i64)],
+                &[&snapshot_id, &(candidate_search_limit as i64)],
             )
             .await?;
 
+        let considered_count = rows.len();
         let mut placed = Vec::new();
         for row in rows {
+            if placed.len() >= place_limit {
+                break;
+            }
             let candidate = candidate_from_row(&row);
             let decision_id: String = row.get("decision_id");
             let strategy_id: String = row.get("strategy_id");
@@ -1660,7 +1667,7 @@ impl Store {
                 "strategy_version": strategy_version,
                 "decision_evidence": decision_evidence
             });
-            client
+            let inserted_count = client
                 .execute(
                     r#"
                 INSERT INTO simulated_bets (
@@ -1704,18 +1711,20 @@ impl Store {
                     &candidate.market_id,
                     &candidate.outcome_id,
                 ],
-            )
+                )
                 .await?;
-            if let Some(item) = self.simulated_bet_by_candidate(&candidate.id).await? {
-                placed.push(json!({
-                    "bet_id": item.id,
-                    "candidate_id": item.candidate_id,
-                    "event_name": candidate.event_name,
-                    "market_name": candidate.market_name,
-                    "outcome_name": candidate.outcome_name,
-                    "observed_decimal_odds": item.observed_decimal_odds,
-                    "hypothetical_stake": item.hypothetical_stake
-                }));
+            if inserted_count > 0 {
+                if let Some(item) = self.simulated_bet_by_candidate(&candidate.id).await? {
+                    placed.push(json!({
+                        "bet_id": item.id,
+                        "candidate_id": item.candidate_id,
+                        "event_name": candidate.event_name,
+                        "market_name": candidate.market_name,
+                        "outcome_name": candidate.outcome_name,
+                        "observed_decimal_odds": item.observed_decimal_odds,
+                        "hypothetical_stake": item.hypothetical_stake
+                    }));
+                }
             }
         }
 
@@ -1727,6 +1736,8 @@ impl Store {
             "max_open_exposure": max_open_exposure,
             "open_exposure_before": open_exposure,
             "placed_count": placed.len(),
+            "considered_count": considered_count,
+            "skipped_count": considered_count.saturating_sub(placed.len()),
             "placed": placed,
             "paper_only": true
         }))
@@ -2761,6 +2772,277 @@ impl Store {
                 })
             }).collect::<Vec<_>>(),
             "paper_only": true
+        }))
+    }
+
+    pub async fn performance_report(
+        &self,
+        default_stake: f64,
+        per_scan_limit: usize,
+        max_open_exposure: f64,
+    ) -> anyhow::Result<Value> {
+        let ledger = self.ledger_summary().await?;
+        let played = self.strategy_played_summary().await?;
+        let client = self.connect().await?;
+
+        let latest_snapshot = client
+            .query_opt(
+                r#"
+                SELECT id, observed_at, event_count
+                FROM odds_snapshots
+                ORDER BY observed_at DESC
+                LIMIT 1
+                "#,
+                &[],
+            )
+            .await?;
+
+        let candidate_status_rows = client
+            .query(
+                r#"
+                WITH latest AS (
+                  SELECT id FROM odds_snapshots ORDER BY observed_at DESC LIMIT 1
+                )
+                SELECT
+                  cb.status,
+                  count(*)::int AS count,
+                  avg(cb.score)::float8 AS average_score,
+                  avg(cb.confidence)::float8 AS average_confidence
+                FROM candidate_bets cb
+                JOIN latest ON latest.id = cb.snapshot_id
+                GROUP BY cb.status
+                ORDER BY cb.status
+                "#,
+                &[],
+            )
+            .await?;
+
+        let selected_unplaced_rows = client
+            .query(
+                r#"
+                WITH latest AS (
+                  SELECT id FROM odds_snapshots ORDER BY observed_at DESC LIMIT 1
+                )
+                SELECT
+                  (count(*) OVER ())::int AS selected_unplaced_total_count,
+                  cb.id,
+                  cb.sport_key,
+                  cb.event_name,
+                  cb.competition,
+                  cb.market_kind,
+                  cb.market_name,
+                  cb.outcome_name,
+                  cb.decimal_odds::float8 AS decimal_odds,
+                  cb.score::float8 AS score,
+                  cb.confidence::float8 AS confidence,
+                  cb.event_id,
+                  cb.market_id,
+                  cb.outcome_id
+                FROM candidate_bets cb
+                JOIN latest ON latest.id = cb.snapshot_id
+                WHERE cb.status = 'selected'
+                  AND NOT EXISTS (
+                    SELECT 1
+                    FROM simulated_bets sb
+                    WHERE sb.candidate_id = cb.id
+                      AND sb.status <> 'duplicate_void'
+                  )
+                  AND NOT EXISTS (
+                    SELECT 1
+                    FROM simulated_bets sb
+                    JOIN candidate_bets existing ON existing.id = sb.candidate_id
+                    WHERE existing.event_id = cb.event_id
+                      AND existing.market_id = cb.market_id
+                      AND existing.outcome_id = cb.outcome_id
+                      AND sb.status <> 'duplicate_void'
+                  )
+                ORDER BY cb.score DESC NULLS LAST, cb.created_at ASC
+                LIMIT 20
+                "#,
+                &[],
+            )
+            .await?;
+
+        let due_rows = client
+            .query(
+                r#"
+                SELECT
+                  count(*) FILTER (
+                    WHERE status IN ('awaiting_result', 'unresolved')
+                      AND expected_result_check_after <= now()
+                  )::int AS due_single_count,
+                  min(expected_result_check_after) FILTER (
+                    WHERE status IN ('awaiting_result', 'unresolved')
+                      AND expected_result_check_after <= now()
+                  ) AS oldest_due_single
+                FROM simulated_bets
+                "#,
+                &[],
+            )
+            .await?;
+        let coupon_due_rows = client
+            .query(
+                r#"
+                SELECT
+                  count(*) FILTER (
+                    WHERE status IN ('awaiting_result', 'unresolved')
+                      AND expected_result_check_after <= now()
+                  )::int AS due_coupon_count,
+                  min(expected_result_check_after) FILTER (
+                    WHERE status IN ('awaiting_result', 'unresolved')
+                      AND expected_result_check_after <= now()
+                  ) AS oldest_due_coupon
+                FROM simulated_coupons
+                "#,
+                &[],
+            )
+            .await?;
+
+        let by_sport = client
+            .query(
+                r#"
+                SELECT
+                  COALESCE(cb.sport_key, 'unknown') AS sport_key,
+                  count(*) FILTER (WHERE sb.status <> 'duplicate_void')::int AS played_count,
+                  count(*) FILTER (WHERE sb.status IN ('open', 'awaiting_result', 'unresolved'))::int AS open_count,
+                  count(*) FILTER (WHERE sb.status = 'awaiting_result')::int AS awaiting_result_count,
+                  count(*) FILTER (WHERE sb.status IN ('settled_won', 'settled_lost'))::int AS decided_count,
+                  count(*) FILTER (WHERE sb.status = 'settled_won')::int AS won_count,
+                  COALESCE(sum(sb.hypothetical_stake) FILTER (WHERE sb.status <> 'duplicate_void'), 0)::float8 AS turnover,
+                  COALESCE(sum(sb.hypothetical_stake) FILTER (WHERE sb.status IN ('open', 'awaiting_result', 'unresolved')), 0)::float8 AS open_exposure,
+                  COALESCE(sum(sb.profit_loss) FILTER (WHERE sb.status <> 'duplicate_void'), 0)::float8 AS profit_loss,
+                  avg(sb.observed_decimal_odds) FILTER (WHERE sb.status <> 'duplicate_void')::float8 AS average_odds
+                FROM simulated_bets sb
+                LEFT JOIN candidate_bets cb ON cb.id = sb.candidate_id
+                GROUP BY COALESCE(cb.sport_key, 'unknown')
+                ORDER BY played_count DESC, sport_key
+                "#,
+                &[],
+            )
+            .await?;
+
+        let stale_awaiting_rows = client
+            .query(
+                r#"
+                SELECT
+                  sb.id,
+                  sb.status,
+                  sb.expected_result_check_after,
+                  cb.sport_key,
+                  cb.event_name,
+                  cb.market_name,
+                  cb.outcome_name
+                FROM simulated_bets sb
+                LEFT JOIN candidate_bets cb ON cb.id = sb.candidate_id
+                WHERE sb.status IN ('awaiting_result', 'unresolved')
+                ORDER BY sb.expected_result_check_after ASC NULLS LAST, sb.created_at ASC
+                LIMIT 10
+                "#,
+                &[],
+            )
+            .await?;
+
+        let remaining_exposure = (max_open_exposure - ledger.open_exposure).max(0.0);
+        let capacity_slots = if default_stake > 0.0 {
+            (remaining_exposure / default_stake).floor() as usize
+        } else {
+            0
+        };
+        let next_scan_capacity = per_scan_limit.min(capacity_slots);
+        let due_single = &due_rows[0];
+        let due_coupon = &coupon_due_rows[0];
+        let oldest_due_single: Option<DateTime<Utc>> = due_single.get("oldest_due_single");
+        let oldest_due_coupon: Option<DateTime<Utc>> = due_coupon.get("oldest_due_coupon");
+        let oldest_due = [oldest_due_single, oldest_due_coupon]
+            .into_iter()
+            .flatten()
+            .min();
+
+        let latest_snapshot_json = latest_snapshot.map(|row| {
+            let observed_at: DateTime<Utc> = row.get("observed_at");
+            json!({
+                "id": row.get::<_, String>("id"),
+                "observed_at": observed_at,
+                "event_count": row.get::<_, i32>("event_count")
+            })
+        });
+        let selected_unplaced_total_count = selected_unplaced_rows
+            .first()
+            .map(|row| row.get::<_, i32>("selected_unplaced_total_count"))
+            .unwrap_or(0);
+
+        Ok(json!({
+            "paper_only": true,
+            "latest_snapshot": latest_snapshot_json,
+            "ledger": ledger,
+            "played": played,
+            "opportunity_intake": {
+                "latest_candidate_status": candidate_status_rows.iter().map(|row| json!({
+                    "status": row.get::<_, String>("status"),
+                    "count": row.get::<_, i32>("count"),
+                    "average_score": row.get::<_, Option<f64>>("average_score"),
+                    "average_confidence": row.get::<_, Option<f64>>("average_confidence")
+                })).collect::<Vec<_>>(),
+                "selected_unplaced_count": selected_unplaced_total_count,
+                "selected_unplaced": selected_unplaced_rows.iter().map(|row| json!({
+                    "candidate_id": row.get::<_, String>("id"),
+                    "sport_key": row.get::<_, String>("sport_key"),
+                    "event_name": row.get::<_, Option<String>>("event_name"),
+                    "competition": row.get::<_, Option<String>>("competition"),
+                    "market_kind": row.get::<_, Option<String>>("market_kind"),
+                    "market_name": row.get::<_, Option<String>>("market_name"),
+                    "outcome_name": row.get::<_, Option<String>>("outcome_name"),
+                    "decimal_odds": row.get::<_, Option<f64>>("decimal_odds"),
+                    "score": row.get::<_, Option<f64>>("score"),
+                    "confidence": row.get::<_, Option<f64>>("confidence")
+                })).collect::<Vec<_>>()
+            },
+            "placement_capacity": {
+                "default_stake": default_stake,
+                "per_scan_limit": per_scan_limit,
+                "max_open_exposure": max_open_exposure,
+                "open_exposure": ledger.open_exposure,
+                "remaining_exposure": remaining_exposure,
+                "capacity_slots": capacity_slots,
+                "next_scan_capacity": next_scan_capacity,
+                "blocked": next_scan_capacity == 0,
+                "block_reason": if next_scan_capacity == 0 { "open_exposure_cap_reached" } else { "" }
+            },
+            "settlement_work": {
+                "due_single_count": due_single.get::<_, i32>("due_single_count"),
+                "due_coupon_count": due_coupon.get::<_, i32>("due_coupon_count"),
+                "due_total": due_single.get::<_, i32>("due_single_count") + due_coupon.get::<_, i32>("due_coupon_count"),
+                "oldest_due": oldest_due,
+                "stale_awaiting": stale_awaiting_rows.iter().map(|row| {
+                    let expected: Option<DateTime<Utc>> = row.get("expected_result_check_after");
+                    json!({
+                        "id": row.get::<_, String>("id"),
+                        "status": row.get::<_, String>("status"),
+                        "expected_result_check_after": expected,
+                        "sport_key": row.get::<_, Option<String>>("sport_key"),
+                        "event_name": row.get::<_, Option<String>>("event_name"),
+                        "market_name": row.get::<_, Option<String>>("market_name"),
+                        "outcome_name": row.get::<_, Option<String>>("outcome_name")
+                    })
+                }).collect::<Vec<_>>()
+            },
+            "by_sport": by_sport.iter().map(|row| {
+                let decided_count: i32 = row.get("decided_count");
+                let won_count: i32 = row.get("won_count");
+                json!({
+                    "sport_key": row.get::<_, String>("sport_key"),
+                    "played_count": row.get::<_, i32>("played_count"),
+                    "open_count": row.get::<_, i32>("open_count"),
+                    "awaiting_result_count": row.get::<_, i32>("awaiting_result_count"),
+                    "decided_count": decided_count,
+                    "won_count": won_count,
+                    "hit_rate": if decided_count > 0 { Some(won_count as f64 / decided_count as f64) } else { None },
+                    "turnover": row.get::<_, f64>("turnover"),
+                    "open_exposure": row.get::<_, f64>("open_exposure"),
+                    "profit_loss": row.get::<_, f64>("profit_loss"),
+                    "average_odds": row.get::<_, Option<f64>>("average_odds")
+                })
+            }).collect::<Vec<_>>()
         }))
     }
 

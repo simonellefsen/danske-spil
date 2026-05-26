@@ -231,6 +231,27 @@ impl GamblerService {
             }
         }
     }
+
+    pub async fn performance_report(&self) -> Value {
+        match self
+            .store
+            .performance_report(
+                self.settings.default_stake,
+                self.settings.auto_paper_per_scan_limit,
+                self.settings.auto_paper_max_open_exposure,
+            )
+            .await
+        {
+            Ok(report) => report,
+            Err(error) => {
+                tracing::warn!(%error, "performance report failed");
+                json!({
+                    "paper_only": true,
+                    "error": error.to_string()
+                })
+            }
+        }
+    }
 }
 
 pub fn build_candidates(snapshot: &Value, max_candidates: usize) -> Vec<CandidateBet> {

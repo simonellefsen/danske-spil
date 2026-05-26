@@ -147,6 +147,17 @@ When `GAMBLER_AUTO_PAPER_ENABLED=true`, each scan automatically paper-places the
 POST /api/simulate/selected
 ```
 
+The local Kubernetes POC keeps this paper-only exposure cap at 200 simulated currency units so the worker can continue taking new paper opportunities while unresolved positions are waiting for result review. The performance report shows remaining capacity and whether auto-paper placement is blocked by exposure:
+
+```text
+GET /api/performance
+```
+
+Each scan evaluates a broader ranked candidate window than the two-per-scan
+placement cap. Duplicate-covered opportunities are skipped, and the first
+eligible lower-ranked selections are paper-placed until the scan limit or
+exposure cap is reached.
+
 The worker and UI can also advance open paper bets into `awaiting_result` once the observed event start time has passed:
 
 ```text
