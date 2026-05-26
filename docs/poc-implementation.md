@@ -141,10 +141,16 @@ Each scan also applies the active baseline to every generated candidate and reco
 
 Rejected candidates cannot be added to the paper ledger through the API. This keeps manual simulation aligned with the active strategy while still preserving the rejected alternatives for review.
 
-When `GAMBLER_AUTO_PAPER_ENABLED=true`, each scan automatically paper-places the top selected candidates up to `GAMBLER_AUTO_PAPER_PER_SCAN_LIMIT` and the `GAMBLER_AUTO_PAPER_MAX_OPEN_EXPOSURE` cap. The Kubernetes worker currently runs this loop every 900 seconds, so the intended POC cadence is roughly every 15 minutes. The placement writes only to `simulated_bets`; it never clicks Danske Spil odds or submits a coupon. Operators can also trigger the same idempotent flow with:
+When `GAMBLER_AUTO_PAPER_ENABLED=true`, each scan automatically paper-places the top selected single-leg candidates up to `GAMBLER_AUTO_PAPER_PER_SCAN_LIMIT` and the `GAMBLER_AUTO_PAPER_MAX_OPEN_EXPOSURE` cap. If the active strategy baseline generates provider-supported candidate coupons, the scan also attempts to paper-place eligible coupons under the same stake and exposure caps. The Kubernetes worker currently runs this loop every 900 seconds, so the intended POC cadence is roughly every 15 minutes. The placement writes only to `simulated_bets` and `simulated_coupons`; it never clicks Danske Spil odds or submits a coupon. Operators can also trigger the same idempotent single-leg flow with:
 
 ```text
 POST /api/simulate/selected
+```
+
+Operators can trigger the coupon placement pass with:
+
+```text
+POST /api/coupons/simulate/selected
 ```
 
 The local Kubernetes POC keeps this paper-only exposure cap at 200 simulated currency units so the worker can continue taking new paper opportunities while unresolved positions are waiting for result review. The performance report shows remaining capacity and whether auto-paper placement is blocked by exposure:
@@ -218,6 +224,7 @@ Current implementation status:
 - `/api/coupons` lists stored multi-leg coupon proposals.
 - `/api/coupons/generate` re-runs generation for the latest or supplied snapshot.
 - `/api/coupons/simulate` writes a candidate coupon into the paper coupon ledger without opening or submitting a provider coupon.
+- `/api/coupons/simulate/selected` walks ranked candidate coupons for the latest or supplied snapshot and paper-places eligible coupons until the per-scan or exposure cap is reached.
 - `/api/coupons/simulated` lists simulated coupon placements with leg evidence, stake, combined odds, status, and simulated P/L.
 - `/api/coupons/settle` allows manual paper settlement of a simulated coupon as won, lost, void, pushed, refunded, cancelled, postponed, or unresolved.
 - The Dioxus UI shows candidate coupons and simulated coupons as separate tables, with real submission still disabled.

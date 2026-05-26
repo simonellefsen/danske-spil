@@ -9,6 +9,7 @@ pub fn render_index(base_path: &str) -> String {
                     button { class: "primary", id: "scan", "Scan markets" }
                     button { id: "auto-paper", "Auto paper selected" }
                     button { id: "generate-coupons", "Generate coupons" }
+                    button { id: "auto-paper-coupons", "Auto paper coupons" }
                     button { id: "queue-settlement", "Queue settlement" }
                     button { id: "review-settlement", "Review results" }
                     button { id: "refresh", "Refresh" }
@@ -707,6 +708,11 @@ $("generate-coupons").addEventListener("click", async () => {
   $("generate-coupons").disabled = true;
   try { await json(api("/api/coupons/generate"), { method: "POST", body: "{}" }); await load(); }
   finally { $("generate-coupons").disabled = false; }
+});
+$("auto-paper-coupons").addEventListener("click", async () => {
+  $("auto-paper-coupons").disabled = true;
+  try { await json(api("/api/coupons/simulate/selected"), { method: "POST", body: "{}" }); await load(); }
+  finally { $("auto-paper-coupons").disabled = false; }
 });
 $("queue-settlement").addEventListener("click", async () => {
   $("queue-settlement").disabled = true;

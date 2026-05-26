@@ -53,7 +53,8 @@ impl GamblerService {
                 "enabled": self.settings.auto_paper_enabled,
                 "per_scan_limit": self.settings.auto_paper_per_scan_limit,
                 "max_open_exposure": self.settings.auto_paper_max_open_exposure,
-                "default_stake": self.settings.default_stake
+                "default_stake": self.settings.default_stake,
+                "coupon_placement": "enabled_when_active_strategy_generates_candidate_coupons"
             },
             "settlement_queue": {
                 "enabled": self.settings.settlement_queue_enabled,
@@ -130,6 +131,30 @@ impl GamblerService {
         } else {
             json!({"enabled": false, "placed_count": 0})
         };
+        let auto_coupon_paper_summary = if self.settings.auto_paper_enabled {
+            match self
+                .store
+                .paper_place_candidate_coupons(
+                    Some(&snapshot_id),
+                    self.settings.default_stake,
+                    self.settings.auto_paper_per_scan_limit,
+                    self.settings.auto_paper_max_open_exposure,
+                )
+                .await
+            {
+                Ok(summary) => summary,
+                Err(error) => {
+                    tracing::warn!(%error, snapshot_id = %snapshot_id, "auto paper coupon placement failed");
+                    json!({
+                        "enabled": true,
+                        "placed_count": 0,
+                        "error": error.to_string()
+                    })
+                }
+            }
+        } else {
+            json!({"enabled": false, "placed_count": 0})
+        };
         let settlement_queue_summary = self.advance_settlement_queue().await;
         let settlement_review_summary = self.refresh_settlement_review_queue().await;
         let (strategy_proposal, strategy_proposal_error) = match self
@@ -152,6 +177,7 @@ impl GamblerService {
                     "strategy_decision_summary": strategy_decision_summary,
                     "coupon_candidate_summary": coupon_candidate_summary,
                     "auto_paper_summary": auto_paper_summary,
+                    "auto_coupon_paper_summary": auto_coupon_paper_summary,
                     "settlement_queue_summary": settlement_queue_summary,
                     "settlement_review_summary": settlement_review_summary,
                     "include_live": include_live,
@@ -167,6 +193,7 @@ impl GamblerService {
             "strategy_decision_summary": strategy_decision_summary,
             "coupon_candidate_summary": coupon_candidate_summary,
             "auto_paper_summary": auto_paper_summary,
+            "auto_coupon_paper_summary": auto_coupon_paper_summary,
             "settlement_queue_summary": settlement_queue_summary,
             "settlement_review_summary": settlement_review_summary,
             "strategy_proposal": strategy_proposal,

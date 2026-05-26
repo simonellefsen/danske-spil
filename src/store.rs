@@ -1458,6 +1458,136 @@ impl Store {
             })
     }
 
+    pub async fn paper_place_candidate_coupons(
+        &self,
+        snapshot_id: Option<&str>,
+        stake: f64,
+        per_scan_limit: usize,
+        max_open_exposure: f64,
+    ) -> anyhow::Result<Value> {
+        if stake <= 0.0 {
+            return Err(anyhow!("stake must be positive"));
+        }
+        if per_scan_limit == 0 {
+            return Ok(json!({
+                "enabled": true,
+                "placed_count": 0,
+                "skipped": true,
+                "reason": "per_scan_limit is zero"
+            }));
+        }
+
+        let client = self.connect().await?;
+        let snapshot_id = match snapshot_id.filter(|value| !value.is_empty()) {
+            Some(value) => value.to_string(),
+            None => client
+                .query_opt(
+                    "SELECT id FROM odds_snapshots ORDER BY observed_at DESC LIMIT 1",
+                    &[],
+                )
+                .await?
+                .map(|row| row.get::<_, String>("id"))
+                .ok_or_else(|| anyhow!("no snapshot available for paper coupon placement"))?,
+        };
+
+        let open_exposure = self.open_exposure().await?;
+        let remaining_exposure = (max_open_exposure - open_exposure).max(0.0);
+        let exposure_limited_slots = (remaining_exposure / stake).floor() as usize;
+        let place_limit = per_scan_limit.min(exposure_limited_slots);
+        if place_limit == 0 {
+            return Ok(json!({
+                "enabled": true,
+                "snapshot_id": snapshot_id,
+                "placed_count": 0,
+                "open_exposure": open_exposure,
+                "max_open_exposure": max_open_exposure,
+                "skipped": true,
+                "reason": "open exposure cap reached"
+            }));
+        }
+
+        let candidate_search_limit = (place_limit.saturating_mul(25)).clamp(place_limit, 200);
+        let rows = client
+            .query(
+                r#"
+                SELECT cc.id
+                FROM candidate_coupons cc
+                WHERE cc.snapshot_id = $1
+                  AND cc.status = 'candidate'
+                  AND NOT EXISTS (
+                    SELECT 1
+                    FROM simulated_coupons sc
+                    WHERE sc.coupon_id = cc.id
+                      AND sc.status <> 'duplicate_void'
+                  )
+                ORDER BY cc.score DESC NULLS LAST, cc.confidence DESC NULLS LAST, cc.created_at ASC
+                LIMIT $2
+                "#,
+                &[&snapshot_id, &(candidate_search_limit as i64)],
+            )
+            .await?;
+
+        let considered_count = rows.len();
+        let mut placed = Vec::new();
+        let mut skipped = Vec::new();
+        for row in rows {
+            if placed.len() >= place_limit {
+                break;
+            }
+            let coupon_id: String = row.get("id");
+            match self
+                .simulate_coupon(&coupon_id, stake, max_open_exposure)
+                .await
+            {
+                Ok(item) => {
+                    let coupon = item
+                        .get("payload")
+                        .and_then(|payload| payload.get("coupon"))
+                        .cloned()
+                        .unwrap_or(Value::Null);
+                    placed.push(json!({
+                        "simulated_coupon_id": item.get("id").cloned().unwrap_or(Value::Null),
+                        "coupon_id": coupon_id,
+                        "coupon_type": coupon.get("coupon_type").cloned().unwrap_or(Value::Null),
+                        "leg_count": coupon.get("leg_count").cloned().unwrap_or(Value::Null),
+                        "observed_combined_decimal_odds": item.get("observed_combined_decimal_odds").cloned().unwrap_or(Value::Null),
+                        "hypothetical_stake": item.get("hypothetical_stake").cloned().unwrap_or(Value::Null)
+                    }));
+                }
+                Err(error) => {
+                    let reason = error.to_string();
+                    skipped.push(json!({
+                        "coupon_id": coupon_id,
+                        "reason": reason
+                    }));
+                    if skipped
+                        .last()
+                        .and_then(|item| item.get("reason"))
+                        .and_then(Value::as_str)
+                        .is_some_and(|value| value.contains("open exposure cap reached"))
+                    {
+                        break;
+                    }
+                }
+            }
+        }
+
+        Ok(json!({
+            "enabled": true,
+            "snapshot_id": snapshot_id,
+            "stake": stake,
+            "per_scan_limit": per_scan_limit,
+            "max_open_exposure": max_open_exposure,
+            "open_exposure_before": open_exposure,
+            "placed_count": placed.len(),
+            "considered_count": considered_count,
+            "skipped_count": considered_count.saturating_sub(placed.len()),
+            "placed": placed,
+            "skipped": skipped,
+            "paper_only": true
+        }))
+    }
+
     async fn candidate_coupon_by_id(&self, coupon_id: &str) -> anyhow::Result<Option<Value>> {
         Ok(self
             .candidate_coupons(1000)

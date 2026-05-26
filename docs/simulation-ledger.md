@@ -91,7 +91,7 @@ Current POC status:
 - Manual settlement writes `settlement_observations` and computed simulated return/profit-loss.
 - Strategy selection is stored in `strategy_candidate_decisions`; rejected candidates are preserved for review but blocked from paper-ledger placement.
 - Selected candidates can be auto-paper-placed into `simulated_bets` with per-scan and max-open-exposure caps. This is idempotent per candidate and remains simulation-only.
-- Multi-leg coupons are planned but not yet automated. They should only be paper-ledgered after provider accumulator support and category restrictions are verified from observed data.
+- Multi-leg coupons are auto-paper-placed only after the active strategy baseline enables the coupon mode and provider accumulator support is verified from observed data.
 - Open paper bets move to `awaiting_result` after the event start time has passed. This queues them for result lookup without grading the outcome.
 - Open paper bets and paper coupons store the event start time and expected result-check-after timestamp so the operator can see when each simulated position should be reviewed.
 - The intended worker cadence is roughly every 15 minutes: scan for new opportunities, auto-place eligible paper bets, queue finished or likely-finished bets, and re-check awaiting-result bets for verified outcomes.
@@ -132,7 +132,8 @@ Current POC metrics are exposed through `/api/ledger/summary`:
 Auto-paper placement walks a wider ranked selection window than the per-scan
 placement limit. This lets it skip opportunities already represented by
 existing non-void simulated exposure and still fill the available paper slots
-from lower-ranked eligible candidates.
+from lower-ranked eligible candidates. The same pattern applies to candidate
+coupons through `/api/coupons/simulate/selected`, using the shared exposure cap.
 
 ## Data Model
 
