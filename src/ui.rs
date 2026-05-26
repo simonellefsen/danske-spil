@@ -233,6 +233,19 @@ const num = (value) => value === null || value === undefined ? "-" : Number(valu
 const esc = (value) => String(value ?? "").replace(/[&<>"']/g, (ch) => ({
   "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;"
 }[ch]));
+const openSettlementStatuses = ["open", "awaiting_result", "unresolved", "postponed"];
+const settlementActions = [
+  ["won", "Won"],
+  ["lost", "Lost"],
+  ["void", "Void"],
+  ["pushed", "Push"],
+  ["refunded", "Refund"],
+  ["cancelled", "Cancel"],
+  ["postponed", "Postpone"]
+];
+const settlementButtons = (attribute, id, disabled) => settlementActions.map(([result, label]) =>
+  `<button ${attribute}="${esc(id || "")}" data-result="${result}" ${disabled || !id ? "disabled" : ""}>${label}</button>`
+).join("");
 const json = (url, options = {}) => fetch(url, {
   headers: { "content-type": "application/json" },
   ...options
@@ -345,7 +358,7 @@ function renderSimulatedCoupons(items) {
     return `${esc(coupon.coupon_type || "coupon")} (${labels.length || coupon.leg_count || 0})<br><span class="label">${labels.join("<br>")}</span>`;
   };
   $("simulated-coupons").innerHTML = items.map((item) => {
-    const canSettle = ["open", "awaiting_result", "unresolved"].includes(item.status);
+    const canSettle = openSettlementStatuses.includes(item.status);
     return `
       <tr>
         <td>${esc(item.created_at)}</td>
@@ -356,9 +369,7 @@ function renderSimulatedCoupons(items) {
         <td>${item.profit_loss === null || item.profit_loss === undefined ? "-" : money(item.profit_loss)}</td>
         <td>
           <div class="actions">
-            <button data-coupon-settle="${item.id}" data-result="won" ${!canSettle ? "disabled" : ""}>Won</button>
-            <button data-coupon-settle="${item.id}" data-result="lost" ${!canSettle ? "disabled" : ""}>Lost</button>
-            <button data-coupon-settle="${item.id}" data-result="void" ${!canSettle ? "disabled" : ""}>Void</button>
+            ${settlementButtons("data-coupon-settle", item.id, !canSettle)}
           </div>
         </td>
       </tr>
@@ -388,7 +399,7 @@ function renderLedger(items) {
     return `${candidate.event_name || item.candidate_id || ""} / ${candidate.outcome_name || ""}`;
   };
   $("ledger").innerHTML = items.map((item) => {
-    const canSettle = ["open", "awaiting_result", "unresolved"].includes(item.status);
+    const canSettle = openSettlementStatuses.includes(item.status);
     return `
     <tr>
       <td>${esc(item.created_at)}</td>
@@ -399,9 +410,7 @@ function renderLedger(items) {
       <td>${item.profit_loss === null || item.profit_loss === undefined ? "-" : money(item.profit_loss)}</td>
       <td>
         <div class="actions">
-          <button data-settle="${item.id}" data-result="won" ${!canSettle ? "disabled" : ""}>Won</button>
-          <button data-settle="${item.id}" data-result="lost" ${!canSettle ? "disabled" : ""}>Lost</button>
-          <button data-settle="${item.id}" data-result="void" ${!canSettle ? "disabled" : ""}>Void</button>
+          ${settlementButtons("data-settle", item.id, !canSettle)}
         </div>
       </td>
     </tr>
@@ -437,18 +446,53 @@ function renderSettlementReview(summary) {
     const state = isCoupon
       ? `${legs.filter((leg) => leg.event_resulted || leg.event_settled).length}/${legs.length} legs resulted`
       : `resulted ${item.event_resulted} / settled ${item.event_settled}`;
+    const status = isCoupon ? item.coupon_status : item.bet_status;
+    const canSettle = openSettlementStatuses.includes(status);
+    const actionAttribute = isCoupon ? "data-review-coupon-settle" : "data-review-settle";
+    const actionId = isCoupon ? item.coupon_simulation_id : item.bet_id;
     return `
       <tr>
         <td><span class="pill">${esc(item.item_type || "single")}</span> ${esc(selection)}<br><span class="label">${detail}</span></td>
         <td>${esc(item.expected_result_check_after || "-")}<br><span class="muted">${esc(item.sport_key || firstLeg.sport_key || "")}</span></td>
         <td>${esc(item.event_status || firstLeg.event_status || "-")}<br><span class="muted">${esc(state)}</span></td>
-        <td><span class="pill">${esc(item.recommendation || "await_more_evidence")}</span></td>
+        <td>
+          <span class="pill">${esc(item.recommendation || "await_more_evidence")}</span>
+          <div class="actions">${settlementButtons(actionAttribute, actionId, !canSettle)}</div>
+        </td>
       </tr>
     `;
   }).join("");
   if (!items.length) {
     $("settlement-review").innerHTML = `<tr><td colspan="4" class="muted">No awaiting-result paper bets or coupons need review.</td></tr>`;
   }
+  document.querySelectorAll("[data-review-settle]").forEach((button) => {
+    button.addEventListener("click", async () => {
+      await json(api("/api/ledger/settle"), {
+        method: "POST",
+        body: JSON.stringify({
+          bet_id: button.dataset.reviewSettle,
+          result: button.dataset.result,
+          source: "manual_operator_review",
+          confidence: 1
+        })
+      });
+      await load();
+    });
+  });
+  document.querySelectorAll("[data-review-coupon-settle]").forEach((button) => {
+    button.addEventListener("click", async () => {
+      await json(api("/api/coupons/settle"), {
+        method: "POST",
+        body: JSON.stringify({
+          coupon_id: button.dataset.reviewCouponSettle,
+          result: button.dataset.result,
+          source: "manual_operator_review",
+          confidence: 1
+        })
+      });
+      await load();
+    });
+  });
 }
 function renderPlayed(summary) {
   const items = summary.by_strategy || [];

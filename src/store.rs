@@ -1689,9 +1689,15 @@ impl Store {
                     AND sb.status <> 'duplicate_void'
                 )
                 AND (
-                  SELECT COALESCE(sum(hypothetical_stake), 0)
-                  FROM simulated_bets
-                  WHERE status IN ('open', 'awaiting_result', 'unresolved')
+                  SELECT (
+                    SELECT COALESCE(sum(hypothetical_stake), 0)
+                    FROM simulated_bets
+                    WHERE status IN ('open', 'awaiting_result', 'unresolved', 'postponed')
+                  ) + (
+                    SELECT COALESCE(sum(hypothetical_stake), 0)
+                    FROM simulated_coupons
+                    WHERE status IN ('open', 'awaiting_result', 'unresolved', 'postponed')
+                  )
                 ) + ($3::float8)::numeric <= ($11::float8)::numeric
                 ON CONFLICT DO NOTHING
                 "#,
@@ -1814,12 +1820,12 @@ impl Store {
                 SELECT (
                   SELECT COALESCE(sum(hypothetical_stake), 0)
                   FROM simulated_bets
-                  WHERE status IN ('open', 'awaiting_result', 'unresolved')
+                  WHERE status IN ('open', 'awaiting_result', 'unresolved', 'postponed')
                 )::float8
                 + (
                   SELECT COALESCE(sum(hypothetical_stake), 0)
                   FROM simulated_coupons
-                  WHERE status IN ('open', 'awaiting_result', 'unresolved')
+                  WHERE status IN ('open', 'awaiting_result', 'unresolved', 'postponed')
                 )::float8 AS open_exposure
                 "#,
                 &[],
@@ -2239,7 +2245,7 @@ impl Store {
                     ORDER BY oo.observed_at DESC
                     LIMIT 1
                   ) oo ON true
-                  WHERE sb.status IN ('awaiting_result', 'unresolved')
+                  WHERE sb.status IN ('awaiting_result', 'unresolved', 'postponed')
                   ORDER BY se.start_time ASC NULLS LAST, sb.created_at ASC
                   LIMIT $1
                 )
@@ -2379,7 +2385,7 @@ impl Store {
                     ORDER BY oo.observed_at DESC
                     LIMIT 1
                   ) oo ON true
-                  WHERE sc.status IN ('awaiting_result', 'unresolved')
+                  WHERE sc.status IN ('awaiting_result', 'unresolved', 'postponed')
                 ),
                 review AS (
                   SELECT
@@ -2598,16 +2604,11 @@ impl Store {
                 odds_total += odds;
                 odds_count += 1;
             }
-            if matches!(
-                bet.status.as_str(),
-                "open" | "awaiting_result" | "unresolved"
-            ) {
+            if is_open_settlement_status(&bet.status) {
                 summary.open_count += 1;
                 summary.open_exposure += bet.hypothetical_stake;
             }
-            if bet.status.starts_with("settled_")
-                || matches!(bet.status.as_str(), "void" | "pushed")
-            {
+            if is_closed_settlement_status(&bet.status) {
                 summary.settled_count += 1;
             }
             if matches!(bet.status.as_str(), "settled_won" | "settled_lost") {
@@ -2650,11 +2651,11 @@ impl Store {
                 odds_total += odds;
                 odds_count += 1;
             }
-            if matches!(status.as_str(), "open" | "awaiting_result" | "unresolved") {
+            if is_open_settlement_status(&status) {
                 summary.open_count += 1;
                 summary.open_exposure += stake;
             }
-            if status.starts_with("settled_") || matches!(status.as_str(), "void" | "pushed") {
+            if is_closed_settlement_status(&status) {
                 summary.settled_count += 1;
             }
             if matches!(status.as_str(), "settled_won" | "settled_lost") {
@@ -2681,10 +2682,10 @@ impl Store {
                 SELECT
                   sb.strategy_id,
                   count(*) FILTER (WHERE sb.status <> 'duplicate_void')::int AS played_count,
-                  count(*) FILTER (WHERE sb.status IN ('open', 'awaiting_result', 'unresolved'))::int AS open_count,
+                  count(*) FILTER (WHERE sb.status IN ('open', 'awaiting_result', 'unresolved', 'postponed'))::int AS open_count,
                   count(*) FILTER (WHERE sb.status = 'awaiting_result')::int AS awaiting_result_count,
                   count(*) FILTER (WHERE sb.status = 'duplicate_void')::int AS duplicate_void_count,
-                  COALESCE(sum(sb.hypothetical_stake) FILTER (WHERE sb.status IN ('open', 'awaiting_result', 'unresolved')), 0)::float8 AS open_exposure,
+                  COALESCE(sum(sb.hypothetical_stake) FILTER (WHERE sb.status IN ('open', 'awaiting_result', 'unresolved', 'postponed')), 0)::float8 AS open_exposure,
                   COALESCE(sum(sb.profit_loss) FILTER (WHERE sb.status <> 'duplicate_void'), 0)::float8 AS profit_loss
                 FROM simulated_bets sb
                 GROUP BY sb.strategy_id
@@ -2868,11 +2869,11 @@ impl Store {
                 r#"
                 SELECT
                   count(*) FILTER (
-                    WHERE status IN ('awaiting_result', 'unresolved')
+                    WHERE status IN ('awaiting_result', 'unresolved', 'postponed')
                       AND expected_result_check_after <= now()
                   )::int AS due_single_count,
                   min(expected_result_check_after) FILTER (
-                    WHERE status IN ('awaiting_result', 'unresolved')
+                    WHERE status IN ('awaiting_result', 'unresolved', 'postponed')
                       AND expected_result_check_after <= now()
                   ) AS oldest_due_single
                 FROM simulated_bets
@@ -2885,11 +2886,11 @@ impl Store {
                 r#"
                 SELECT
                   count(*) FILTER (
-                    WHERE status IN ('awaiting_result', 'unresolved')
+                    WHERE status IN ('awaiting_result', 'unresolved', 'postponed')
                       AND expected_result_check_after <= now()
                   )::int AS due_coupon_count,
                   min(expected_result_check_after) FILTER (
-                    WHERE status IN ('awaiting_result', 'unresolved')
+                    WHERE status IN ('awaiting_result', 'unresolved', 'postponed')
                       AND expected_result_check_after <= now()
                   ) AS oldest_due_coupon
                 FROM simulated_coupons
@@ -2904,12 +2905,12 @@ impl Store {
                 SELECT
                   COALESCE(cb.sport_key, 'unknown') AS sport_key,
                   count(*) FILTER (WHERE sb.status <> 'duplicate_void')::int AS played_count,
-                  count(*) FILTER (WHERE sb.status IN ('open', 'awaiting_result', 'unresolved'))::int AS open_count,
+                  count(*) FILTER (WHERE sb.status IN ('open', 'awaiting_result', 'unresolved', 'postponed'))::int AS open_count,
                   count(*) FILTER (WHERE sb.status = 'awaiting_result')::int AS awaiting_result_count,
                   count(*) FILTER (WHERE sb.status IN ('settled_won', 'settled_lost'))::int AS decided_count,
                   count(*) FILTER (WHERE sb.status = 'settled_won')::int AS won_count,
                   COALESCE(sum(sb.hypothetical_stake) FILTER (WHERE sb.status <> 'duplicate_void'), 0)::float8 AS turnover,
-                  COALESCE(sum(sb.hypothetical_stake) FILTER (WHERE sb.status IN ('open', 'awaiting_result', 'unresolved')), 0)::float8 AS open_exposure,
+                  COALESCE(sum(sb.hypothetical_stake) FILTER (WHERE sb.status IN ('open', 'awaiting_result', 'unresolved', 'postponed')), 0)::float8 AS open_exposure,
                   COALESCE(sum(sb.profit_loss) FILTER (WHERE sb.status <> 'duplicate_void'), 0)::float8 AS profit_loss,
                   avg(sb.observed_decimal_odds) FILTER (WHERE sb.status <> 'duplicate_void')::float8 AS average_odds
                 FROM simulated_bets sb
@@ -2934,7 +2935,7 @@ impl Store {
                   cb.outcome_name
                 FROM simulated_bets sb
                 LEFT JOIN candidate_bets cb ON cb.id = sb.candidate_id
-                WHERE sb.status IN ('awaiting_result', 'unresolved')
+                WHERE sb.status IN ('awaiting_result', 'unresolved', 'postponed')
                 ORDER BY sb.expected_result_check_after ASC NULLS LAST, sb.created_at ASC
                 LIMIT 10
                 "#,
@@ -3231,6 +3232,10 @@ impl Store {
             "lost" => "settled_lost",
             "void" => "void",
             "pushed" => "pushed",
+            "cancelled" => "cancelled",
+            "abandoned" => "abandoned",
+            "refunded" => "refunded",
+            "postponed" => "postponed",
             "unresolved" => "unresolved",
             _ => return Err(anyhow!("unsupported settlement result: {result}")),
         };
@@ -3242,7 +3247,7 @@ impl Store {
             .ok_or_else(|| anyhow!("simulated bet not found: {bet_id}"))?;
         if !matches!(
             bet.status.as_str(),
-            "open" | "awaiting_result" | "unresolved"
+            "open" | "awaiting_result" | "unresolved" | "postponed"
         ) {
             return Err(anyhow!("simulated bet is already settled: {bet_id}"));
         }
@@ -3253,7 +3258,9 @@ impl Store {
                 (Some(returned), Some(returned - bet.hypothetical_stake))
             }
             "lost" => (Some(0.0), Some(-bet.hypothetical_stake)),
-            "void" | "pushed" => (Some(bet.hypothetical_stake), Some(0.0)),
+            "void" | "pushed" | "cancelled" | "abandoned" | "refunded" => {
+                (Some(bet.hypothetical_stake), Some(0.0))
+            }
             _ => (None, None),
         };
         let settlement_payload = json!({
@@ -3317,6 +3324,10 @@ impl Store {
             "lost" => "settled_lost",
             "void" => "void",
             "pushed" => "pushed",
+            "cancelled" => "cancelled",
+            "abandoned" => "abandoned",
+            "refunded" => "refunded",
+            "postponed" => "postponed",
             "unresolved" => "unresolved",
             _ => return Err(anyhow!("unsupported settlement result: {result}")),
         };
@@ -3334,7 +3345,10 @@ impl Store {
             .get("status")
             .and_then(Value::as_str)
             .unwrap_or_default();
-        if !matches!(current_status, "open" | "awaiting_result" | "unresolved") {
+        if !matches!(
+            current_status,
+            "open" | "awaiting_result" | "unresolved" | "postponed"
+        ) {
             return Err(anyhow!("simulated coupon is already settled: {coupon_id}"));
         }
         let stake = coupon
@@ -3351,7 +3365,7 @@ impl Store {
                 (Some(returned), Some(returned - stake))
             }
             "lost" => (Some(0.0), Some(-stake)),
-            "void" | "pushed" => (Some(stake), Some(0.0)),
+            "void" | "pushed" | "cancelled" | "abandoned" | "refunded" => (Some(stake), Some(0.0)),
             _ => (None, None),
         };
         let settlement_payload = json!({
@@ -4849,6 +4863,21 @@ fn simulated_bet_from_row(row: &Row) -> SimulatedBet {
         settlement_payload: row.get("settlement_payload"),
         payload: row.get("payload"),
     }
+}
+
+fn is_open_settlement_status(status: &str) -> bool {
+    matches!(
+        status,
+        "open" | "awaiting_result" | "unresolved" | "postponed"
+    )
+}
+
+fn is_closed_settlement_status(status: &str) -> bool {
+    status.starts_with("settled_")
+        || matches!(
+            status,
+            "void" | "pushed" | "cancelled" | "abandoned" | "refunded"
+        )
 }
 
 fn candidate_event_start_time(candidate: &CandidateBet) -> Option<DateTime<Utc>> {

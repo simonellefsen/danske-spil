@@ -34,8 +34,13 @@ stateDiagram-v2
   simulated_placed --> awaiting_result
   awaiting_result --> settled_won
   awaiting_result --> settled_lost
-  awaiting_result --> settled_void
+  awaiting_result --> void
+  awaiting_result --> pushed
+  awaiting_result --> refunded
+  awaiting_result --> cancelled
+  awaiting_result --> postponed
   awaiting_result --> unresolved
+  postponed --> awaiting_result
   unresolved --> awaiting_result
 ```
 
@@ -75,14 +80,14 @@ Every settlement observation should record:
 - Grading rule used.
 - Any ambiguity or manual-review flag.
 
-Ambiguous outcomes should stay unresolved or require operator review. The system should not silently guess.
+Ambiguous outcomes should stay unresolved or require operator review. Postponed outcomes remain open exposure and should be rechecked later. The system should not silently guess.
 
 The settlement model must explicitly handle cancelled, postponed, abandoned, voided, pushed, and agency-refunded outcomes. A refund or void should preserve the stake-return rule and source evidence instead of being recorded as an ordinary win or loss.
 
 Current POC status:
 
 - Paper placements are stored in `simulated_bets` with immutable observed odds and stake.
-- Manual operator settlement can mark rows as won, lost, void, pushed, or unresolved through the API.
+- Manual operator settlement can mark rows as won, lost, void, pushed, refunded, cancelled, postponed, or unresolved through the API.
 - Manual settlement writes `settlement_observations` and computed simulated return/profit-loss.
 - Strategy selection is stored in `strategy_candidate_decisions`; rejected candidates are preserved for review but blocked from paper-ledger placement.
 - Selected candidates can be auto-paper-placed into `simulated_bets` with per-scan and max-open-exposure caps. This is idempotent per candidate and remains simulation-only.

@@ -33,7 +33,7 @@ For each candidate bet or coupon, show:
 - Rejected alternatives and rejection reasons.
 - Risk checks: duplicate exposure, stake limits, loss-cooldown, odds staleness, responsible-gambling flags, and terms/safety gate.
 - Recommendation state: observed, candidate, rejected, needs review, approved for simulation, or promoted baseline.
-- Simulated placement state: not placed, simulated placed, awaiting result, settled won, settled lost, void, or unresolved.
+- Simulated placement state: not placed, simulated placed, awaiting result, settled won, settled lost, void, pushed, refunded, cancelled, postponed, or unresolved.
 
 The reasoning panel should show structured rationale and evidence. It should not show hidden chain-of-thought, raw model scratchpads, credentials, cookies, browser profile data, or raw account payloads.
 

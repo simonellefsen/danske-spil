@@ -219,20 +219,20 @@ Current implementation status:
 - `/api/coupons/generate` re-runs generation for the latest or supplied snapshot.
 - `/api/coupons/simulate` writes a candidate coupon into the paper coupon ledger without opening or submitting a provider coupon.
 - `/api/coupons/simulated` lists simulated coupon placements with leg evidence, stake, combined odds, status, and simulated P/L.
-- `/api/coupons/settle` allows manual paper settlement of a simulated coupon as won, lost, void, pushed, or unresolved.
+- `/api/coupons/settle` allows manual paper settlement of a simulated coupon as won, lost, void, pushed, refunded, cancelled, postponed, or unresolved.
 - The Dioxus UI shows candidate coupons and simulated coupons as separate tables, with real submission still disabled.
 - The settlement queue now treats simulated coupons as first-class paper-ledger items: a coupon moves to `awaiting_result` only after the latest leg start time has passed, and its legs move with it.
 - The default baseline still disables doubles, triples, and accumulators. When a scan observes enough same-sport, distinct-event selections with provider accumulator metadata for a double, Hermes can propose a reviewed `coupon_modes` experiment that enables paper doubles only.
 
 ## Paper Settlement POC
 
-The web UI can manually settle paper-ledger rows as won, lost, void, pushed, or unresolved. This writes settlement metadata and simulated return/profit-loss fields to Postgres. Manual settlement is a placeholder for the planned result-lookup worker; it should only be used when the operator has verified the result from an acceptable source.
+The web UI can manually settle paper-ledger rows as won, lost, void, pushed, refunded, cancelled, postponed, or unresolved. This writes settlement metadata and simulated return/profit-loss fields to Postgres. Refunded, cancelled, abandoned, void, and pushed outcomes return the simulated stake with zero P/L. Postponed remains open exposure so the worker and operator keep rechecking it. Manual settlement is a placeholder for the planned result-lookup worker; it should only be used when the operator has verified the result from an acceptable source.
 
 The planned automated settlement worker should handle normal final results plus cancelled, postponed, abandoned, voided, pushed, and agency-refunded outcomes. These states should keep their source evidence and grading rule in Postgres so simulation metrics can distinguish real losses from stake returns or unresolved events.
 
 Current result-review status:
 
-- `GET/POST /api/settlement/review` refreshes review evidence for `awaiting_result` and `unresolved` paper bets.
+- `GET/POST /api/settlement/review` refreshes review evidence for `awaiting_result`, `unresolved`, and `postponed` paper bets.
 - The same review endpoint also refreshes simulated coupon evidence with leg-level event, market, outcome, latest price, and result-state metadata.
 - The worker runs the same review refresh after advancing the settlement queue.
 - `simulated_bets`, `simulated_coupons`, and `simulated_coupon_legs` preserve event start and expected result-check-after timestamps for operator scheduling.
