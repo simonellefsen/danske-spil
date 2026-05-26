@@ -207,6 +207,7 @@ Current implementation status:
 - `/api/coupons/simulated` lists simulated coupon placements with leg evidence, stake, combined odds, status, and simulated P/L.
 - `/api/coupons/settle` allows manual paper settlement of a simulated coupon as won, lost, void, pushed, or unresolved.
 - The Dioxus UI shows candidate coupons and simulated coupons as separate tables, with real submission still disabled.
+- The settlement queue now treats simulated coupons as first-class paper-ledger items: a coupon moves to `awaiting_result` only after the latest leg start time has passed, and its legs move with it.
 - The default baseline still disables doubles, triples, and accumulators. When a scan observes enough same-sport, distinct-event selections with provider accumulator metadata for a double, Hermes can propose a reviewed `coupon_modes` experiment that enables paper doubles only.
 
 ## Paper Settlement POC
@@ -218,8 +219,10 @@ The planned automated settlement worker should handle normal final results plus 
 Current result-review status:
 
 - `GET/POST /api/settlement/review` refreshes review evidence for `awaiting_result` and `unresolved` paper bets.
+- The same review endpoint also refreshes simulated coupon evidence with leg-level event, market, outcome, latest price, and result-state metadata.
 - The worker runs the same review refresh after advancing the settlement queue.
 - Review evidence is written into each bet's `settlement_payload.review_evidence`.
+- Coupon review evidence is written into each simulated coupon's `settlement_payload.review_evidence`.
 - The review queue joins paper bets to the latest observed event, market, and outcome payloads from the Danske Spil content feed.
 - The system recommends `manual_grade_ready`, `manual_void_or_refund_review`, `expected_finish_passed_recheck`, or `await_more_evidence`.
 - It still does not auto-grade won/lost because the feed outcome result semantics have not been proven for each market type.

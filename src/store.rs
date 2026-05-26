@@ -1868,15 +1868,122 @@ impl Store {
                 &[&(awaiting_grace_minutes as i32), &(limit as i64)],
             )
             .await?;
+        let coupon_rows = client
+            .query(
+                r#"
+                WITH eligible AS (
+                  SELECT
+                    sc.id,
+                    sc.coupon_id,
+                    cc.coupon_type,
+                    cc.leg_count,
+                    cc.combined_decimal_odds::float8 AS combined_decimal_odds,
+                    cc.strategy_id,
+                    max(
+                      COALESCE(
+                        se.start_time,
+                        CASE
+                          WHEN cb.feature_snapshot ? 'start_time'
+                           AND cb.feature_snapshot->>'start_time' ~ '^[0-9]{4}-'
+                          THEN (cb.feature_snapshot->>'start_time')::timestamptz
+                          ELSE NULL
+                        END
+                      )
+                    ) AS event_start_time,
+                    jsonb_agg(
+                      jsonb_build_object(
+                        'candidate_id', cb.id,
+                        'leg_index', scl.leg_index,
+                        'event_id', cb.event_id,
+                        'event_name', cb.event_name,
+                        'sport_key', cb.sport_key,
+                        'competition', cb.competition,
+                        'market_name', cb.market_name,
+                        'outcome_name', cb.outcome_name,
+                        'event_start_time', COALESCE(
+                          se.start_time,
+                          CASE
+                            WHEN cb.feature_snapshot ? 'start_time'
+                             AND cb.feature_snapshot->>'start_time' ~ '^[0-9]{4}-'
+                            THEN (cb.feature_snapshot->>'start_time')::timestamptz
+                            ELSE NULL
+                          END
+                        ),
+                        'event_status', se.status,
+                        'event_resulted', se.resulted,
+                        'event_settled', se.settled
+                      )
+                      ORDER BY scl.leg_index
+                    ) AS legs
+                  FROM simulated_coupons sc
+                  JOIN candidate_coupons cc ON cc.id = sc.coupon_id
+                  JOIN simulated_coupon_legs scl ON scl.simulated_coupon_id = sc.id
+                  JOIN candidate_bets cb ON cb.id = scl.candidate_id
+                  LEFT JOIN sport_events se ON se.id = cb.event_id
+                  WHERE sc.status = 'open'
+                  GROUP BY sc.id, sc.coupon_id, cc.coupon_type, cc.leg_count,
+                           cc.combined_decimal_odds, cc.strategy_id, sc.created_at
+                  HAVING max(
+                    COALESCE(
+                      se.start_time,
+                      CASE
+                        WHEN cb.feature_snapshot ? 'start_time'
+                         AND cb.feature_snapshot->>'start_time' ~ '^[0-9]{4}-'
+                        THEN (cb.feature_snapshot->>'start_time')::timestamptz
+                        ELSE NULL
+                      END
+                    )
+                  ) <= now() - ($1::int * interval '1 minute')
+                  ORDER BY event_start_time ASC NULLS LAST, sc.created_at ASC
+                  LIMIT $2
+                )
+                UPDATE simulated_coupons sc
+                SET status = 'awaiting_result',
+                    settlement_payload = sc.settlement_payload || jsonb_build_object(
+                      'queue_transition',
+                      jsonb_build_object(
+                        'from_status', 'open',
+                        'to_status', 'awaiting_result',
+                        'transitioned_at', now(),
+                        'source', 'settlement_queue',
+                        'coupon_type', eligible.coupon_type,
+                        'leg_count', eligible.leg_count,
+                        'event_start_time', eligible.event_start_time,
+                        'legs', eligible.legs,
+                        'paper_only', true
+                      )
+                    )
+                FROM eligible
+                WHERE sc.id = eligible.id
+                RETURNING
+                  sc.id,
+                  eligible.coupon_id,
+                  eligible.coupon_type,
+                  eligible.leg_count,
+                  eligible.combined_decimal_odds,
+                  eligible.strategy_id,
+                  eligible.event_start_time,
+                  eligible.legs
+                "#,
+                &[&(awaiting_grace_minutes as i32), &(limit as i64)],
+            )
+            .await?;
+        for row in &coupon_rows {
+            let coupon_id: String = row.get("id");
+            client
+                .execute(
+                    "UPDATE simulated_coupon_legs SET status = 'awaiting_result' WHERE simulated_coupon_id = $1 AND status = 'open'",
+                    &[&coupon_id],
+                )
+                .await?;
+        }
 
-        Ok(json!({
-            "enabled": true,
-            "transitioned_count": rows.len(),
-            "awaiting_grace_minutes": awaiting_grace_minutes,
-            "limit": limit,
-            "items": rows.iter().map(|row| {
+        let mut items: Vec<Value> = rows
+            .iter()
+            .map(|row| {
                 let event_start_time: Option<DateTime<Utc>> = row.get("event_start_time");
                 json!({
+                    "item_type": "single",
                     "bet_id": row.get::<_, String>("id"),
                     "event_id": row.get::<_, Option<String>>("event_id"),
                     "event_name": row.get::<_, Option<String>>("event_name"),
@@ -1890,7 +1997,32 @@ impl Store {
                     "event_settled": row.get::<_, Option<bool>>("event_settled"),
                     "new_status": "awaiting_result"
                 })
-            }).collect::<Vec<_>>(),
+            })
+            .collect();
+        items.extend(coupon_rows.iter().map(|row| {
+            let event_start_time: Option<DateTime<Utc>> = row.get("event_start_time");
+            json!({
+                "item_type": "coupon",
+                "coupon_simulation_id": row.get::<_, String>("id"),
+                "coupon_id": row.get::<_, Option<String>>("coupon_id"),
+                "coupon_type": row.get::<_, String>("coupon_type"),
+                "leg_count": row.get::<_, i32>("leg_count"),
+                "combined_decimal_odds": row.get::<_, Option<f64>>("combined_decimal_odds"),
+                "strategy_id": row.get::<_, String>("strategy_id"),
+                "event_start_time": event_start_time,
+                "legs": row.get::<_, Value>("legs"),
+                "new_status": "awaiting_result"
+            })
+        }));
+
+        Ok(json!({
+            "enabled": true,
+            "transitioned_count": rows.len() + coupon_rows.len(),
+            "single_transitioned_count": rows.len(),
+            "coupon_transitioned_count": coupon_rows.len(),
+            "awaiting_grace_minutes": awaiting_grace_minutes,
+            "limit": limit,
+            "items": items,
             "paper_only": true
         }))
     }
@@ -2034,12 +2166,155 @@ impl Store {
                 &[&(limit as i64)],
             )
             .await?;
+        let coupon_rows = client
+            .query(
+                r#"
+                WITH leg_review AS (
+                  SELECT
+                    sc.id AS simulated_coupon_id,
+                    sc.status AS coupon_status,
+                    sc.coupon_id,
+                    sc.observed_combined_decimal_odds::float8 AS combined_decimal_odds,
+                    sc.strategy_id,
+                    cc.coupon_type,
+                    cc.leg_count,
+                    scl.leg_index,
+                    scl.status AS leg_status,
+                    cb.id AS candidate_id,
+                    cb.sport_key,
+                    cb.event_id,
+                    cb.event_name,
+                    cb.competition,
+                    cb.market_id,
+                    cb.market_name,
+                    cb.market_kind,
+                    cb.outcome_id,
+                    cb.outcome_name,
+                    cb.decimal_odds::float8 AS observed_decimal_odds,
+                    se.start_time,
+                    se.status AS event_status,
+                    se.resulted AS event_resulted,
+                    se.settled AS event_settled,
+                    mo.active AS latest_market_active,
+                    mo.displayed AS latest_market_displayed,
+                    oo.active AS latest_outcome_active,
+                    oo.displayed AS latest_outcome_displayed,
+                    oo.decimal_odds::float8 AS latest_decimal_odds,
+                    oo.payload AS latest_outcome_payload,
+                    CASE
+                      WHEN se.start_time IS NULL THEN NULL
+                      WHEN cb.sport_key = 'football' THEN se.start_time + interval '130 minutes'
+                      WHEN cb.sport_key = 'basketball' THEN se.start_time + interval '150 minutes'
+                      WHEN cb.sport_key = 'tennis' THEN se.start_time + interval '240 minutes'
+                      WHEN cb.sport_key IN ('formula1', 'golf', 'cycling') THEN se.start_time + interval '1 day'
+                      ELSE se.start_time + interval '4 hours'
+                    END AS expected_result_check_after
+                  FROM simulated_coupons sc
+                  JOIN candidate_coupons cc ON cc.id = sc.coupon_id
+                  JOIN simulated_coupon_legs scl ON scl.simulated_coupon_id = sc.id
+                  JOIN candidate_bets cb ON cb.id = scl.candidate_id
+                  LEFT JOIN sport_events se ON se.id = cb.event_id
+                  LEFT JOIN LATERAL (
+                    SELECT mo.*
+                    FROM market_observations mo
+                    WHERE mo.event_id = cb.event_id
+                      AND mo.market_id = cb.market_id
+                    ORDER BY mo.observed_at DESC
+                    LIMIT 1
+                  ) mo ON true
+                  LEFT JOIN LATERAL (
+                    SELECT oo.*
+                    FROM outcome_observations oo
+                    WHERE oo.market_observation_id = mo.id
+                      AND oo.outcome_id = cb.outcome_id
+                    ORDER BY oo.observed_at DESC
+                    LIMIT 1
+                  ) oo ON true
+                  WHERE sc.status IN ('awaiting_result', 'unresolved')
+                ),
+                review AS (
+                  SELECT
+                    simulated_coupon_id,
+                    coupon_status,
+                    coupon_id,
+                    combined_decimal_odds,
+                    strategy_id,
+                    coupon_type,
+                    leg_count,
+                    max(expected_result_check_after) AS expected_result_check_after,
+                    jsonb_agg(
+                      jsonb_build_object(
+                        'leg_index', leg_index,
+                        'leg_status', leg_status,
+                        'candidate_id', candidate_id,
+                        'sport_key', sport_key,
+                        'event_id', event_id,
+                        'event_name', event_name,
+                        'competition', competition,
+                        'market_id', market_id,
+                        'market_name', market_name,
+                        'market_kind', market_kind,
+                        'outcome_id', outcome_id,
+                        'outcome_name', outcome_name,
+                        'observed_decimal_odds', observed_decimal_odds,
+                        'start_time', start_time,
+                        'expected_result_check_after', expected_result_check_after,
+                        'event_status', event_status,
+                        'event_resulted', event_resulted,
+                        'event_settled', event_settled,
+                        'latest_market_active', latest_market_active,
+                        'latest_market_displayed', latest_market_displayed,
+                        'latest_outcome_active', latest_outcome_active,
+                        'latest_outcome_displayed', latest_outcome_displayed,
+                        'latest_decimal_odds', latest_decimal_odds,
+                        'latest_outcome_payload', latest_outcome_payload
+                      )
+                      ORDER BY leg_index
+                    ) AS legs
+                  FROM leg_review
+                  GROUP BY simulated_coupon_id, coupon_status, coupon_id,
+                           combined_decimal_odds, strategy_id, coupon_type, leg_count
+                  ORDER BY max(expected_result_check_after) ASC NULLS LAST
+                  LIMIT $1
+                )
+                UPDATE simulated_coupons sc
+                SET settlement_payload = sc.settlement_payload || jsonb_build_object(
+                  'review_evidence',
+                  jsonb_build_object(
+                    'source', 'danskespil_content_service',
+                    'reviewed_at', now(),
+                    'paper_only', true,
+                    'not_auto_graded', true,
+                    'requires_manual_grade', true,
+                    'coupon_status', review.coupon_status,
+                    'coupon_id', review.coupon_id,
+                    'coupon_type', review.coupon_type,
+                    'leg_count', review.leg_count,
+                    'combined_decimal_odds', review.combined_decimal_odds,
+                    'expected_result_check_after', review.expected_result_check_after,
+                    'legs', review.legs
+                  )
+                )
+                FROM review
+                WHERE sc.id = review.simulated_coupon_id
+                RETURNING
+                  sc.id,
+                  review.coupon_status,
+                  review.coupon_id,
+                  review.coupon_type,
+                  review.leg_count,
+                  review.combined_decimal_odds,
+                  review.strategy_id,
+                  review.expected_result_check_after,
+                  review.legs
+                "#,
+                &[&(limit as i64)],
+            )
+            .await?;
 
-        Ok(json!({
-            "enabled": true,
-            "review_count": rows.len(),
-            "limit": limit,
-            "items": rows.iter().map(|row| {
+        let mut items: Vec<Value> = rows
+            .iter()
+            .map(|row| {
                 let start_time: Option<DateTime<Utc>> = row.get("start_time");
                 let expected_result_check_after: Option<DateTime<Utc>> =
                     row.get("expected_result_check_after");
@@ -2053,6 +2328,7 @@ impl Store {
                     expected_result_check_after,
                 );
                 json!({
+                    "item_type": "single",
                     "bet_id": row.get::<_, String>("id"),
                     "bet_status": row.get::<_, String>("bet_status"),
                     "candidate_id": row.get::<_, String>("candidate_id"),
@@ -2079,7 +2355,36 @@ impl Store {
                     "latest_outcome_payload": row.get::<_, Option<Value>>("latest_outcome_payload"),
                     "recommendation": recommendation
                 })
-            }).collect::<Vec<_>>(),
+            })
+            .collect();
+        items.extend(coupon_rows.iter().map(|row| {
+            let expected_result_check_after: Option<DateTime<Utc>> =
+                row.get("expected_result_check_after");
+            let legs: Value = row.get("legs");
+            let recommendation =
+                coupon_settlement_review_recommendation(&legs, expected_result_check_after);
+            json!({
+                "item_type": "coupon",
+                "coupon_simulation_id": row.get::<_, String>("id"),
+                "coupon_status": row.get::<_, String>("coupon_status"),
+                "coupon_id": row.get::<_, Option<String>>("coupon_id"),
+                "coupon_type": row.get::<_, String>("coupon_type"),
+                "leg_count": row.get::<_, i32>("leg_count"),
+                "combined_decimal_odds": row.get::<_, Option<f64>>("combined_decimal_odds"),
+                "strategy_id": row.get::<_, String>("strategy_id"),
+                "expected_result_check_after": expected_result_check_after,
+                "legs": legs,
+                "recommendation": recommendation
+            })
+        }));
+
+        Ok(json!({
+            "enabled": true,
+            "review_count": rows.len() + coupon_rows.len(),
+            "single_review_count": rows.len(),
+            "coupon_review_count": coupon_rows.len(),
+            "limit": limit,
+            "items": items,
             "paper_only": true,
             "not_auto_graded": true
         }))
@@ -3739,6 +4044,39 @@ fn settlement_review_recommendation(
         return "manual_void_or_refund_review";
     }
     if event_settled == Some(true) || event_resulted == Some(true) {
+        return "manual_grade_ready";
+    }
+    if expected_result_check_after.is_some_and(|value| value <= Utc::now()) {
+        return "expected_finish_passed_recheck";
+    }
+    "await_more_evidence"
+}
+
+fn coupon_settlement_review_recommendation(
+    legs: &Value,
+    expected_result_check_after: Option<DateTime<Utc>>,
+) -> &'static str {
+    let leg_items = legs.as_array().map(Vec::as_slice).unwrap_or_default();
+    if leg_items.iter().any(|leg| {
+        let status = leg
+            .get("event_status")
+            .and_then(Value::as_str)
+            .unwrap_or_default()
+            .to_ascii_lowercase();
+        status.contains("cancel")
+            || status.contains("postpon")
+            || status.contains("abandon")
+            || status.contains("suspend")
+            || status.contains("void")
+    }) {
+        return "manual_void_or_refund_review";
+    }
+    if !leg_items.is_empty()
+        && leg_items.iter().all(|leg| {
+            leg.get("event_settled").and_then(Value::as_bool) == Some(true)
+                || leg.get("event_resulted").and_then(Value::as_bool) == Some(true)
+        })
+    {
         return "manual_grade_ready";
     }
     if expected_result_check_after.is_some_and(|value| value <= Utc::now()) {

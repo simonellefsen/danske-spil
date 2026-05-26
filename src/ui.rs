@@ -402,16 +402,30 @@ function renderLedger(items) {
 }
 function renderSettlementReview(summary) {
   const items = summary.items || [];
-  $("settlement-review").innerHTML = items.map((item) => `
-    <tr>
-      <td>${esc(item.event_name || item.bet_id)}<br><span class="label">${esc(item.market_name || "")} / ${esc(item.outcome_name || "")}</span></td>
-      <td>${esc(item.expected_result_check_after || "-")}<br><span class="muted">${esc(item.sport_key || "")}</span></td>
-      <td>${esc(item.event_status || "-")}<br><span class="muted">resulted ${esc(item.event_resulted)} / settled ${esc(item.event_settled)}</span></td>
-      <td><span class="pill">${esc(item.recommendation || "await_more_evidence")}</span></td>
-    </tr>
-  `).join("");
+  $("settlement-review").innerHTML = items.map((item) => {
+    const isCoupon = item.item_type === "coupon";
+    const legs = item.legs || [];
+    const firstLeg = legs[0] || {};
+    const selection = isCoupon
+      ? `${item.coupon_type || "coupon"} (${item.leg_count || legs.length})`
+      : `${item.event_name || item.bet_id || ""}`;
+    const detail = isCoupon
+      ? legs.map((leg) => `${esc(leg.event_name || leg.candidate_id || "")} / ${esc(leg.outcome_name || "")}`).join("<br>")
+      : esc(`${item.market_name || ""} / ${item.outcome_name || ""}`);
+    const state = isCoupon
+      ? `${legs.filter((leg) => leg.event_resulted || leg.event_settled).length}/${legs.length} legs resulted`
+      : `resulted ${item.event_resulted} / settled ${item.event_settled}`;
+    return `
+      <tr>
+        <td><span class="pill">${esc(item.item_type || "single")}</span> ${esc(selection)}<br><span class="label">${detail}</span></td>
+        <td>${esc(item.expected_result_check_after || "-")}<br><span class="muted">${esc(item.sport_key || firstLeg.sport_key || "")}</span></td>
+        <td>${esc(item.event_status || firstLeg.event_status || "-")}<br><span class="muted">${esc(state)}</span></td>
+        <td><span class="pill">${esc(item.recommendation || "await_more_evidence")}</span></td>
+      </tr>
+    `;
+  }).join("");
   if (!items.length) {
-    $("settlement-review").innerHTML = `<tr><td colspan="4" class="muted">No awaiting-result paper bets need review.</td></tr>`;
+    $("settlement-review").innerHTML = `<tr><td colspan="4" class="muted">No awaiting-result paper bets or coupons need review.</td></tr>`;
   }
 }
 function renderPlayed(summary) {
