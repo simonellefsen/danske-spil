@@ -245,6 +245,7 @@ The planned automated settlement worker should handle normal final results plus 
 Current result-review status:
 
 - `GET/POST /api/settlement/review` refreshes review evidence for `awaiting_result`, `unresolved`, and `postponed` paper bets.
+- `GET /api/settlement/sources` lists approved settlement-capable source classes from `source_registry`.
 - The same review endpoint also refreshes simulated coupon evidence with leg-level event, market, outcome, latest price, and result-state metadata.
 - The worker runs the same review refresh after advancing the settlement queue.
 - `simulated_bets`, `simulated_coupons`, and `simulated_coupon_legs` preserve event start and expected result-check-after timestamps for operator scheduling.

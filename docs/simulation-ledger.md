@@ -70,6 +70,10 @@ Outcome lookup should prefer sources in this order:
 2. Official league, tournament, or event result sources.
 3. Documented third-party result sources, only when source reliability is recorded.
 
+The POC seeds these source classes into `source_registry` as settlement-capable
+sources and exposes them through `GET /api/settlement/sources`. They are policy
+records, not credentials or browser sessions.
+
 Every settlement observation should record:
 
 - Source name and URL pattern.
@@ -89,6 +93,7 @@ Current POC status:
 - Paper placements are stored in `simulated_bets` with immutable observed odds and stake.
 - Manual operator settlement can mark rows as won, lost, void, pushed, refunded, cancelled, postponed, or unresolved through the API.
 - Manual settlement writes `settlement_observations` and computed simulated return/profit-loss.
+- The web UI shows configured settlement-capable source classes next to the review queue so manual grading can cite an approved source class.
 - Strategy selection is stored in `strategy_candidate_decisions`; rejected candidates are preserved for review but blocked from paper-ledger placement.
 - Selected candidates can be auto-paper-placed into `simulated_bets` with per-scan and max-open-exposure caps. This is idempotent per candidate and remains simulation-only.
 - Multi-leg coupons are auto-paper-placed only after the active strategy baseline enables the coupon mode and provider accumulator support is verified from observed data.

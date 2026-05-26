@@ -92,6 +92,15 @@ pub fn render_index(base_path: &str) -> String {
                         }
                     }
                     section {
+                        h2 { "Settlement sources" }
+                        table {
+                            thead { tr {
+                                th { "Priority" } th { "Source" } th { "Scope" } th { "Reliability" } th { "Notes" }
+                            } }
+                            tbody { id: "settlement-sources" }
+                        }
+                    }
+                    section {
                         h2 { "Strategies played" }
                         table {
                             thead { tr {
@@ -504,6 +513,24 @@ function renderSettlementReview(summary) {
     });
   });
 }
+function renderSettlementSources(sources) {
+  const items = sources.items || [];
+  $("settlement-sources").innerHTML = items.map((item) => {
+    const payload = item.payload || {};
+    return `
+      <tr>
+        <td>${esc(payload.priority ?? "-")}</td>
+        <td><span class="pill">${esc(item.source_key)}</span><br><span class="label">${esc(item.source_type)}</span><br>${esc(item.source_name)}</td>
+        <td>${esc((item.sport_scope || []).join(", "))}</td>
+        <td>${num(item.reliability)}</td>
+        <td>${esc(item.notes || "")}<br><span class="muted">${esc(item.url_pattern || "")}</span></td>
+      </tr>
+    `;
+  }).join("");
+  if (!items.length) {
+    $("settlement-sources").innerHTML = `<tr><td colspan="5" class="muted">No settlement-capable sources are configured.</td></tr>`;
+  }
+}
 function renderPlayed(summary) {
   const items = summary.by_strategy || [];
   $("played").innerHTML = items.map((item) => `
@@ -714,6 +741,8 @@ async function load() {
   renderLedger(ledger.items || []);
   const settlementReview = await json(api("/api/settlement/review"));
   renderSettlementReview(settlementReview);
+  const settlementSources = await json(api("/api/settlement/sources"));
+  renderSettlementSources(settlementSources);
   const played = await json(api("/api/strategy/played"));
   renderPlayed(played);
   const performance = await json(api("/api/performance"));

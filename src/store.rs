@@ -117,6 +117,59 @@ CREATE TABLE IF NOT EXISTS source_registry (
   payload jsonb NOT NULL DEFAULT '{}'::jsonb
 );
 
+INSERT INTO source_registry (
+  source_key, source_name, source_type, url_pattern, sport_scope,
+  reliability, can_settle, manual_review_required, notes, payload
+)
+VALUES
+  (
+    'danskespil_account_history',
+    'Danske Spil account or coupon history',
+    'operator_settlement',
+    'Danske Spil authenticated account/coupon history',
+    ARRAY['football','tennis','basketball','formula1','golf','cycling'],
+    0.95,
+    true,
+    true,
+    'Preferred source when accessible in an operator-controlled browser session. Never expose credentials or account payloads to Hermes.',
+    '{"paper_only": true, "requires_operator_session": true, "priority": 1}'::jsonb
+  ),
+  (
+    'official_competition_results',
+    'Official league, tournament, or federation results',
+    'official_result',
+    'Official competition result pages',
+    ARRAY['football','tennis','basketball','formula1','golf','cycling'],
+    0.90,
+    true,
+    true,
+    'Use official event, league, tournament, or federation result pages when Danske Spil settlement history is unavailable.',
+    '{"paper_only": true, "priority": 2}'::jsonb
+  ),
+  (
+    'documented_third_party_results',
+    'Documented third-party result source',
+    'third_party_result',
+    'Configured third-party result provider',
+    ARRAY['football','tennis','basketball','formula1','golf','cycling'],
+    0.70,
+    true,
+    true,
+    'Fallback only when source reliability and URL pattern are documented for the sport and event.',
+    '{"paper_only": true, "priority": 3, "fallback_only": true}'::jsonb
+  )
+ON CONFLICT (source_key) DO UPDATE
+SET source_name = EXCLUDED.source_name,
+    source_type = EXCLUDED.source_type,
+    url_pattern = EXCLUDED.url_pattern,
+    sport_scope = EXCLUDED.sport_scope,
+    reliability = EXCLUDED.reliability,
+    can_settle = EXCLUDED.can_settle,
+    manual_review_required = EXCLUDED.manual_review_required,
+    notes = EXCLUDED.notes,
+    payload = EXCLUDED.payload,
+    last_seen_at = now();
+
 CREATE TABLE IF NOT EXISTS ingestion_runs (
   id text PRIMARY KEY,
   source_key text REFERENCES source_registry(source_key),
@@ -3254,22 +3307,49 @@ impl Store {
         let sports = client
             .query(
                 r#"
+                WITH event_counts AS (
+                  SELECT sport_key, count(*)::int AS event_count
+                  FROM sport_events
+                  GROUP BY sport_key
+                ),
+                competition_counts AS (
+                  SELECT sport_key, count(*)::int AS competition_count
+                  FROM competitions
+                  GROUP BY sport_key
+                ),
+                market_counts AS (
+                  SELECT e.sport_key, count(mo.id)::int AS market_count
+                  FROM sport_events e
+                  JOIN market_observations mo ON mo.event_id = e.id
+                  GROUP BY e.sport_key
+                ),
+                outcome_counts AS (
+                  SELECT e.sport_key, count(oo.id)::int AS outcome_count
+                  FROM sport_events e
+                  JOIN market_observations mo ON mo.event_id = e.id
+                  JOIN outcome_observations oo ON oo.market_observation_id = mo.id
+                  GROUP BY e.sport_key
+                ),
+                candidate_counts AS (
+                  SELECT sport_key, count(*)::int AS candidate_count
+                  FROM candidate_bets
+                  GROUP BY sport_key
+                )
                 SELECT
                   s.sport_key,
                   s.label,
                   s.last_seen_at,
-                  count(DISTINCT e.id)::int AS event_count,
-                  count(DISTINCT c.id)::int AS competition_count,
-                  count(DISTINCT mo.id)::int AS market_count,
-                  count(DISTINCT oo.id)::int AS outcome_count,
-                  count(DISTINCT cb.id)::int AS candidate_count
+                  COALESCE(ec.event_count, 0) AS event_count,
+                  COALESCE(cc.competition_count, 0) AS competition_count,
+                  COALESCE(mc.market_count, 0) AS market_count,
+                  COALESCE(oc.outcome_count, 0) AS outcome_count,
+                  COALESCE(cbc.candidate_count, 0) AS candidate_count
                 FROM sports s
-                LEFT JOIN sport_events e ON e.sport_key = s.sport_key
-                LEFT JOIN competitions c ON c.sport_key = s.sport_key
-                LEFT JOIN market_observations mo ON mo.event_id = e.id
-                LEFT JOIN outcome_observations oo ON oo.market_observation_id = mo.id
-                LEFT JOIN candidate_bets cb ON cb.sport_key = s.sport_key
-                GROUP BY s.sport_key, s.label, s.last_seen_at
+                LEFT JOIN event_counts ec ON ec.sport_key = s.sport_key
+                LEFT JOIN competition_counts cc ON cc.sport_key = s.sport_key
+                LEFT JOIN market_counts mc ON mc.sport_key = s.sport_key
+                LEFT JOIN outcome_counts oc ON oc.sport_key = s.sport_key
+                LEFT JOIN candidate_counts cbc ON cbc.sport_key = s.sport_key
                 ORDER BY s.sport_key
                 "#,
                 &[],
@@ -3415,6 +3495,53 @@ impl Store {
                     "status": row.get::<_, String>("status"),
                     "sport_keys": row.get::<_, Vec<String>>("sport_keys"),
                     "event_count": row.get::<_, i32>("event_count"),
+                    "payload": row.get::<_, Value>("payload")
+                })
+            }).collect::<Vec<_>>()
+        }))
+    }
+
+    pub async fn settlement_sources(&self) -> anyhow::Result<Value> {
+        let client = self.connect().await?;
+        let rows = client
+            .query(
+                r#"
+                SELECT
+                  source_key,
+                  source_name,
+                  source_type,
+                  url_pattern,
+                  sport_scope,
+                  reliability::float8 AS reliability,
+                  manual_review_required,
+                  notes,
+                  last_seen_at,
+                  payload
+                FROM source_registry
+                WHERE can_settle = true
+                ORDER BY
+                  COALESCE((payload->>'priority')::int, 999),
+                  reliability DESC,
+                  source_key
+                "#,
+                &[],
+            )
+            .await?;
+        Ok(json!({
+            "paper_only": true,
+            "manual_review_required": true,
+            "items": rows.iter().map(|row| {
+                let last_seen_at: DateTime<Utc> = row.get("last_seen_at");
+                json!({
+                    "source_key": row.get::<_, String>("source_key"),
+                    "source_name": row.get::<_, String>("source_name"),
+                    "source_type": row.get::<_, String>("source_type"),
+                    "url_pattern": row.get::<_, Option<String>>("url_pattern"),
+                    "sport_scope": row.get::<_, Vec<String>>("sport_scope"),
+                    "reliability": row.get::<_, f64>("reliability"),
+                    "manual_review_required": row.get::<_, bool>("manual_review_required"),
+                    "notes": row.get::<_, Option<String>>("notes"),
+                    "last_seen_at": last_seen_at,
                     "payload": row.get::<_, Value>("payload")
                 })
             }).collect::<Vec<_>>()

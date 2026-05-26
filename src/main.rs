@@ -150,6 +150,10 @@ async fn get_handler(State(state): State<Arc<AppState>>, uri: OriginalUri) -> Re
         "/api/settlement/review" => {
             Json(state.service.refresh_settlement_review_queue().await).into_response()
         },
+        "/api/settlement/sources" => match state.service.store().settlement_sources().await {
+            Ok(sources) => Json(sources).into_response(),
+            Err(error) => error_response(StatusCode::INTERNAL_SERVER_ERROR, error),
+        },
         "/api/catalog/coverage" => match state.service.store().market_catalog_coverage().await {
             Ok(coverage) => Json(coverage).into_response(),
             Err(error) => error_response(StatusCode::INTERNAL_SERVER_ERROR, error),
