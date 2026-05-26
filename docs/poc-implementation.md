@@ -157,7 +157,12 @@ The local Kubernetes POC keeps this paper-only exposure cap at 200 simulated cur
 
 ```text
 GET /api/performance
+GET /api/performance/history
 ```
+
+Each scan writes a row to `simulation_performance_snapshots` after placement,
+settlement queueing, and review refresh complete. The web UI shows this history
+so exposure and due-review pressure can be compared across scan cycles.
 
 Each scan evaluates a broader ranked candidate window than the two-per-scan
 placement cap. Duplicate-covered opportunities are skipped, and the first

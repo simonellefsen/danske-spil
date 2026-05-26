@@ -168,6 +168,37 @@ impl GamblerService {
                 (None, Some(error.to_string()))
             }
         };
+        let performance_snapshot = match self
+            .store
+            .performance_report(
+                self.settings.default_stake,
+                self.settings.auto_paper_per_scan_limit,
+                self.settings.auto_paper_max_open_exposure,
+            )
+            .await
+        {
+            Ok(report) => match self
+                .store
+                .record_performance_snapshot("scan_completed", Some(&snapshot_id), &report)
+                .await
+            {
+                Ok(snapshot) => snapshot,
+                Err(error) => {
+                    tracing::warn!(%error, snapshot_id = %snapshot_id, "performance snapshot recording failed");
+                    json!({
+                        "recorded": false,
+                        "error": error.to_string()
+                    })
+                }
+            },
+            Err(error) => {
+                tracing::warn!(%error, snapshot_id = %snapshot_id, "performance snapshot report failed");
+                json!({
+                    "recorded": false,
+                    "error": error.to_string()
+                })
+            }
+        };
         self.store
             .record_audit(
                 "scan_completed",
@@ -180,6 +211,7 @@ impl GamblerService {
                     "auto_coupon_paper_summary": auto_coupon_paper_summary,
                     "settlement_queue_summary": settlement_queue_summary,
                     "settlement_review_summary": settlement_review_summary,
+                    "performance_snapshot_id": performance_snapshot.get("id").cloned().unwrap_or(Value::Null),
                     "include_live": include_live,
                     "paper_only": true,
                     "runtime": "rust-dioxus"
@@ -198,6 +230,7 @@ impl GamblerService {
             "settlement_review_summary": settlement_review_summary,
             "strategy_proposal": strategy_proposal,
             "strategy_proposal_error": strategy_proposal_error,
+            "performance_snapshot": performance_snapshot,
             "snapshot": snapshot
         }))
     }
@@ -274,6 +307,19 @@ impl GamblerService {
                 tracing::warn!(%error, "performance report failed");
                 json!({
                     "paper_only": true,
+                    "error": error.to_string()
+                })
+            }
+        }
+    }
+
+    pub async fn performance_history(&self, limit: i64) -> Value {
+        match self.store.performance_history(limit).await {
+            Ok(history) => history,
+            Err(error) => {
+                tracing::warn!(%error, "performance history failed");
+                json!({
+                    "items": [],
                     "error": error.to_string()
                 })
             }

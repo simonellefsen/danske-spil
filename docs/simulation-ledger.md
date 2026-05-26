@@ -129,6 +129,11 @@ Current POC metrics are exposed through `/api/ledger/summary`:
 - Awaiting-result items due for review.
 - Paper performance by sport and strategy.
 
+Each scan records the live report into `simulation_performance_snapshots`.
+`/api/performance/history` exposes recent snapshots so operators can compare
+exposure, due-settlement workload, placement capacity, and simulated P/L across
+scan cycles instead of relying only on the current state.
+
 Auto-paper placement walks a wider ranked selection window than the per-scan
 placement limit. This lets it skip opportunities already represented by
 existing non-void simulated exposure and still fill the available paper slots

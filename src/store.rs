@@ -352,6 +352,20 @@ CREATE TABLE IF NOT EXISTS audit_events (
   details jsonb NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS simulation_performance_snapshots (
+  id text PRIMARY KEY,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  source text NOT NULL,
+  odds_snapshot_id text REFERENCES odds_snapshots(id) ON DELETE SET NULL,
+  ledger jsonb NOT NULL,
+  played jsonb NOT NULL,
+  performance jsonb NOT NULL,
+  payload jsonb NOT NULL DEFAULT '{}'::jsonb
+);
+
+CREATE INDEX IF NOT EXISTS idx_simulation_performance_snapshots_created_at
+ON simulation_performance_snapshots(created_at DESC);
+
 CREATE TABLE IF NOT EXISTS hermes_reflections (
   id text PRIMARY KEY,
   created_at timestamptz NOT NULL DEFAULT now(),
@@ -3177,6 +3191,64 @@ impl Store {
         }))
     }
 
+    pub async fn record_performance_snapshot(
+        &self,
+        source: &str,
+        odds_snapshot_id: Option<&str>,
+        performance: &Value,
+    ) -> anyhow::Result<Value> {
+        let client = self.connect().await?;
+        let id = new_id();
+        let ledger = performance.get("ledger").cloned().unwrap_or(Value::Null);
+        let played = performance.get("played").cloned().unwrap_or(Value::Null);
+        let payload = json!({
+            "paper_only": true,
+            "source": source,
+            "latest_snapshot": performance.get("latest_snapshot").cloned().unwrap_or(Value::Null),
+            "placement_capacity": performance.get("placement_capacity").cloned().unwrap_or(Value::Null),
+            "settlement_work": performance.get("settlement_work").cloned().unwrap_or(Value::Null)
+        });
+        let row = client
+            .query_one(
+                r#"
+                INSERT INTO simulation_performance_snapshots (
+                  id, source, odds_snapshot_id, ledger, played, performance, payload
+                )
+                VALUES ($1,$2,$3,$4,$5,$6,$7)
+                RETURNING id, created_at, source, odds_snapshot_id, ledger, played, performance, payload
+                "#,
+                &[
+                    &id,
+                    &source,
+                    &odds_snapshot_id,
+                    &ledger,
+                    &played,
+                    &performance,
+                    &payload,
+                ],
+            )
+            .await?;
+        Ok(performance_snapshot_from_row(&row))
+    }
+
+    pub async fn performance_history(&self, limit: i64) -> anyhow::Result<Value> {
+        let client = self.connect().await?;
+        let rows = client
+            .query(
+                r#"
+                SELECT id, created_at, source, odds_snapshot_id, ledger, played, performance, payload
+                FROM simulation_performance_snapshots
+                ORDER BY created_at DESC
+                LIMIT $1
+                "#,
+                &[&limit],
+            )
+            .await?;
+        Ok(json!({
+            "items": rows.iter().map(performance_snapshot_from_row).collect::<Vec<_>>()
+        }))
+    }
+
     pub async fn market_catalog_coverage(&self) -> anyhow::Result<Value> {
         let client = self.connect().await?;
         let sports = client
@@ -4993,6 +5065,20 @@ fn simulated_bet_from_row(row: &Row) -> SimulatedBet {
         settlement_payload: row.get("settlement_payload"),
         payload: row.get("payload"),
     }
+}
+
+fn performance_snapshot_from_row(row: &Row) -> Value {
+    let created_at: DateTime<Utc> = row.get("created_at");
+    json!({
+        "id": row.get::<_, String>("id"),
+        "created_at": created_at,
+        "source": row.get::<_, String>("source"),
+        "odds_snapshot_id": row.get::<_, Option<String>>("odds_snapshot_id"),
+        "ledger": row.get::<_, Value>("ledger"),
+        "played": row.get::<_, Value>("played"),
+        "performance": row.get::<_, Value>("performance"),
+        "payload": row.get::<_, Value>("payload")
+    })
 }
 
 fn is_open_settlement_status(status: &str) -> bool {

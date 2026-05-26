@@ -110,6 +110,15 @@ pub fn render_index(base_path: &str) -> String {
                         }
                     }
                     section {
+                        h2 { "Performance history" }
+                        table {
+                            thead { tr {
+                                th { "Recorded" } th { "Source" } th { "Open exposure" } th { "Due" } th { "P/L" } th { "Capacity" }
+                            } }
+                            tbody { id: "performance-history" }
+                        }
+                    }
+                    section {
                         h2 { "Opportunity intake" }
                         table {
                             thead { tr {
@@ -550,6 +559,29 @@ function renderPerformance(report) {
     $("opportunity-intake").innerHTML = `<tr><td colspan="4" class="muted">No latest candidate intake yet. Run a scan.</td></tr>`;
   }
 }
+function renderPerformanceHistory(history) {
+  const items = history.items || [];
+  $("performance-history").innerHTML = items.map((item) => {
+    const performance = item.performance || {};
+    const ledger = item.ledger || {};
+    const capacity = performance.placement_capacity || {};
+    const settlement = performance.settlement_work || {};
+    const blocked = capacity.blocked ? "blocked" : `${capacity.next_scan_capacity ?? 0}/${capacity.per_scan_limit ?? 0}`;
+    return `
+      <tr>
+        <td>${esc(item.created_at || "-")}<br><span class="label">${esc(item.odds_snapshot_id || "")}</span></td>
+        <td>${esc(item.source || "-")}</td>
+        <td>${money(ledger.open_exposure)}</td>
+        <td>${esc(settlement.due_total ?? 0)}</td>
+        <td>${money(ledger.profit_loss)}</td>
+        <td><span class="pill">${esc(blocked)}</span></td>
+      </tr>
+    `;
+  }).join("");
+  if (!items.length) {
+    $("performance-history").innerHTML = `<tr><td colspan="6" class="muted">No persisted performance snapshots yet. Run a scan.</td></tr>`;
+  }
+}
 function renderCoverage(coverage) {
   const sports = coverage.sports || [];
   const totalEvents = sports.reduce((sum, item) => sum + Number(item.event_count || 0), 0);
@@ -686,6 +718,8 @@ async function load() {
   renderPlayed(played);
   const performance = await json(api("/api/performance"));
   renderPerformance(performance);
+  const performanceHistory = await json(api("/api/performance/history"));
+  renderPerformanceHistory(performanceHistory);
   const coverage = await json(api("/api/catalog/coverage"));
   renderCoverage(coverage);
   const intelligence = await json(api("/api/intelligence/coverage"));
