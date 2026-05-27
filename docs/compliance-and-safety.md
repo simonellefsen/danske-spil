@@ -51,6 +51,7 @@ Before implementation may place or submit real-money bets, create a decision rec
 - What stake limits are acceptable?
 - What manual confirmation step is required?
 - How will audit logs prove the system did not bypass controls?
+- The POC exposes recent `audit_events` through the web UI so operators can review scan, paper-placement, settlement, and strategy-review actions without database access.
 - How will the system stop if gambling behavior looks unhealthy?
 
 Until that decision exists, all implementation should be observe-only or simulation-only.

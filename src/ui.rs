@@ -204,6 +204,15 @@ pub fn render_index(base_path: &str) -> String {
                         }
                     }
                     section {
+                        h2 { "Audit events" }
+                        table {
+                            thead { tr {
+                                th { "Created" } th { "Type" } th { "Details" }
+                            } }
+                            tbody { id: "audit-events" }
+                        }
+                    }
+                    section {
                         h2 { "Strategy experiments" }
                         table {
                             thead { tr {
@@ -828,6 +837,19 @@ function renderIntelligence(coverage) {
     $("ingestion-runs").innerHTML = `<tr><td colspan="5" class="muted">No ingestion runs yet. Run a scan.</td></tr>`;
   }
 }
+function renderAuditEvents(events) {
+  const items = events.items || [];
+  $("audit-events").innerHTML = items.map((item) => `
+    <tr>
+      <td>${esc(item.created_at || "-")}<br><span class="label">${esc(item.id || "")}</span></td>
+      <td><span class="pill">${esc(item.event_type || "-")}</span></td>
+      <td><pre>${esc(JSON.stringify(item.details || {}, null, 2))}</pre></td>
+    </tr>
+  `).join("");
+  if (!items.length) {
+    $("audit-events").innerHTML = `<tr><td colspan="3" class="muted">No audit events yet.</td></tr>`;
+  }
+}
 function renderStrategy(strategy) {
   const experiments = strategy.experiments || [];
   $("experiments").innerHTML = experiments.map((item) => {
@@ -939,6 +961,8 @@ async function load() {
   renderCoverage(coverage);
   const intelligence = await json(api("/api/intelligence/coverage"));
   renderIntelligence(intelligence);
+  const auditEvents = await json(api("/api/audit/events"));
+  renderAuditEvents(auditEvents);
   const hermes = await json(api("/api/hermes"));
   renderStrategy(hermes.strategy || {});
   $("hermes").textContent = JSON.stringify(hermes, null, 2);

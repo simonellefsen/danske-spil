@@ -5288,6 +5288,32 @@ impl Store {
         Ok(())
     }
 
+    pub async fn audit_events(&self, limit: i64) -> anyhow::Result<Value> {
+        let client = self.connect().await?;
+        let rows = client
+            .query(
+                r#"
+                SELECT id, created_at, event_type, details
+                FROM audit_events
+                ORDER BY created_at DESC
+                LIMIT $1
+                "#,
+                &[&limit],
+            )
+            .await?;
+        Ok(json!({
+            "items": rows.iter().map(|row| {
+                let created_at: DateTime<Utc> = row.get("created_at");
+                json!({
+                    "id": row.get::<_, String>("id"),
+                    "created_at": created_at,
+                    "event_type": row.get::<_, String>("event_type"),
+                    "details": row.get::<_, Value>("details")
+                })
+            }).collect::<Vec<_>>()
+        }))
+    }
+
     async fn connect(&self) -> anyhow::Result<Client> {
         let database_url = self
             .database_url

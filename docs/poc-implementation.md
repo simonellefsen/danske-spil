@@ -168,6 +168,10 @@ snapshot age, and next scan due time so the web UI can show whether the roughly
 UI renders them as scanner audit history with source, status, sports, event
 count, and snapshot id.
 
+`GET /api/audit/events` exposes recent immutable audit events written by scan,
+paper-placement, settlement, daily-reflection, and strategy-review flows. The
+web UI renders the latest events for operator inspection.
+
 Each scan writes a row to `simulation_performance_snapshots` after placement,
 settlement queueing, and review refresh complete. The web UI shows this history
 so exposure and due-review pressure can be compared across scan cycles.

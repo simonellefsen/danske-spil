@@ -82,6 +82,11 @@ Append-only timeline for project wiki maintenance. Use headings with the format 
 - Added a web UI ingestion runs table backed by `/api/intelligence/coverage`.
 - Exposed recent scanner run source, status, covered sports, event count, and snapshot id in the dashboard.
 
+## [2026-05-27] implementation | audit event visibility
+
+- Added `GET /api/audit/events` for recent immutable app audit events.
+- Added a web UI audit events table for scan, paper-placement, settlement, reflection, and strategy-review actions.
+
 ## [2026-05-25] implementation | Candidate ranking and paper settlement POC
 
 - Added `poc_ranker_v1` candidate scoring fields: implied probability, model probability, expected value, confidence, score, risk flags, and feature snapshot.

@@ -182,6 +182,10 @@ async fn get_handler(State(state): State<Arc<AppState>>, uri: OriginalUri) -> Re
                 Err(error) => error_response(StatusCode::INTERNAL_SERVER_ERROR, error),
             }
         },
+        "/api/audit/events" => match state.service.store().audit_events(50).await {
+            Ok(events) => Json(events).into_response(),
+            Err(error) => error_response(StatusCode::INTERNAL_SERVER_ERROR, error),
+        },
         "/api/hermes" => match state.service.store().hermes_reflections(25).await {
             Ok(reflections) => match state.service.store().strategy_state().await {
                 Ok(strategy) => Json(json!({
