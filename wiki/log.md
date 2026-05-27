@@ -97,6 +97,11 @@ Append-only timeline for project wiki maintenance. Use headings with the format 
 - Added `GET /api/odds/movement` to compare latest and previous observations for the same event, market, and outcome.
 - Added a web UI odds movement table with previous odds, current odds, absolute move, percentage move, and latest active/displayed state.
 
+## [2026-05-27] implementation | candidate movement evidence
+
+- Embedded latest-prior odds movement into candidate feature snapshots and rationale at candidate insert time.
+- Added candidate table movement hints so selected and rejected opportunities show whether odds drift was known when the candidate was created.
+
 ## [2026-05-25] implementation | Candidate ranking and paper settlement POC
 
 - Added `poc_ranker_v1` candidate scoring fields: implied probability, model probability, expected value, confidence, score, risk flags, and feature snapshot.

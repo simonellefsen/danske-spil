@@ -107,6 +107,8 @@ This endpoint is meant for feed-quality inspection before strategy work. It show
 
 `GET /api/odds/movement` compares the latest and previous stored observation for the same event, market, and outcome. It is an operator monitoring view only: it surfaces odds drift, active/displayed state, and observation timestamps without treating movement as a settlement-grade or placement signal.
 
+When a candidate is inserted, the store also stamps the same latest-prior movement evidence into `candidate_bets.feature_snapshot.odds_movement` and the candidate rationale. That makes later strategy decisions and paper placements replayable with the odds drift that was known at candidate creation time.
+
 ## Sports Intelligence Feature Snapshots
 
 The scanner also creates a first decision-time feature snapshot per observed event:
@@ -215,7 +217,7 @@ Stored candidate fields include:
 - A first-pass model probability from odds shape, market kind, and metadata completeness.
 - Expected value, confidence, and score.
 - Risk flags such as missing participants, specialized market, long-horizon market, line market, very short price, or long price.
-- A feature snapshot containing only decision-time metadata from the normalized odds feed.
+- A feature snapshot containing decision-time metadata from the normalized odds feed, including odds movement when a previous observation exists for the same event, market, and outcome.
 
 The ranker intentionally uses weak, transparent heuristics until sports intelligence ingestion is wired in. Later model versions should replace these heuristics with feature snapshots from stats, news, weather, form, and settlement history.
 

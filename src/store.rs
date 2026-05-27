@@ -719,6 +719,11 @@ impl Store {
             )
             .await?;
         for candidate in candidates {
+            if let Some(movement) =
+                candidate_odds_movement(&transaction, &snapshot_id, observed_at, candidate).await?
+            {
+                attach_candidate_odds_movement(candidate, movement);
+            }
             transaction
                 .execute(
                     r#"
@@ -5929,6 +5934,104 @@ async fn save_market_catalog(
         }
     }
     Ok(())
+}
+
+async fn candidate_odds_movement(
+    transaction: &Transaction<'_>,
+    current_snapshot_id: &str,
+    current_observed_at: DateTime<Utc>,
+    candidate: &CandidateBet,
+) -> anyhow::Result<Option<Value>> {
+    let (Some(event_id), Some(market_id), Some(outcome_id), Some(current_decimal_odds)) = (
+        candidate.event_id.as_deref(),
+        candidate.market_id.as_deref(),
+        candidate.outcome_id.as_deref(),
+        candidate.decimal_odds,
+    ) else {
+        return Ok(None);
+    };
+    let row = transaction
+        .query_opt(
+            r#"
+            SELECT
+              os.id AS previous_snapshot_id,
+              os.observed_at AS previous_observed_at,
+              oo.decimal_odds::float8 AS previous_decimal_odds,
+              oo.active AS previous_active,
+              oo.displayed AS previous_displayed
+            FROM outcome_observations oo
+            JOIN market_observations mo ON mo.id = oo.market_observation_id
+            JOIN odds_snapshots os ON os.id = oo.snapshot_id
+            WHERE os.id <> $1
+              AND os.observed_at < $2
+              AND mo.event_id = $3
+              AND mo.market_id = $4
+              AND oo.outcome_id = $5
+              AND oo.decimal_odds IS NOT NULL
+            ORDER BY os.observed_at DESC
+            LIMIT 1
+            "#,
+            &[
+                &current_snapshot_id,
+                &current_observed_at,
+                &event_id,
+                &market_id,
+                &outcome_id,
+            ],
+        )
+        .await?;
+    let Some(row) = row else {
+        return Ok(None);
+    };
+    let previous_decimal_odds: f64 = row.get("previous_decimal_odds");
+    let delta = current_decimal_odds - previous_decimal_odds;
+    let delta_pct = if previous_decimal_odds == 0.0 {
+        None
+    } else {
+        Some(delta / previous_decimal_odds)
+    };
+    let direction = if delta > 0.0 {
+        "up"
+    } else if delta < 0.0 {
+        "down"
+    } else {
+        "flat"
+    };
+    let previous_observed_at: DateTime<Utc> = row.get("previous_observed_at");
+    Ok(Some(json!({
+        "source": "outcome_observations_latest_previous_at_candidate_insert",
+        "previous_snapshot_id": row.get::<_, String>("previous_snapshot_id"),
+        "previous_observed_at": previous_observed_at,
+        "current_snapshot_id": current_snapshot_id,
+        "current_observed_at": current_observed_at,
+        "previous_decimal_odds": previous_decimal_odds,
+        "current_decimal_odds": current_decimal_odds,
+        "decimal_odds_delta": delta,
+        "decimal_odds_delta_pct": delta_pct,
+        "direction": direction,
+        "previous_active": row.get::<_, Option<bool>>("previous_active"),
+        "previous_displayed": row.get::<_, Option<bool>>("previous_displayed"),
+        "paper_only": true,
+        "not_settlement_grade": true
+    })))
+}
+
+fn attach_candidate_odds_movement(candidate: &mut CandidateBet, movement: Value) {
+    if let Some(features) = candidate.feature_snapshot.as_object_mut() {
+        features.insert("odds_movement".to_string(), movement.clone());
+    } else {
+        candidate.feature_snapshot = json!({"odds_movement": movement.clone()});
+    }
+
+    if let Some(evidence) = candidate
+        .rationale
+        .get_mut("evidence")
+        .and_then(Value::as_object_mut)
+    {
+        evidence.insert("odds_movement".to_string(), movement);
+    } else if let Some(rationale) = candidate.rationale.as_object_mut() {
+        rationale.insert("odds_movement".to_string(), movement);
+    }
 }
 
 fn event_feature_snapshot(sport_key: &str, event: &Value) -> Value {

@@ -357,17 +357,26 @@ const json = (url, options = {}) => fetch(url, {
   return r.json();
 });
 function renderRows(items) {
-  $("candidates").innerHTML = items.map((item) => `
-    <tr>
-      <td><span class="pill">${esc(item.sport_key)}</span></td>
-      <td>${esc(item.event_name)}<br><span class="label">${esc(item.competition)}</span></td>
-      <td>${esc(item.market_name)}<br><span class="label">${esc(item.market_kind)}</span></td>
-      <td>${esc(item.outcome_name)}</td>
-      <td>${item.decimal_odds ?? ""}<br><span class="muted">imp ${pct(item.implied_probability)}</span></td>
-      <td>${num(item.score)}<br><span class="muted">conf ${pct(item.confidence)}</span></td>
-      <td><button data-candidate="${item.id}" ${item.status === "rejected" ? "disabled" : ""}>${item.status === "rejected" ? "Rejected" : "Paper"}</button></td>
-    </tr>
-  `).join("");
+  $("candidates").innerHTML = items.map((item) => {
+    const movement = item.feature_snapshot && item.feature_snapshot.odds_movement
+      ? item.feature_snapshot.odds_movement
+      : null;
+    const movementLabel = movement
+      ? `${movement.decimal_odds_delta >= 0 ? "+" : ""}${Number(movement.decimal_odds_delta || 0).toFixed(2)} ${movement.direction || ""}`
+      : "no prior";
+    const movementClass = movement && movement.direction === "up" ? "ok" : movement && movement.direction === "down" ? "danger" : "muted";
+    return `
+      <tr>
+        <td><span class="pill">${esc(item.sport_key)}</span></td>
+        <td>${esc(item.event_name)}<br><span class="label">${esc(item.competition)}</span></td>
+        <td>${esc(item.market_name)}<br><span class="label">${esc(item.market_kind)}</span></td>
+        <td>${esc(item.outcome_name)}</td>
+        <td>${item.decimal_odds ?? ""}<br><span class="muted">imp ${pct(item.implied_probability)}</span><br><span class="${movementClass}">${esc(movementLabel)}</span></td>
+        <td>${num(item.score)}<br><span class="muted">conf ${pct(item.confidence)}</span></td>
+        <td><button data-candidate="${item.id}" ${item.status === "rejected" ? "disabled" : ""}>${item.status === "rejected" ? "Rejected" : "Paper"}</button></td>
+      </tr>
+    `;
+  }).join("");
   document.querySelectorAll("[data-candidate]").forEach((button) => {
     button.addEventListener("click", async () => {
       await json(api("/api/simulate"), { method: "POST", body: JSON.stringify({ candidate_id: button.dataset.candidate }) });
