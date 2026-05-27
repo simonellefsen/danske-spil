@@ -175,6 +175,7 @@ impl GamblerService {
                 self.settings.default_stake,
                 self.settings.auto_paper_per_scan_limit,
                 self.settings.auto_paper_max_open_exposure,
+                self.settings.settlement_lookup_cooldown_minutes,
             )
             .await
         {
@@ -321,6 +322,7 @@ impl GamblerService {
                 self.settings.default_stake,
                 self.settings.auto_paper_per_scan_limit,
                 self.settings.auto_paper_max_open_exposure,
+                self.settings.settlement_lookup_cooldown_minutes,
             )
             .await
         {

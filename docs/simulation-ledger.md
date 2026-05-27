@@ -137,6 +137,7 @@ Current POC metrics are exposed through `/api/ledger/summary`:
 - Selected but unplaced candidates from the latest snapshot.
 - Remaining paper placement capacity and exposure-cap blocker state.
 - Awaiting-result items due for review.
+- Settlement lookup cadence: due items with recent checks, due items missing a fresh lookup, last lookup time, and next lookup due time.
 - Paper performance by sport and strategy.
 
 Each scan records the live report into `simulation_performance_snapshots`.

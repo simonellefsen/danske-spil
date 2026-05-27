@@ -29,6 +29,7 @@ pub fn render_index(base_path: &str) -> String {
                     div { class: "metric", div { class: "label", "Next capacity" } div { class: "value", id: "next-capacity", "-" } }
                     div { class: "metric", div { class: "label", "Awaiting result" } div { class: "value", id: "awaiting-result", "-" } }
                     div { class: "metric", div { class: "label", "Due review" } div { class: "value", id: "due-review", "-" } }
+                    div { class: "metric", div { class: "label", "Lookup due" } div { class: "value", id: "lookup-due", "-" } }
                     div { class: "metric", div { class: "label", "Open exposure" } div { class: "value", id: "exposure", "-" } }
                     div { class: "metric", div { class: "label", "Paper P/L" } div { class: "value", id: "profit", "-" } }
                     div { class: "metric", div { class: "label", "Real-money placement" } div { class: "value danger", id: "placement", "disabled" } }
@@ -632,10 +633,13 @@ function renderPlayed(summary) {
 function renderPerformance(report) {
   const capacity = report.placement_capacity || {};
   const settlement = report.settlement_work || {};
+  const lookup = settlement.lookup_cadence || {};
   $("next-capacity").textContent = `${capacity.next_scan_capacity ?? 0}/${capacity.per_scan_limit ?? 0}`;
   $("next-capacity").className = capacity.blocked ? "value danger" : "value ok";
   $("due-review").textContent = String(settlement.due_total || 0);
   $("due-review").className = Number(settlement.due_total || 0) > 0 ? "value danger" : "value ok";
+  $("lookup-due").textContent = `${lookup.due_without_recent_lookup_count ?? 0}/${lookup.due_lookup_item_count ?? 0}`;
+  $("lookup-due").className = Number(lookup.due_without_recent_lookup_count || 0) > 0 ? "value danger" : "value ok";
 
   const dueBySport = {};
   (settlement.stale_awaiting || []).forEach((item) => {
@@ -654,6 +658,9 @@ function renderPerformance(report) {
   `).join("");
   if (!(report.by_sport || []).length) {
     $("performance").innerHTML = `<tr><td colspan="6" class="muted">No paper performance yet.</td></tr>`;
+  }
+  if (lookup.next_lookup_due_at) {
+    $("reasoning").textContent = `${$("reasoning").textContent}\n\nSettlement lookup cadence:\n${JSON.stringify(lookup, null, 2)}`;
   }
 
   const intake = report.opportunity_intake || {};

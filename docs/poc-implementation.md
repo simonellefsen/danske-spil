@@ -258,5 +258,6 @@ Current result-review status:
 - Manual settlement must cite a `source_registry` row where `can_settle=true`; the settlement payload preserves earlier review evidence and adds the selected source policy under `manual_settlement.source_policy`.
 - The review queue joins paper bets to the latest observed event, market, and outcome payloads from the Danske Spil content feed.
 - Each review refresh records `settlement_lookup_attempts` rows with the source key, recommendation, current event/outcome state, and the approved settlement source policy. Writes are throttled by `GAMBLER_SETTLEMENT_LOOKUP_COOLDOWN_MINUTES` so repeated UI refreshes do not create duplicate attempts inside the intended 15-minute recheck cadence.
+- `/api/performance` now includes `settlement_work.lookup_cadence`, which reports how many due paper positions have a recent lookup attempt, how many are due without a recent attempt, the last lookup time, and the next lookup due time.
 - The system recommends `manual_grade_ready`, `manual_void_or_refund_review`, `expected_finish_passed_recheck`, or `await_more_evidence`.
 - It still does not auto-grade won/lost because the feed outcome result semantics have not been proven for each market type.

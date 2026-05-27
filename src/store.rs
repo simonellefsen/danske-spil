@@ -3014,6 +3014,7 @@ impl Store {
         default_stake: f64,
         per_scan_limit: usize,
         max_open_exposure: f64,
+        lookup_cooldown_minutes: i64,
     ) -> anyhow::Result<Value> {
         let ledger = self.ledger_summary().await?;
         let played = self.strategy_played_summary().await?;
@@ -3131,6 +3132,78 @@ impl Store {
                 &[],
             )
             .await?;
+        let lookup_cadence_row = client
+            .query_one(
+                r#"
+                WITH due AS (
+                  SELECT
+                    'single'::text AS item_type,
+                    id AS simulated_bet_id,
+                    NULL::text AS simulated_coupon_id
+                  FROM simulated_bets
+                  WHERE status IN ('awaiting_result', 'unresolved', 'postponed')
+                    AND expected_result_check_after <= now()
+                  UNION ALL
+                  SELECT
+                    'coupon'::text AS item_type,
+                    NULL::text AS simulated_bet_id,
+                    id AS simulated_coupon_id
+                  FROM simulated_coupons
+                  WHERE status IN ('awaiting_result', 'unresolved', 'postponed')
+                    AND expected_result_check_after <= now()
+                ),
+                due_with_attempt AS (
+                  SELECT
+                    due.item_type,
+                    due.simulated_bet_id,
+                    due.simulated_coupon_id,
+                    max(sla.created_at) AS last_lookup_at
+                  FROM due
+                  LEFT JOIN settlement_lookup_attempts sla
+                    ON sla.source_key = 'danskespil_content_service'
+                   AND (
+                     (due.simulated_bet_id IS NOT NULL AND sla.simulated_bet_id = due.simulated_bet_id)
+                     OR (due.simulated_coupon_id IS NOT NULL AND sla.simulated_coupon_id = due.simulated_coupon_id)
+                   )
+                  GROUP BY due.item_type, due.simulated_bet_id, due.simulated_coupon_id
+                ),
+                attempt_window AS (
+                  SELECT
+                    count(*)::int AS total_lookup_attempt_count,
+                    count(*) FILTER (
+                      WHERE created_at >= now() - ($1::int * interval '1 minute')
+                    )::int AS lookup_attempts_in_cooldown,
+                    max(created_at) AS last_lookup_attempt_at
+                  FROM settlement_lookup_attempts
+                  WHERE source_key = 'danskespil_content_service'
+                )
+                SELECT
+                  (SELECT count(*)::int FROM due_with_attempt) AS due_lookup_item_count,
+                  count(*) FILTER (
+                    WHERE last_lookup_at >= now() - ($1::int * interval '1 minute')
+                  )::int AS recently_checked_due_count,
+                  count(*) FILTER (
+                    WHERE last_lookup_at IS NULL
+                       OR last_lookup_at < now() - ($1::int * interval '1 minute')
+                  )::int AS due_without_recent_lookup_count,
+                  max(last_lookup_at) AS newest_due_lookup_at,
+                  min(last_lookup_at) AS oldest_due_lookup_at,
+                  CASE
+                    WHEN count(*) FILTER (
+                      WHERE last_lookup_at IS NULL
+                         OR last_lookup_at < now() - ($1::int * interval '1 minute')
+                    ) > 0
+                    THEN now()
+                    ELSE min(last_lookup_at + ($1::int * interval '1 minute'))
+                  END AS next_lookup_due_at,
+                  (SELECT total_lookup_attempt_count FROM attempt_window) AS total_lookup_attempt_count,
+                  (SELECT lookup_attempts_in_cooldown FROM attempt_window) AS lookup_attempts_in_cooldown,
+                  (SELECT last_lookup_attempt_at FROM attempt_window) AS last_lookup_attempt_at
+                FROM due_with_attempt
+                "#,
+                &[&(lookup_cooldown_minutes.max(0) as i32)],
+            )
+            .await?;
 
         let by_sport = client
             .query(
@@ -3191,6 +3264,14 @@ impl Store {
             .into_iter()
             .flatten()
             .min();
+        let newest_due_lookup_at: Option<DateTime<Utc>> =
+            lookup_cadence_row.get("newest_due_lookup_at");
+        let oldest_due_lookup_at: Option<DateTime<Utc>> =
+            lookup_cadence_row.get("oldest_due_lookup_at");
+        let next_lookup_due_at: Option<DateTime<Utc>> =
+            lookup_cadence_row.get("next_lookup_due_at");
+        let last_lookup_attempt_at: Option<DateTime<Utc>> =
+            lookup_cadence_row.get("last_lookup_attempt_at");
 
         let latest_snapshot_json = latest_snapshot.map(|row| {
             let observed_at: DateTime<Utc> = row.get("observed_at");
@@ -3247,6 +3328,19 @@ impl Store {
                 "due_coupon_count": due_coupon.get::<_, i32>("due_coupon_count"),
                 "due_total": due_single.get::<_, i32>("due_single_count") + due_coupon.get::<_, i32>("due_coupon_count"),
                 "oldest_due": oldest_due,
+                "lookup_cadence": {
+                    "source_key": "danskespil_content_service",
+                    "cooldown_minutes": lookup_cooldown_minutes,
+                    "due_lookup_item_count": lookup_cadence_row.get::<_, i32>("due_lookup_item_count"),
+                    "recently_checked_due_count": lookup_cadence_row.get::<_, i32>("recently_checked_due_count"),
+                    "due_without_recent_lookup_count": lookup_cadence_row.get::<_, i32>("due_without_recent_lookup_count"),
+                    "newest_due_lookup_at": newest_due_lookup_at,
+                    "oldest_due_lookup_at": oldest_due_lookup_at,
+                    "next_lookup_due_at": next_lookup_due_at,
+                    "total_lookup_attempt_count": lookup_cadence_row.get::<_, i32>("total_lookup_attempt_count"),
+                    "lookup_attempts_in_cooldown": lookup_cadence_row.get::<_, i32>("lookup_attempts_in_cooldown"),
+                    "last_lookup_attempt_at": last_lookup_attempt_at
+                },
                 "stale_awaiting": stale_awaiting_rows.iter().map(|row| {
                     let expected: Option<DateTime<Utc>> = row.get("expected_result_check_after");
                     json!({
