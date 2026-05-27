@@ -2516,8 +2516,7 @@ impl Store {
                   LEFT JOIN LATERAL (
                     SELECT max(created_at) AS last_lookup_at
                     FROM settlement_lookup_attempts sla
-                    WHERE sla.source_key = 'danskespil_content_service'
-                      AND sla.simulated_bet_id = sb.id
+                    WHERE sla.simulated_bet_id = sb.id
                   ) lkp ON true
                   WHERE sb.status IN ('awaiting_result', 'unresolved', 'postponed')
                   ORDER BY se.start_time ASC NULLS LAST, sb.created_at ASC
@@ -2666,8 +2665,7 @@ impl Store {
                   LEFT JOIN LATERAL (
                     SELECT max(created_at) AS last_lookup_at
                     FROM settlement_lookup_attempts sla
-                    WHERE sla.source_key = 'danskespil_content_service'
-                      AND sla.simulated_coupon_id = sc.id
+                    WHERE sla.simulated_coupon_id = sc.id
                   ) lkp ON true
                   WHERE sc.status IN ('awaiting_result', 'unresolved', 'postponed')
                 ),
@@ -2786,6 +2784,8 @@ impl Store {
                     event_settled,
                     expected_result_check_after,
                 );
+                let overdue_minutes = settlement_overdue_minutes(expected_result_check_after);
+                let recommended_source_key = settlement_recommended_source_key(recommendation);
                 json!({
                     "item_type": "single",
                     "bet_id": row.get::<_, String>("id"),
@@ -2806,6 +2806,7 @@ impl Store {
                     "last_lookup_at": last_lookup_at,
                     "lookup_stale": lookup_stale,
                     "lookup_cooldown_minutes": lookup_cooldown_minutes,
+                    "overdue_minutes": overdue_minutes,
                     "event_status": event_status,
                     "event_resulted": event_resulted,
                     "event_settled": event_settled,
@@ -2816,7 +2817,8 @@ impl Store {
                     "latest_decimal_odds": row.get::<_, Option<f64>>("latest_decimal_odds"),
                     "latest_outcome_payload": row.get::<_, Option<Value>>("latest_outcome_payload"),
                     "settlement_source_policy": settlement_source_policy.clone(),
-                    "recommendation": recommendation
+                    "recommendation": recommendation,
+                    "recommended_source_key": recommended_source_key
                 })
             })
             .collect();
@@ -2830,6 +2832,8 @@ impl Store {
             let legs: Value = row.get("legs");
             let recommendation =
                 coupon_settlement_review_recommendation(&legs, expected_result_check_after);
+            let overdue_minutes = settlement_overdue_minutes(expected_result_check_after);
+            let recommended_source_key = settlement_recommended_source_key(recommendation);
             json!({
                 "item_type": "coupon",
                 "coupon_simulation_id": row.get::<_, String>("id"),
@@ -2843,9 +2847,11 @@ impl Store {
                 "last_lookup_at": last_lookup_at,
                 "lookup_stale": lookup_stale,
                 "lookup_cooldown_minutes": lookup_cooldown_minutes,
+                "overdue_minutes": overdue_minutes,
                 "legs": legs,
                 "settlement_source_policy": settlement_source_policy.clone(),
-                "recommendation": recommendation
+                "recommendation": recommendation,
+                "recommended_source_key": recommended_source_key
             })
         }));
 
@@ -3436,8 +3442,7 @@ impl Store {
                     max(sla.created_at) AS last_lookup_at
                   FROM due
                   LEFT JOIN settlement_lookup_attempts sla
-                    ON sla.source_key = 'danskespil_content_service'
-                   AND (
+                    ON (
                      (due.simulated_bet_id IS NOT NULL AND sla.simulated_bet_id = due.simulated_bet_id)
                      OR (due.simulated_coupon_id IS NOT NULL AND sla.simulated_coupon_id = due.simulated_coupon_id)
                    )
@@ -3451,7 +3456,6 @@ impl Store {
                     )::int AS lookup_attempts_in_cooldown,
                     max(created_at) AS last_lookup_attempt_at
                   FROM settlement_lookup_attempts
-                  WHERE source_key = 'danskespil_content_service'
                 )
                 SELECT
                   (SELECT count(*)::int FROM due_with_attempt) AS due_lookup_item_count,
@@ -3599,8 +3603,7 @@ impl Store {
                     max(sla.created_at) AS last_lookup_at
                   FROM due_items
                   LEFT JOIN settlement_lookup_attempts sla
-                    ON sla.source_key = 'danskespil_content_service'
-                   AND (
+                    ON (
                      (due_items.item_type = 'single' AND sla.simulated_bet_id = due_items.item_id)
                      OR (due_items.item_type = 'coupon' AND sla.simulated_coupon_id = due_items.item_id)
                    )
@@ -3707,7 +3710,7 @@ impl Store {
                 "due_total": due_single.get::<_, i32>("due_single_count") + due_coupon.get::<_, i32>("due_coupon_count"),
                 "oldest_due": oldest_due,
                 "lookup_cadence": {
-                    "source_key": "danskespil_content_service",
+                    "source_scope": "settlement_review_sources",
                     "cooldown_minutes": lookup_cooldown_minutes,
                     "due_lookup_item_count": lookup_cadence_row.get::<_, i32>("due_lookup_item_count"),
                     "recently_checked_due_count": lookup_cadence_row.get::<_, i32>("recently_checked_due_count"),
@@ -4457,18 +4460,25 @@ impl Store {
                 .and_then(Value::as_str)
                 .unwrap_or("await_more_evidence")
                 .to_string();
+            let source_key = item
+                .get("recommended_source_key")
+                .and_then(Value::as_str)
+                .unwrap_or("danskespil_content_service")
+                .to_string();
             let outcome_state = json!({
                 "event_status": item.get("event_status").cloned().unwrap_or(Value::Null),
                 "event_resulted": item.get("event_resulted").cloned().unwrap_or(Value::Null),
                 "event_settled": item.get("event_settled").cloned().unwrap_or(Value::Null),
                 "expected_result_check_after": item.get("expected_result_check_after").cloned().unwrap_or(Value::Null),
+                "overdue_minutes": item.get("overdue_minutes").cloned().unwrap_or(Value::Null),
+                "recommended_source_key": source_key,
                 "latest_outcome_active": item.get("latest_outcome_active").cloned().unwrap_or(Value::Null),
                 "latest_outcome_displayed": item.get("latest_outcome_displayed").cloned().unwrap_or(Value::Null)
             });
             let payload = json!({
                 "paper_only": true,
                 "not_auto_graded": true,
-                "source": "danskespil_content_service",
+                "source": source_key,
                 "settlement_source_policy": settlement_source_policy,
                 "review_item": item
             });
@@ -4496,7 +4506,7 @@ impl Store {
                         &item_type,
                         &simulated_bet_id,
                         &simulated_coupon_id,
-                        &"danskespil_content_service",
+                        &source_key,
                         &recommendation,
                         &outcome_state,
                         &payload,
@@ -6529,6 +6539,9 @@ fn settlement_review_recommendation(
     if event_settled == Some(true) || event_resulted == Some(true) {
         return "manual_grade_ready";
     }
+    if expected_result_check_after.is_some_and(|value| value <= Utc::now() - Duration::hours(24)) {
+        return "external_result_required";
+    }
     if expected_result_check_after.is_some_and(|value| value <= Utc::now()) {
         return "expected_finish_passed_recheck";
     }
@@ -6562,10 +6575,26 @@ fn coupon_settlement_review_recommendation(
     {
         return "manual_grade_ready";
     }
+    if expected_result_check_after.is_some_and(|value| value <= Utc::now() - Duration::hours(24)) {
+        return "external_result_required";
+    }
     if expected_result_check_after.is_some_and(|value| value <= Utc::now()) {
         return "expected_finish_passed_recheck";
     }
     "await_more_evidence"
+}
+
+fn settlement_overdue_minutes(expected_result_check_after: Option<DateTime<Utc>>) -> Option<i64> {
+    expected_result_check_after.map(|value| (Utc::now() - value).num_minutes().max(0))
+}
+
+fn settlement_recommended_source_key(recommendation: &str) -> &'static str {
+    match recommendation {
+        "external_result_required" => "official_competition_results",
+        "manual_void_or_refund_review" => "danskespil_account_history",
+        "manual_grade_ready" => "danskespil_account_history",
+        _ => "danskespil_content_service",
+    }
 }
 
 #[derive(Debug, Clone)]

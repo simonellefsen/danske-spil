@@ -182,6 +182,7 @@ The UI should show:
 - Settlement source and confidence.
 - Recent non-grading settlement lookup attempts and recommendations.
 - Lookup freshness on each settlement-review row, including the last lookup timestamp and whether it is stale relative to the configured cooldown.
+- Overdue paper positions that remain unresulted in the Danske Spil content feed for more than 24 hours after the expected result-check time are escalated to `external_result_required`, with official competition or tournament result pages as the recommended next source.
 - Manual-review queue for ambiguous results.
 
 All displays must clearly label results as simulated/paper results unless real-money functionality is explicitly approved later.

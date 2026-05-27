@@ -337,6 +337,15 @@ const money = (value) => Number(value || 0).toFixed(2);
 const pct = (value) => value === null || value === undefined ? "-" : `${(Number(value) * 100).toFixed(1)}%`;
 const num = (value) => value === null || value === undefined ? "-" : Number(value).toFixed(3);
 const mins = (value) => value === null || value === undefined ? "-" : `${Math.round(Number(value) / 60)}m`;
+const durationMins = (value) => {
+  if (value === null || value === undefined) return "";
+  const total = Math.max(0, Number(value));
+  const days = Math.floor(total / 1440);
+  const hours = Math.floor((total % 1440) / 60);
+  if (days > 0) return `${days}d ${hours}h`;
+  if (hours > 0) return `${hours}h`;
+  return `${Math.round(total)}m`;
+};
 const esc = (value) => String(value ?? "").replace(/[&<>"']/g, (ch) => ({
   "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;"
 }[ch]));
@@ -580,14 +589,16 @@ function renderSettlementReview(summary) {
       ? `last lookup ${item.last_lookup_at}`
       : "lookup not recorded";
     const lookupClass = item.lookup_stale ? "danger" : "ok";
+    const overdueLabel = item.overdue_minutes > 0 ? `overdue ${durationMins(item.overdue_minutes)}` : "";
+    const sourceLabel = item.recommended_source_key || preferredSource.source_key || "-";
     return `
       <tr>
         <td><span class="pill">${esc(item.item_type || "single")}</span> ${esc(selection)}<br><span class="label">${detail}</span></td>
-        <td>${esc(item.expected_result_check_after || "-")}<br><span class="muted">${esc(item.sport_key || firstLeg.sport_key || "")}</span><br><span class="${lookupClass}">${esc(lookupLabel)}</span></td>
+        <td>${esc(item.expected_result_check_after || "-")}<br><span class="muted">${esc(item.sport_key || firstLeg.sport_key || "")}</span><br><span class="${lookupClass}">${esc(lookupLabel)}</span>${overdueLabel ? `<br><span class="danger">${esc(overdueLabel)}</span>` : ""}</td>
         <td>${esc(item.event_status || firstLeg.event_status || "-")}<br><span class="muted">${esc(state)}</span></td>
         <td>
           <span class="pill">${esc(item.recommendation || "await_more_evidence")}</span>
-          <br><span class="muted">source: ${esc(preferredSource.source_key || "-")}</span>
+          <br><span class="muted">source: ${esc(sourceLabel)}</span>
           <div class="actions">${settlementButtons(actionAttribute, actionId, !canSettle)}</div>
         </td>
       </tr>

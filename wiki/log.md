@@ -117,6 +117,11 @@ Append-only timeline for project wiki maintenance. Use headings with the format 
 - Added paper performance aggregation by candidate risk flag across singles and simulated coupons.
 - Exposed the breakdown in the web UI so movement-risk gates can be compared against settled paper outcomes.
 
+## [2026-05-27] implementation | stale settlement escalation
+
+- Added a stale settlement recommendation for paper positions still unresulted more than 24 hours after the expected result-check time.
+- Settlement review now recommends official competition results for stale rows instead of repeatedly treating the stale Danske Spil content-feed state as enough context.
+
 ## [2026-05-25] implementation | Candidate ranking and paper settlement POC
 
 - Added `poc_ranker_v1` candidate scoring fields: implied probability, model probability, expected value, confidence, score, risk flags, and feature snapshot.
