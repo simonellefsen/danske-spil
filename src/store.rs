@@ -6016,11 +6016,22 @@ async fn candidate_odds_movement(
     })))
 }
 
-fn attach_candidate_odds_movement(candidate: &mut CandidateBet, movement: Value) {
+fn attach_candidate_odds_movement(candidate: &mut CandidateBet, mut movement: Value) {
+    let classification = classify_candidate_odds_movement(&movement);
+    if let Some(object) = movement.as_object_mut() {
+        object.insert("classification".to_string(), classification.clone());
+    }
+    let risk_flags = candidate_movement_risk_flags(&candidate.risk_flags, &classification);
+    candidate.risk_flags = json!(risk_flags.clone());
+
     if let Some(features) = candidate.feature_snapshot.as_object_mut() {
         features.insert("odds_movement".to_string(), movement.clone());
+        features.insert("risk_flags".to_string(), json!(risk_flags.clone()));
     } else {
-        candidate.feature_snapshot = json!({"odds_movement": movement.clone()});
+        candidate.feature_snapshot = json!({
+            "odds_movement": movement.clone(),
+            "risk_flags": risk_flags
+        });
     }
 
     if let Some(evidence) = candidate
@@ -6032,6 +6043,95 @@ fn attach_candidate_odds_movement(candidate: &mut CandidateBet, movement: Value)
     } else if let Some(rationale) = candidate.rationale.as_object_mut() {
         rationale.insert("odds_movement".to_string(), movement);
     }
+
+    if let Some(score_summary) = candidate
+        .rationale
+        .get_mut("score_summary")
+        .and_then(Value::as_object_mut)
+    {
+        score_summary.insert("risk_flags".to_string(), candidate.risk_flags.clone());
+        score_summary.insert("movement_classification".to_string(), classification);
+    }
+}
+
+fn classify_candidate_odds_movement(movement: &Value) -> Value {
+    let delta = movement
+        .get("decimal_odds_delta")
+        .and_then(Value::as_f64)
+        .unwrap_or(0.0);
+    let delta_pct = movement
+        .get("decimal_odds_delta_pct")
+        .and_then(Value::as_f64)
+        .unwrap_or(0.0);
+    let abs_delta = delta.abs();
+    let abs_delta_pct = delta_pct.abs();
+    let direction = movement
+        .get("direction")
+        .and_then(Value::as_str)
+        .unwrap_or("flat");
+    let movement_band = if abs_delta < 0.01 || abs_delta_pct < 0.005 {
+        "stable"
+    } else if abs_delta >= 0.5 || abs_delta_pct >= 0.10 {
+        "large"
+    } else {
+        "normal"
+    };
+    let mut flags = Vec::new();
+    match direction {
+        "up" => flags.push("odds_moved_up"),
+        "down" => flags.push("odds_moved_down"),
+        _ => flags.push("odds_stable"),
+    }
+    if movement_band == "large" {
+        flags.push("large_odds_movement");
+    }
+    if movement
+        .get("previous_active")
+        .and_then(Value::as_bool)
+        .is_some_and(|active| !active)
+    {
+        flags.push("previous_outcome_inactive");
+    }
+    if movement
+        .get("previous_displayed")
+        .and_then(Value::as_bool)
+        .is_some_and(|displayed| !displayed)
+    {
+        flags.push("previous_outcome_hidden");
+    }
+    flags.sort();
+    flags.dedup();
+    json!({
+        "movement_band": movement_band,
+        "direction": direction,
+        "absolute_delta": abs_delta,
+        "absolute_delta_pct": abs_delta_pct,
+        "risk_flags": flags,
+        "score_adjusted": false,
+        "reason": "Movement is persisted as decision-time evidence. Numeric score changes require reviewed strategy experiments."
+    })
+}
+
+fn candidate_movement_risk_flags(existing: &Value, classification: &Value) -> Vec<String> {
+    let mut flags: Vec<String> = existing
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter_map(Value::as_str)
+        .map(str::to_string)
+        .collect();
+    flags.extend(
+        classification
+            .get("risk_flags")
+            .and_then(Value::as_array)
+            .into_iter()
+            .flatten()
+            .filter_map(Value::as_str)
+            .map(str::to_string),
+    );
+    flags.sort();
+    flags.dedup();
+    flags
 }
 
 fn event_feature_snapshot(sport_key: &str, event: &Value) -> Value {

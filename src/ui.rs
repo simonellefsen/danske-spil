@@ -361,8 +361,11 @@ function renderRows(items) {
     const movement = item.feature_snapshot && item.feature_snapshot.odds_movement
       ? item.feature_snapshot.odds_movement
       : null;
+    const movementBand = movement && movement.classification
+      ? movement.classification.movement_band || ""
+      : "";
     const movementLabel = movement
-      ? `${movement.decimal_odds_delta >= 0 ? "+" : ""}${Number(movement.decimal_odds_delta || 0).toFixed(2)} ${movement.direction || ""}`
+      ? `${movement.decimal_odds_delta >= 0 ? "+" : ""}${Number(movement.decimal_odds_delta || 0).toFixed(2)} ${movement.direction || ""}${movementBand ? ` / ${movementBand}` : ""}`
       : "no prior";
     const movementClass = movement && movement.direction === "up" ? "ok" : movement && movement.direction === "down" ? "danger" : "muted";
     return `

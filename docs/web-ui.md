@@ -35,7 +35,7 @@ For each candidate bet or coupon, show:
 - Implied probability and estimated probability.
 - Estimated edge and confidence.
 - Evidence inputs, such as market movement, sport stats, team/player news, weather, seasonality, model features, and historical calibration.
-- Odds movement should show previous odds, current odds, absolute move, percentage move, and whether the latest outcome is still active/displayed. Candidate rows should also show the movement known at candidate creation time when available.
+- Odds movement should show previous odds, current odds, absolute move, percentage move, classification band, and whether the latest outcome is still active/displayed. Candidate rows should also show the movement known at candidate creation time when available.
 - Missing or stale data warnings for stats, weather, news, rankings, and availability signals.
 - Rejected alternatives and rejection reasons.
 - Risk checks: duplicate exposure, stake limits, loss-cooldown, odds staleness, responsible-gambling flags, and terms/safety gate.
