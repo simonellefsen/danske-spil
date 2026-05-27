@@ -36,6 +36,12 @@ The Hermes view should show:
 - Approval, rejection, promotion, and rollback history.
 - Active baseline context when one exists.
 
+Current POC status:
+
+- `POST /api/hermes/reflect/yesterday` writes an idempotent daily reflection into `hermes_reflections` for the previous Europe/Copenhagen calendar day.
+- The daily reflection is paper-only and summarizes scan/performance snapshots, simulated placements, settlement observations, and whether results are ready to evaluate.
+- If paper placements are still awaiting result review, the reflection explicitly blocks strategy promotion based on unresolved exposure.
+
 ## Initial Goal Contract
 
 ```yaml

@@ -493,6 +493,26 @@ async fn post_handler(
         "/api/settlement/review" => {
             Json(state.service.refresh_settlement_review_queue().await).into_response()
         }
+        "/api/hermes/reflect/yesterday" => {
+            let local_date = payload.get("date").and_then(Value::as_str);
+            match state
+                .service
+                .store()
+                .record_daily_reflection(local_date)
+                .await
+            {
+                Ok(reflection) => {
+                    state
+                        .service
+                        .store()
+                        .record_audit("hermes_daily_reflection_recorded", reflection.clone())
+                        .await
+                        .ok();
+                    Json(json!({"item": reflection})).into_response()
+                }
+                Err(error) => error_response(StatusCode::BAD_REQUEST, error),
+            }
+        }
         "/api/strategy/experiment/review" => {
             let experiment_id = payload
                 .get("experiment_id")

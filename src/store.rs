@@ -1,6 +1,6 @@
 use crate::models::{CandidateBet, HermesReflection, LedgerSummary, SimulatedBet};
 use anyhow::{anyhow, Context};
-use chrono::{DateTime, Duration, Utc};
+use chrono::{DateTime, Duration, NaiveDate, Utc};
 use serde_json::{json, Value};
 use std::collections::{BTreeMap, HashMap, HashSet};
 use tokio_postgres::{Client, NoTls, Row, Transaction};
@@ -3954,6 +3954,181 @@ impl Store {
                 status: row.get("status"),
             })
             .collect())
+    }
+
+    pub async fn record_daily_reflection(&self, local_date: Option<&str>) -> anyhow::Result<Value> {
+        let client = self.connect().await?;
+        let local_date = match local_date {
+            Some(value) if !value.trim().is_empty() => value.trim().to_string(),
+            _ => {
+                let row = client
+                    .query_one(
+                        "SELECT to_char(((now() AT TIME ZONE 'Europe/Copenhagen')::date - 1), 'YYYY-MM-DD') AS local_date",
+                        &[],
+                    )
+                    .await?;
+                row.get("local_date")
+            }
+        };
+        let local_date_value = NaiveDate::parse_from_str(&local_date, "%Y-%m-%d")
+            .with_context(|| format!("invalid reflection date: {local_date}"))?;
+        let reflection_id = format!("daily-paper-reflection-{local_date}");
+
+        let performance_row = client
+            .query_one(
+                r#"
+                SELECT
+                  count(*)::int AS snapshot_count,
+                  min(created_at) AS first_snapshot_at,
+                  max(created_at) AS last_snapshot_at
+                FROM simulation_performance_snapshots
+                WHERE (created_at AT TIME ZONE 'Europe/Copenhagen')::date = $1
+                "#,
+                &[&local_date_value],
+            )
+            .await?;
+        let latest_performance = client
+            .query_opt(
+                r#"
+                SELECT performance
+                FROM simulation_performance_snapshots
+                WHERE (created_at AT TIME ZONE 'Europe/Copenhagen')::date = $1
+                ORDER BY created_at DESC
+                LIMIT 1
+                "#,
+                &[&local_date_value],
+            )
+            .await?
+            .map(|row| row.get::<_, Value>("performance"))
+            .unwrap_or(Value::Null);
+        let bet_row = client
+            .query_one(
+                r#"
+                WITH scoped AS (
+                  SELECT *
+                  FROM simulated_bets
+                  WHERE (created_at AT TIME ZONE 'Europe/Copenhagen')::date = $1
+                ),
+                status_counts AS (
+                  SELECT status, count(*)::int AS count
+                  FROM scoped
+                  GROUP BY status
+                )
+                SELECT
+                  (SELECT count(*)::int FROM scoped) AS placed_count,
+                  COALESCE((SELECT sum(hypothetical_stake)::float8 FROM scoped), 0) AS turnover,
+                  COALESCE((SELECT sum(profit_loss)::float8 FROM scoped), 0) AS profit_loss,
+                  COALESCE((SELECT jsonb_object_agg(status, count) FROM status_counts), '{}'::jsonb) AS by_status
+                "#,
+                &[&local_date_value],
+            )
+            .await?;
+        let coupon_row = client
+            .query_one(
+                r#"
+                WITH scoped AS (
+                  SELECT *
+                  FROM simulated_coupons
+                  WHERE (created_at AT TIME ZONE 'Europe/Copenhagen')::date = $1
+                ),
+                status_counts AS (
+                  SELECT status, count(*)::int AS count
+                  FROM scoped
+                  GROUP BY status
+                )
+                SELECT
+                  (SELECT count(*)::int FROM scoped) AS placed_count,
+                  COALESCE((SELECT sum(hypothetical_stake)::float8 FROM scoped), 0) AS turnover,
+                  COALESCE((SELECT sum(profit_loss)::float8 FROM scoped), 0) AS profit_loss,
+                  COALESCE((SELECT jsonb_object_agg(status, count) FROM status_counts), '{}'::jsonb) AS by_status
+                "#,
+                &[&local_date_value],
+            )
+            .await?;
+        let settlement_row = client
+            .query_one(
+                r#"
+                SELECT count(*)::int AS observation_count
+                FROM settlement_observations
+                WHERE (created_at AT TIME ZONE 'Europe/Copenhagen')::date = $1
+                "#,
+                &[&local_date_value],
+            )
+            .await?;
+
+        let snapshot_count: i32 = performance_row.get("snapshot_count");
+        let bet_count: i32 = bet_row.get("placed_count");
+        let bet_turnover: f64 = bet_row.get("turnover");
+        let coupon_count: i32 = coupon_row.get("placed_count");
+        let settlement_count: i32 = settlement_row.get("observation_count");
+        let first_snapshot_at: Option<DateTime<Utc>> = performance_row.get("first_snapshot_at");
+        let last_snapshot_at: Option<DateTime<Utc>> = performance_row.get("last_snapshot_at");
+        let title = format!("Daily paper reflection {local_date}");
+        let summary = if bet_count + coupon_count == 0 {
+            format!("{local_date}: no paper placements were created. {snapshot_count} performance snapshots were recorded; no settlement observations were available.")
+        } else if settlement_count == 0 {
+            format!("{local_date}: recorded {snapshot_count} performance snapshots and {bet_count} paper singles / {coupon_count} paper coupons. Paper single turnover was {bet_turnover:.2}. No settlement observations were recorded yet, so won/lost performance is not evaluable.")
+        } else {
+            format!("{local_date}: recorded {snapshot_count} performance snapshots, {bet_count} paper singles, {coupon_count} paper coupons, and {settlement_count} settlement observations.")
+        };
+        let evidence = json!({
+            "reflection_date": local_date,
+            "timezone": "Europe/Copenhagen",
+            "paper_only": true,
+            "first_snapshot_at": first_snapshot_at,
+            "last_snapshot_at": last_snapshot_at,
+            "performance_snapshot_count": snapshot_count,
+            "latest_performance": latest_performance,
+            "single_bets": {
+                "placed_count": bet_count,
+                "turnover": bet_turnover,
+                "profit_loss": bet_row.get::<_, f64>("profit_loss"),
+                "by_status": bet_row.get::<_, Value>("by_status")
+            },
+            "coupons": {
+                "placed_count": coupon_count,
+                "turnover": coupon_row.get::<_, f64>("turnover"),
+                "profit_loss": coupon_row.get::<_, f64>("profit_loss"),
+                "by_status": coupon_row.get::<_, Value>("by_status")
+            },
+            "settlement_observation_count": settlement_count,
+            "assessment": {
+                "has_realized_results": settlement_count > 0,
+                "needs_result_review": settlement_count == 0 && (bet_count + coupon_count) > 0,
+                "recommendation": if settlement_count == 0 && (bet_count + coupon_count) > 0 {
+                    "Keep positions in awaiting-result review; do not promote strategy based on unresolved paper exposure."
+                } else if bet_count + coupon_count == 0 {
+                    "No paper results to evaluate for this date."
+                } else {
+                    "Review settled outcomes before considering any strategy promotion."
+                }
+            }
+        });
+        let row = client
+            .query_one(
+                r#"
+                INSERT INTO hermes_reflections (id, title, summary, evidence, status)
+                VALUES ($1,$2,$3,$4,'recorded')
+                ON CONFLICT (id) DO UPDATE
+                SET created_at = now(),
+                    title = EXCLUDED.title,
+                    summary = EXCLUDED.summary,
+                    evidence = EXCLUDED.evidence,
+                    status = EXCLUDED.status
+                RETURNING id, created_at, title, summary, evidence, status
+                "#,
+                &[&reflection_id, &title, &summary, &evidence],
+            )
+            .await?;
+        let created_at: DateTime<Utc> = row.get("created_at");
+        Ok(json!({
+            "id": row.get::<_, String>("id"),
+            "created_at": created_at,
+            "title": row.get::<_, String>("title"),
+            "summary": row.get::<_, String>("summary"),
+            "evidence": row.get::<_, Value>("evidence"),
+            "status": row.get::<_, String>("status")
+        }))
     }
 
     pub async fn strategy_state(&self) -> anyhow::Result<Value> {

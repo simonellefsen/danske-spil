@@ -12,6 +12,7 @@ pub fn render_index(base_path: &str) -> String {
                     button { id: "auto-paper-coupons", "Auto paper coupons" }
                     button { id: "queue-settlement", "Queue settlement" }
                     button { id: "review-settlement", "Review results" }
+                    button { id: "reflect-yesterday", "Reflect yesterday" }
                     button { id: "refresh", "Refresh" }
                 }
             }
@@ -831,6 +832,11 @@ $("review-settlement").addEventListener("click", async () => {
   $("review-settlement").disabled = true;
   try { await json(api("/api/settlement/review"), { method: "POST", body: "{}" }); await load(); }
   finally { $("review-settlement").disabled = false; }
+});
+$("reflect-yesterday").addEventListener("click", async () => {
+  $("reflect-yesterday").disabled = true;
+  try { await json(api("/api/hermes/reflect/yesterday"), { method: "POST", body: "{}" }); await load(); }
+  finally { $("reflect-yesterday").disabled = false; }
 });
 $("refresh").addEventListener("click", load);
 load().catch((error) => { $("reasoning").textContent = error.stack || String(error); });
