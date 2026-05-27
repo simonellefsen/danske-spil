@@ -2949,17 +2949,36 @@ impl Store {
         let by_strategy = client
             .query(
                 r#"
+                WITH positions AS (
+                  SELECT
+                    'single'::text AS item_type,
+                    sb.strategy_id,
+                    sb.status,
+                    sb.hypothetical_stake,
+                    sb.profit_loss
+                  FROM simulated_bets sb
+                  UNION ALL
+                  SELECT
+                    'coupon'::text AS item_type,
+                    sc.strategy_id,
+                    sc.status,
+                    sc.hypothetical_stake,
+                    sc.profit_loss
+                  FROM simulated_coupons sc
+                )
                 SELECT
-                  sb.strategy_id,
-                  count(*) FILTER (WHERE sb.status <> 'duplicate_void')::int AS played_count,
-                  count(*) FILTER (WHERE sb.status IN ('open', 'awaiting_result', 'unresolved', 'postponed'))::int AS open_count,
-                  count(*) FILTER (WHERE sb.status = 'awaiting_result')::int AS awaiting_result_count,
-                  count(*) FILTER (WHERE sb.status = 'duplicate_void')::int AS duplicate_void_count,
-                  COALESCE(sum(sb.hypothetical_stake) FILTER (WHERE sb.status IN ('open', 'awaiting_result', 'unresolved', 'postponed')), 0)::float8 AS open_exposure,
-                  COALESCE(sum(sb.profit_loss) FILTER (WHERE sb.status <> 'duplicate_void'), 0)::float8 AS profit_loss
-                FROM simulated_bets sb
-                GROUP BY sb.strategy_id
-                ORDER BY played_count DESC, sb.strategy_id
+                  strategy_id,
+                  count(*) FILTER (WHERE status <> 'duplicate_void')::int AS played_count,
+                  count(*) FILTER (WHERE item_type = 'single' AND status <> 'duplicate_void')::int AS single_count,
+                  count(*) FILTER (WHERE item_type = 'coupon' AND status <> 'duplicate_void')::int AS coupon_count,
+                  count(*) FILTER (WHERE status IN ('open', 'awaiting_result', 'unresolved', 'postponed'))::int AS open_count,
+                  count(*) FILTER (WHERE status = 'awaiting_result')::int AS awaiting_result_count,
+                  count(*) FILTER (WHERE status = 'duplicate_void')::int AS duplicate_void_count,
+                  COALESCE(sum(hypothetical_stake) FILTER (WHERE status IN ('open', 'awaiting_result', 'unresolved', 'postponed')), 0)::float8 AS open_exposure,
+                  COALESCE(sum(profit_loss) FILTER (WHERE status <> 'duplicate_void'), 0)::float8 AS profit_loss
+                FROM positions
+                GROUP BY strategy_id
+                ORDER BY played_count DESC, strategy_id
                 "#,
                 &[],
             )
@@ -2967,16 +2986,42 @@ impl Store {
         let by_sport = client
             .query(
                 r#"
+                WITH coupon_sports AS (
+                  SELECT
+                    sc.id,
+                    CASE
+                      WHEN count(DISTINCT cb.sport_key) = 1 THEN min(cb.sport_key)
+                      ELSE 'mixed'
+                    END AS sport_key
+                  FROM simulated_coupons sc
+                  LEFT JOIN simulated_coupon_legs scl ON scl.simulated_coupon_id = sc.id
+                  LEFT JOIN candidate_bets cb ON cb.id = scl.candidate_id
+                  GROUP BY sc.id
+                ),
+                positions AS (
+                  SELECT
+                    COALESCE(cb.sport_key, 'unknown') AS sport_key,
+                    sb.status,
+                    sb.hypothetical_stake
+                  FROM simulated_bets sb
+                  LEFT JOIN candidate_bets cb ON cb.id = sb.candidate_id
+                  UNION ALL
+                  SELECT
+                    COALESCE(cs.sport_key, 'unknown') AS sport_key,
+                    sc.status,
+                    sc.hypothetical_stake
+                  FROM simulated_coupons sc
+                  LEFT JOIN coupon_sports cs ON cs.id = sc.id
+                )
                 SELECT
-                  cb.sport_key,
-                  sb.status,
+                  sport_key,
+                  status,
                   count(*)::int AS count,
-                  COALESCE(sum(sb.hypothetical_stake), 0)::float8 AS stake
-                FROM simulated_bets sb
-                LEFT JOIN candidate_bets cb ON cb.id = sb.candidate_id
-                WHERE sb.status <> 'duplicate_void'
-                GROUP BY cb.sport_key, sb.status
-                ORDER BY cb.sport_key, sb.status
+                  COALESCE(sum(hypothetical_stake), 0)::float8 AS stake
+                FROM positions
+                WHERE status <> 'duplicate_void'
+                GROUP BY sport_key, status
+                ORDER BY sport_key, status
                 "#,
                 &[],
             )
@@ -2984,24 +3029,78 @@ impl Store {
         let recent = client
             .query(
                 r#"
+                WITH coupon_sports AS (
+                  SELECT
+                    sc.id,
+                    CASE
+                      WHEN count(DISTINCT cb.sport_key) = 1 THEN min(cb.sport_key)
+                      ELSE 'mixed'
+                    END AS sport_key,
+                    string_agg(cb.event_name, ' + ' ORDER BY scl.leg_index) AS event_name,
+                    min(cb.competition) AS competition
+                  FROM simulated_coupons sc
+                  LEFT JOIN simulated_coupon_legs scl ON scl.simulated_coupon_id = sc.id
+                  LEFT JOIN candidate_bets cb ON cb.id = scl.candidate_id
+                  GROUP BY sc.id
+                ),
+                recent_positions AS (
+                  SELECT
+                    'single'::text AS item_type,
+                    sb.id,
+                    sb.created_at,
+                    sb.strategy_id,
+                    sb.status,
+                    sb.hypothetical_stake::float8 AS hypothetical_stake,
+                    sb.observed_decimal_odds::float8 AS observed_decimal_odds,
+                    cb.sport_key,
+                    cb.event_name,
+                    cb.competition,
+                    cb.market_kind,
+                    cb.market_name,
+                    cb.outcome_name,
+                    cb.score::float8 AS score,
+                    cb.confidence::float8 AS confidence
+                  FROM simulated_bets sb
+                  LEFT JOIN candidate_bets cb ON cb.id = sb.candidate_id
+                  UNION ALL
+                  SELECT
+                    'coupon'::text AS item_type,
+                    sc.id,
+                    sc.created_at,
+                    sc.strategy_id,
+                    sc.status,
+                    sc.hypothetical_stake::float8 AS hypothetical_stake,
+                    sc.observed_combined_decimal_odds::float8 AS observed_decimal_odds,
+                    cs.sport_key,
+                    COALESCE(cs.event_name, cc.coupon_type || ' coupon') AS event_name,
+                    cs.competition,
+                    cc.coupon_type AS market_kind,
+                    cc.coupon_type || ' coupon' AS market_name,
+                    cc.leg_count::text || ' legs' AS outcome_name,
+                    cc.score::float8 AS score,
+                    cc.confidence::float8 AS confidence
+                  FROM simulated_coupons sc
+                  LEFT JOIN candidate_coupons cc ON cc.id = sc.coupon_id
+                  LEFT JOIN coupon_sports cs ON cs.id = sc.id
+                )
                 SELECT
-                  sb.id,
-                  sb.created_at,
-                  sb.strategy_id,
-                  sb.status,
-                  sb.hypothetical_stake::float8 AS hypothetical_stake,
-                  sb.observed_decimal_odds::float8 AS observed_decimal_odds,
-                  cb.sport_key,
-                  cb.event_name,
-                  cb.competition,
-                  cb.market_kind,
-                  cb.market_name,
-                  cb.outcome_name,
-                  cb.score::float8 AS score,
-                  cb.confidence::float8 AS confidence
-                FROM simulated_bets sb
-                LEFT JOIN candidate_bets cb ON cb.id = sb.candidate_id
-                ORDER BY sb.created_at DESC
+                  item_type,
+                  id,
+                  created_at,
+                  strategy_id,
+                  status,
+                  hypothetical_stake,
+                  observed_decimal_odds,
+                  sport_key,
+                  event_name,
+                  competition,
+                  market_kind,
+                  market_name,
+                  outcome_name,
+                  score,
+                  confidence
+                FROM recent_positions
+                ORDER BY created_at DESC
                 LIMIT 25
                 "#,
                 &[],
@@ -3011,6 +3110,8 @@ impl Store {
             "by_strategy": by_strategy.iter().map(|row| json!({
                 "strategy_id": row.get::<_, String>("strategy_id"),
                 "played_count": row.get::<_, i32>("played_count"),
+                "single_count": row.get::<_, i32>("single_count"),
+                "coupon_count": row.get::<_, i32>("coupon_count"),
                 "open_count": row.get::<_, i32>("open_count"),
                 "awaiting_result_count": row.get::<_, i32>("awaiting_result_count"),
                 "duplicate_void_count": row.get::<_, i32>("duplicate_void_count"),
@@ -3026,6 +3127,7 @@ impl Store {
             "recent": recent.iter().map(|row| {
                 let created_at: DateTime<Utc> = row.get("created_at");
                 json!({
+                    "item_type": row.get::<_, String>("item_type"),
                     "id": row.get::<_, String>("id"),
                     "created_at": created_at,
                     "strategy_id": row.get::<_, String>("strategy_id"),
@@ -3245,20 +3347,50 @@ impl Store {
         let by_sport = client
             .query(
                 r#"
+                WITH coupon_sports AS (
+                  SELECT
+                    sc.id,
+                    CASE
+                      WHEN count(DISTINCT cb.sport_key) = 1 THEN min(cb.sport_key)
+                      ELSE 'mixed'
+                    END AS sport_key
+                  FROM simulated_coupons sc
+                  LEFT JOIN simulated_coupon_legs scl ON scl.simulated_coupon_id = sc.id
+                  LEFT JOIN candidate_bets cb ON cb.id = scl.candidate_id
+                  GROUP BY sc.id
+                ),
+                positions AS (
+                  SELECT
+                    COALESCE(cb.sport_key, 'unknown') AS sport_key,
+                    sb.status,
+                    sb.hypothetical_stake,
+                    sb.profit_loss,
+                    sb.observed_decimal_odds AS observed_odds
+                  FROM simulated_bets sb
+                  LEFT JOIN candidate_bets cb ON cb.id = sb.candidate_id
+                  UNION ALL
+                  SELECT
+                    COALESCE(cs.sport_key, 'unknown') AS sport_key,
+                    sc.status,
+                    sc.hypothetical_stake,
+                    sc.profit_loss,
+                    sc.observed_combined_decimal_odds AS observed_odds
+                  FROM simulated_coupons sc
+                  LEFT JOIN coupon_sports cs ON cs.id = sc.id
+                )
                 SELECT
-                  COALESCE(cb.sport_key, 'unknown') AS sport_key,
-                  count(*) FILTER (WHERE sb.status <> 'duplicate_void')::int AS played_count,
-                  count(*) FILTER (WHERE sb.status IN ('open', 'awaiting_result', 'unresolved', 'postponed'))::int AS open_count,
-                  count(*) FILTER (WHERE sb.status = 'awaiting_result')::int AS awaiting_result_count,
-                  count(*) FILTER (WHERE sb.status IN ('settled_won', 'settled_lost'))::int AS decided_count,
-                  count(*) FILTER (WHERE sb.status = 'settled_won')::int AS won_count,
-                  COALESCE(sum(sb.hypothetical_stake) FILTER (WHERE sb.status <> 'duplicate_void'), 0)::float8 AS turnover,
-                  COALESCE(sum(sb.hypothetical_stake) FILTER (WHERE sb.status IN ('open', 'awaiting_result', 'unresolved', 'postponed')), 0)::float8 AS open_exposure,
-                  COALESCE(sum(sb.profit_loss) FILTER (WHERE sb.status <> 'duplicate_void'), 0)::float8 AS profit_loss,
-                  avg(sb.observed_decimal_odds) FILTER (WHERE sb.status <> 'duplicate_void')::float8 AS average_odds
-                FROM simulated_bets sb
-                LEFT JOIN candidate_bets cb ON cb.id = sb.candidate_id
-                GROUP BY COALESCE(cb.sport_key, 'unknown')
+                  sport_key,
+                  count(*) FILTER (WHERE status <> 'duplicate_void')::int AS played_count,
+                  count(*) FILTER (WHERE status IN ('open', 'awaiting_result', 'unresolved', 'postponed'))::int AS open_count,
+                  count(*) FILTER (WHERE status = 'awaiting_result')::int AS awaiting_result_count,
+                  count(*) FILTER (WHERE status IN ('settled_won', 'settled_lost'))::int AS decided_count,
+                  count(*) FILTER (WHERE status = 'settled_won')::int AS won_count,
+                  COALESCE(sum(hypothetical_stake) FILTER (WHERE status <> 'duplicate_void'), 0)::float8 AS turnover,
+                  COALESCE(sum(hypothetical_stake) FILTER (WHERE status IN ('open', 'awaiting_result', 'unresolved', 'postponed')), 0)::float8 AS open_exposure,
+                  COALESCE(sum(profit_loss) FILTER (WHERE status <> 'duplicate_void'), 0)::float8 AS profit_loss,
+                  avg(observed_odds) FILTER (WHERE status <> 'duplicate_void')::float8 AS average_odds
+                FROM positions
+                GROUP BY sport_key
                 ORDER BY played_count DESC, sport_key
                 "#,
                 &[],

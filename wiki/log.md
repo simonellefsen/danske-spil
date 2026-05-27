@@ -61,6 +61,12 @@ Append-only timeline for project wiki maintenance. Use headings with the format 
 - Removed deploy-time patching of shared ngrok `AgentEndpoint` and `NgrokTrafficPolicy` resources.
 - Kept this repository responsible for the `danske-spil` namespace, `gambler-api` service, and `/danske-spil` base-path behavior.
 
+## [2026-05-27] implementation | combined strategy played summaries
+
+- Updated strategy played summaries to count both single paper bets and multi-leg paper coupons.
+- Updated sport performance aggregation so doubles, triples, and larger paper coupon positions contribute to turnover, exposure, P/L, and hit-rate metrics.
+- Exposed separate single and coupon counts in the web UI strategy table.
+
 ## [2026-05-25] implementation | Candidate ranking and paper settlement POC
 
 - Added `poc_ranker_v1` candidate scoring fields: implied probability, model probability, expected value, confidence, score, risk flags, and feature snapshot.

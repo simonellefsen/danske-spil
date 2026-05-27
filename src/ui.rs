@@ -632,7 +632,7 @@ function renderPlayed(summary) {
   const items = summary.by_strategy || [];
   $("played").innerHTML = items.map((item) => `
     <tr>
-      <td>${esc(item.strategy_id)}<br><span class="label">duplicates ${esc(item.duplicate_void_count || 0)}</span></td>
+      <td>${esc(item.strategy_id)}<br><span class="label">singles ${esc(item.single_count || 0)} / coupons ${esc(item.coupon_count || 0)} / duplicates ${esc(item.duplicate_void_count || 0)}</span></td>
       <td>${esc(item.played_count)}</td>
       <td>${esc(item.open_count)}<br><span class="muted">${money(item.open_exposure)}</span></td>
       <td>${esc(item.awaiting_result_count)}</td>
