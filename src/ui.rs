@@ -121,6 +121,15 @@ pub fn render_index(base_path: &str) -> String {
                         }
                     }
                     section {
+                        h2 { "Lookup due queue" }
+                        table {
+                            thead { tr {
+                                th { "Item" } th { "Expected" } th { "Last lookup" } th { "Status" }
+                            } }
+                            tbody { id: "lookup-due-items" }
+                        }
+                    }
+                    section {
                         h2 { "Strategies played" }
                         table {
                             thead { tr {
@@ -661,6 +670,26 @@ function renderPerformance(report) {
   }
   if (lookup.next_lookup_due_at) {
     $("reasoning").textContent = `${$("reasoning").textContent}\n\nSettlement lookup cadence:\n${JSON.stringify(lookup, null, 2)}`;
+  }
+  const lookupDueItems = settlement.lookup_due_items || [];
+  $("lookup-due-items").innerHTML = lookupDueItems.map((item) => {
+    const label = item.item_type === "coupon"
+      ? `${item.coupon_type || "coupon"} (${item.leg_count || 0})`
+      : `${item.event_name || item.id || ""}`;
+    const detail = item.item_type === "coupon"
+      ? item.id
+      : [item.market_name, item.outcome_name].filter(Boolean).join(" / ");
+    return `
+      <tr>
+        <td><span class="pill">${esc(item.item_type)}</span> ${esc(label)}<br><span class="label">${esc(detail || "")}</span></td>
+        <td>${esc(item.expected_result_check_after || "-")}<br><span class="muted">${esc(item.sport_key || "")}</span></td>
+        <td>${esc(item.last_lookup_at || "never")}</td>
+        <td>${esc(item.status || "-")}</td>
+      </tr>
+    `;
+  }).join("");
+  if (!lookupDueItems.length) {
+    $("lookup-due-items").innerHTML = `<tr><td colspan="4" class="muted">No due paper positions are missing a fresh lookup.</td></tr>`;
   }
 
   const intake = report.opportunity_intake || {};

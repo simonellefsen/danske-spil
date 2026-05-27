@@ -3248,6 +3248,78 @@ impl Store {
                 &[],
             )
             .await?;
+        let lookup_due_rows = client
+            .query(
+                r#"
+                WITH due_items AS (
+                  SELECT
+                    'single'::text AS item_type,
+                    sb.id AS item_id,
+                    sb.status,
+                    sb.expected_result_check_after,
+                    cb.sport_key,
+                    cb.event_name,
+                    cb.market_name,
+                    cb.outcome_name,
+                    NULL::text AS coupon_type,
+                    NULL::int AS leg_count
+                  FROM simulated_bets sb
+                  LEFT JOIN candidate_bets cb ON cb.id = sb.candidate_id
+                  WHERE sb.status IN ('awaiting_result', 'unresolved', 'postponed')
+                    AND sb.expected_result_check_after <= now()
+                  UNION ALL
+                  SELECT
+                    'coupon'::text AS item_type,
+                    sc.id AS item_id,
+                    sc.status,
+                    sc.expected_result_check_after,
+                    COALESCE(min(cb.sport_key), 'mixed') AS sport_key,
+                    cc.coupon_type || ' coupon' AS event_name,
+                    NULL::text AS market_name,
+                    NULL::text AS outcome_name,
+                    cc.coupon_type,
+                    cc.leg_count
+                  FROM simulated_coupons sc
+                  JOIN candidate_coupons cc ON cc.id = sc.coupon_id
+                  LEFT JOIN simulated_coupon_legs scl ON scl.simulated_coupon_id = sc.id
+                  LEFT JOIN candidate_bets cb ON cb.id = scl.candidate_id
+                  WHERE sc.status IN ('awaiting_result', 'unresolved', 'postponed')
+                    AND sc.expected_result_check_after <= now()
+                  GROUP BY sc.id, sc.status, sc.expected_result_check_after, cc.coupon_type, cc.leg_count
+                ),
+                latest_lookup AS (
+                  SELECT
+                    due_items.*,
+                    max(sla.created_at) AS last_lookup_at
+                  FROM due_items
+                  LEFT JOIN settlement_lookup_attempts sla
+                    ON sla.source_key = 'danskespil_content_service'
+                   AND (
+                     (due_items.item_type = 'single' AND sla.simulated_bet_id = due_items.item_id)
+                     OR (due_items.item_type = 'coupon' AND sla.simulated_coupon_id = due_items.item_id)
+                   )
+                  GROUP BY
+                    due_items.item_type,
+                    due_items.item_id,
+                    due_items.status,
+                    due_items.expected_result_check_after,
+                    due_items.sport_key,
+                    due_items.event_name,
+                    due_items.market_name,
+                    due_items.outcome_name,
+                    due_items.coupon_type,
+                    due_items.leg_count
+                )
+                SELECT *
+                FROM latest_lookup
+                WHERE last_lookup_at IS NULL
+                   OR last_lookup_at < now() - ($1::int * interval '1 minute')
+                ORDER BY expected_result_check_after ASC NULLS LAST, item_id
+                LIMIT 10
+                "#,
+                &[&(lookup_cooldown_minutes.max(0) as i32)],
+            )
+            .await?;
 
         let remaining_exposure = (max_open_exposure - ledger.open_exposure).max(0.0);
         let capacity_slots = if default_stake > 0.0 {
@@ -3341,6 +3413,23 @@ impl Store {
                     "lookup_attempts_in_cooldown": lookup_cadence_row.get::<_, i32>("lookup_attempts_in_cooldown"),
                     "last_lookup_attempt_at": last_lookup_attempt_at
                 },
+                "lookup_due_items": lookup_due_rows.iter().map(|row| {
+                    let expected: Option<DateTime<Utc>> = row.get("expected_result_check_after");
+                    let last_lookup_at: Option<DateTime<Utc>> = row.get("last_lookup_at");
+                    json!({
+                        "item_type": row.get::<_, String>("item_type"),
+                        "id": row.get::<_, String>("item_id"),
+                        "status": row.get::<_, String>("status"),
+                        "expected_result_check_after": expected,
+                        "last_lookup_at": last_lookup_at,
+                        "sport_key": row.get::<_, Option<String>>("sport_key"),
+                        "event_name": row.get::<_, Option<String>>("event_name"),
+                        "market_name": row.get::<_, Option<String>>("market_name"),
+                        "outcome_name": row.get::<_, Option<String>>("outcome_name"),
+                        "coupon_type": row.get::<_, Option<String>>("coupon_type"),
+                        "leg_count": row.get::<_, Option<i32>>("leg_count")
+                    })
+                }).collect::<Vec<_>>(),
                 "stale_awaiting": stale_awaiting_rows.iter().map(|row| {
                     let expected: Option<DateTime<Utc>> = row.get("expected_result_check_after");
                     json!({

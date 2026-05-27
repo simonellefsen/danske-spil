@@ -259,5 +259,6 @@ Current result-review status:
 - The review queue joins paper bets to the latest observed event, market, and outcome payloads from the Danske Spil content feed.
 - Each review refresh records `settlement_lookup_attempts` rows with the source key, recommendation, current event/outcome state, and the approved settlement source policy. Writes are throttled by `GAMBLER_SETTLEMENT_LOOKUP_COOLDOWN_MINUTES` so repeated UI refreshes do not create duplicate attempts inside the intended 15-minute recheck cadence.
 - `/api/performance` now includes `settlement_work.lookup_cadence`, which reports how many due paper positions have a recent lookup attempt, how many are due without a recent attempt, the last lookup time, and the next lookup due time.
+- The same performance payload includes `settlement_work.lookup_due_items`, a capped operator queue of due paper singles or coupons whose latest lookup is missing or outside the cooldown window.
 - The system recommends `manual_grade_ready`, `manual_void_or_refund_review`, `expected_finish_passed_recheck`, or `await_more_evidence`.
 - It still does not auto-grade won/lost because the feed outcome result semantics have not been proven for each market type.
