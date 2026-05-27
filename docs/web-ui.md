@@ -16,6 +16,7 @@ The UI is not a marketing site. It is an operational dashboard for repeated revi
 - Last successful Oddset and Tips snapshots.
 - Scanner cadence, latest snapshot age, and whether the next worker scan is due.
 - Sports intelligence ingestion health by sport and source.
+- Recent ingestion runs with source, status, covered sports, event count, and snapshot id.
 - Candidate count by product, market, confidence, and status.
 - Open simulated placements, unresolved settlements, and settled paper results.
 - Recent paper plays, including both singles and multi-leg coupons with strategy, stake, observed odds, status, score, and confidence.

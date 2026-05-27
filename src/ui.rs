@@ -195,6 +195,15 @@ pub fn render_index(base_path: &str) -> String {
                         }
                     }
                     section {
+                        h2 { "Ingestion runs" }
+                        table {
+                            thead { tr {
+                                th { "Completed" } th { "Source" } th { "Status" } th { "Sports" } th { "Events" }
+                            } }
+                            tbody { id: "ingestion-runs" }
+                        }
+                    }
+                    section {
                         h2 { "Strategy experiments" }
                         table {
                             thead { tr {
@@ -804,6 +813,19 @@ function renderIntelligence(coverage) {
   }).join("");
   if (!features.length) {
     $("intelligence").innerHTML = `<tr><td colspan="5" class="muted">No feature snapshots yet. Run a scan.</td></tr>`;
+  }
+  const runs = coverage.recent_runs || [];
+  $("ingestion-runs").innerHTML = runs.map((item) => `
+    <tr>
+      <td>${esc(item.completed_at || "-")}<br><span class="label">${esc(item.snapshot_id || "")}</span></td>
+      <td>${esc(item.source_key || "-")}</td>
+      <td><span class="pill">${esc(item.status || "-")}</span></td>
+      <td>${esc((item.sport_keys || []).join(", "))}</td>
+      <td>${esc(item.event_count ?? 0)}</td>
+    </tr>
+  `).join("");
+  if (!runs.length) {
+    $("ingestion-runs").innerHTML = `<tr><td colspan="5" class="muted">No ingestion runs yet. Run a scan.</td></tr>`;
   }
 }
 function renderStrategy(strategy) {

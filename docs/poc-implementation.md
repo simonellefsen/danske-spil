@@ -164,6 +164,10 @@ GET /api/performance/history
 snapshot age, and next scan due time so the web UI can show whether the roughly
 15-minute worker loop is fresh or overdue.
 
+`GET /api/intelligence/coverage` includes recent `ingestion_runs`, and the web
+UI renders them as scanner audit history with source, status, sports, event
+count, and snapshot id.
+
 Each scan writes a row to `simulation_performance_snapshots` after placement,
 settlement queueing, and review refresh complete. The web UI shows this history
 so exposure and due-review pressure can be compared across scan cycles.

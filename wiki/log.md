@@ -77,6 +77,11 @@ Append-only timeline for project wiki maintenance. Use headings with the format 
 - Added scanner cadence, latest snapshot age, and next scan due metadata to `/api/status`.
 - Added dashboard metrics for the configured scan cadence and next scan due time.
 
+## [2026-05-27] implementation | ingestion run visibility
+
+- Added a web UI ingestion runs table backed by `/api/intelligence/coverage`.
+- Exposed recent scanner run source, status, covered sports, event count, and snapshot id in the dashboard.
+
 ## [2026-05-25] implementation | Candidate ranking and paper settlement POC
 
 - Added `poc_ranker_v1` candidate scoring fields: implied probability, model probability, expected value, confidence, score, risk flags, and feature snapshot.

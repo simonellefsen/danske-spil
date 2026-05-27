@@ -86,6 +86,7 @@ Current POC status:
 - `source_registry` records the read-only Danske Spil content-service as a market snapshot source.
 - `source_registry` also seeds settlement-capable source classes for Danske Spil account/coupon history, official competition results, and documented third-party fallbacks.
 - `ingestion_runs` records scanner runs, the snapshot id, covered sports, event count, and completion status.
+- The web UI surfaces recent ingestion runs so scanner completion history can be reviewed without querying Postgres directly.
 - `feature_snapshots` stores one `market_context_v1` row per observed event per snapshot.
 - The first feature set is intentionally limited to market-feed context: competition, start time, participant count, market count, outcome count, market kinds, external providers, live/result flags, and missing-signal markers.
 - Weather, news, rankings, form, and injury/availability are explicitly marked missing until separate sources are configured and reviewed.
