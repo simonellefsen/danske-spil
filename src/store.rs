@@ -398,6 +398,21 @@ CREATE TABLE IF NOT EXISTS settlement_observations (
 
 ALTER TABLE settlement_observations ADD COLUMN IF NOT EXISTS simulated_coupon_id text REFERENCES simulated_coupons(id) ON DELETE CASCADE;
 
+CREATE TABLE IF NOT EXISTS settlement_lookup_attempts (
+  id text PRIMARY KEY,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  item_type text NOT NULL,
+  simulated_bet_id text REFERENCES simulated_bets(id) ON DELETE CASCADE,
+  simulated_coupon_id text REFERENCES simulated_coupons(id) ON DELETE CASCADE,
+  source_key text NOT NULL,
+  recommendation text NOT NULL,
+  outcome_state jsonb NOT NULL DEFAULT '{}'::jsonb,
+  payload jsonb NOT NULL DEFAULT '{}'::jsonb
+);
+
+CREATE INDEX IF NOT EXISTS idx_settlement_lookup_attempts_created_at
+ON settlement_lookup_attempts(created_at DESC);
+
 CREATE TABLE IF NOT EXISTS audit_events (
   id text PRIMARY KEY,
   created_at timestamptz NOT NULL DEFAULT now(),
@@ -2743,11 +2758,16 @@ impl Store {
             })
         }));
 
+        let lookup_attempt_count = self
+            .record_settlement_lookup_attempts(&client, &items, &settlement_source_policy)
+            .await?;
+
         Ok(json!({
             "enabled": true,
             "review_count": rows.len() + coupon_rows.len(),
             "single_review_count": rows.len(),
             "coupon_review_count": coupon_rows.len(),
+            "lookup_attempt_count": lookup_attempt_count,
             "limit": limit,
             "items": items,
             "settlement_source_policy": settlement_source_policy,
@@ -3635,6 +3655,138 @@ impl Store {
                 })
             }).collect::<Vec<_>>()
         }))
+    }
+
+    pub async fn settlement_lookup_attempts(&self, limit: i64) -> anyhow::Result<Value> {
+        let client = self.connect().await?;
+        let rows = client
+            .query(
+                r#"
+                SELECT
+                  sla.id,
+                  sla.created_at,
+                  sla.item_type,
+                  sla.simulated_bet_id,
+                  sla.simulated_coupon_id,
+                  sla.source_key,
+                  sla.recommendation,
+                  sla.outcome_state,
+                  sla.payload,
+                  cb.event_name AS bet_event_name,
+                  cb.market_name AS bet_market_name,
+                  cb.outcome_name AS bet_outcome_name,
+                  cc.coupon_type,
+                  cc.leg_count
+                FROM settlement_lookup_attempts sla
+                LEFT JOIN simulated_bets sb ON sb.id = sla.simulated_bet_id
+                LEFT JOIN candidate_bets cb ON cb.id = sb.candidate_id
+                LEFT JOIN simulated_coupons sc ON sc.id = sla.simulated_coupon_id
+                LEFT JOIN candidate_coupons cc ON cc.id = sc.coupon_id
+                ORDER BY sla.created_at DESC
+                LIMIT $1
+                "#,
+                &[&limit],
+            )
+            .await?;
+        Ok(json!({
+            "paper_only": true,
+            "not_auto_graded": true,
+            "items": rows.iter().map(|row| {
+                let created_at: DateTime<Utc> = row.get("created_at");
+                let item_type: String = row.get("item_type");
+                json!({
+                    "id": row.get::<_, String>("id"),
+                    "created_at": created_at,
+                    "item_type": item_type,
+                    "simulated_bet_id": row.get::<_, Option<String>>("simulated_bet_id"),
+                    "simulated_coupon_id": row.get::<_, Option<String>>("simulated_coupon_id"),
+                    "source_key": row.get::<_, String>("source_key"),
+                    "recommendation": row.get::<_, String>("recommendation"),
+                    "outcome_state": row.get::<_, Value>("outcome_state"),
+                    "payload": row.get::<_, Value>("payload"),
+                    "event_name": row.get::<_, Option<String>>("bet_event_name"),
+                    "market_name": row.get::<_, Option<String>>("bet_market_name"),
+                    "outcome_name": row.get::<_, Option<String>>("bet_outcome_name"),
+                    "coupon_type": row.get::<_, Option<String>>("coupon_type"),
+                    "leg_count": row.get::<_, Option<i32>>("leg_count")
+                })
+            }).collect::<Vec<_>>()
+        }))
+    }
+
+    async fn record_settlement_lookup_attempts(
+        &self,
+        client: &Client,
+        items: &[Value],
+        settlement_source_policy: &Value,
+    ) -> anyhow::Result<usize> {
+        let mut recorded = 0;
+        for item in items {
+            let item_type = item
+                .get("item_type")
+                .and_then(Value::as_str)
+                .unwrap_or("single");
+            let simulated_bet_id = if item_type == "single" {
+                item.get("bet_id")
+                    .and_then(Value::as_str)
+                    .map(str::to_string)
+            } else {
+                None
+            };
+            let simulated_coupon_id = if item_type == "coupon" {
+                item.get("coupon_simulation_id")
+                    .and_then(Value::as_str)
+                    .map(str::to_string)
+            } else {
+                None
+            };
+            if simulated_bet_id.is_none() && simulated_coupon_id.is_none() {
+                continue;
+            }
+            let recommendation = item
+                .get("recommendation")
+                .and_then(Value::as_str)
+                .unwrap_or("await_more_evidence")
+                .to_string();
+            let outcome_state = json!({
+                "event_status": item.get("event_status").cloned().unwrap_or(Value::Null),
+                "event_resulted": item.get("event_resulted").cloned().unwrap_or(Value::Null),
+                "event_settled": item.get("event_settled").cloned().unwrap_or(Value::Null),
+                "expected_result_check_after": item.get("expected_result_check_after").cloned().unwrap_or(Value::Null),
+                "latest_outcome_active": item.get("latest_outcome_active").cloned().unwrap_or(Value::Null),
+                "latest_outcome_displayed": item.get("latest_outcome_displayed").cloned().unwrap_or(Value::Null)
+            });
+            let payload = json!({
+                "paper_only": true,
+                "not_auto_graded": true,
+                "source": "danskespil_content_service",
+                "settlement_source_policy": settlement_source_policy,
+                "review_item": item
+            });
+            client
+                .execute(
+                    r#"
+                    INSERT INTO settlement_lookup_attempts (
+                      id, item_type, simulated_bet_id, simulated_coupon_id, source_key,
+                      recommendation, outcome_state, payload
+                    )
+                    VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
+                    "#,
+                    &[
+                        &new_id(),
+                        &item_type,
+                        &simulated_bet_id,
+                        &simulated_coupon_id,
+                        &"danskespil_content_service",
+                        &recommendation,
+                        &outcome_state,
+                        &payload,
+                    ],
+                )
+                .await?;
+            recorded += 1;
+        }
+        Ok(recorded)
     }
 
     async fn settlement_source_record(&self, source_key: &str) -> anyhow::Result<Value> {

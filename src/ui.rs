@@ -111,6 +111,15 @@ pub fn render_index(base_path: &str) -> String {
                         }
                     }
                     section {
+                        h2 { "Settlement lookup attempts" }
+                        table {
+                            thead { tr {
+                                th { "Checked" } th { "Item" } th { "Recommendation" } th { "Source" } th { "State" }
+                            } }
+                            tbody { id: "settlement-lookup-attempts" }
+                        }
+                    }
+                    section {
                         h2 { "Strategies played" }
                         table {
                             thead { tr {
@@ -575,6 +584,36 @@ function renderSettlementObservations(observations) {
     $("settlement-observations").innerHTML = `<tr><td colspan="5" class="muted">No settlement observations have been recorded yet.</td></tr>`;
   }
 }
+function renderSettlementLookupAttempts(attempts) {
+  const items = attempts.items || [];
+  $("settlement-lookup-attempts").innerHTML = items.map((item) => {
+    const itemLabel = item.item_type === "coupon"
+      ? `${item.coupon_type || "coupon"} (${item.leg_count || 0})`
+      : `${item.event_name || item.simulated_bet_id || ""}`;
+    const detail = item.item_type === "coupon"
+      ? item.simulated_coupon_id || ""
+      : [item.market_name, item.outcome_name].filter(Boolean).join(" / ");
+    const state = item.outcome_state || {};
+    const stateLabel = [
+      state.event_status ? `status ${state.event_status}` : null,
+      state.event_resulted === true ? "resulted" : null,
+      state.event_settled === true ? "settled" : null,
+      state.latest_outcome_active === false ? "outcome inactive" : null
+    ].filter(Boolean).join(", ");
+    return `
+      <tr>
+        <td>${esc(item.created_at || "-")}</td>
+        <td><span class="pill">${esc(item.item_type)}</span> ${esc(itemLabel)}<br><span class="label">${esc(detail)}</span></td>
+        <td>${esc(item.recommendation)}</td>
+        <td>${esc(item.source_key)}<br><span class="muted">no auto grade</span></td>
+        <td>${esc(stateLabel || "awaiting evidence")}</td>
+      </tr>
+    `;
+  }).join("");
+  if (!items.length) {
+    $("settlement-lookup-attempts").innerHTML = `<tr><td colspan="5" class="muted">No settlement lookup attempts have been recorded yet.</td></tr>`;
+  }
+}
 function renderPlayed(summary) {
   const items = summary.by_strategy || [];
   $("played").innerHTML = items.map((item) => `
@@ -789,6 +828,8 @@ async function load() {
   renderSettlementReview(settlementReview);
   const settlementObservations = await json(api("/api/settlement/observations"));
   renderSettlementObservations(settlementObservations);
+  const settlementLookupAttempts = await json(api("/api/settlement/lookup-attempts"));
+  renderSettlementLookupAttempts(settlementLookupAttempts);
   const played = await json(api("/api/strategy/played"));
   renderPlayed(played);
   const performance = await json(api("/api/performance"));

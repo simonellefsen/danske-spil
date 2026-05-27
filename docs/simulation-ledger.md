@@ -97,6 +97,7 @@ Current POC status:
 - The web UI and `GET /api/settlement/observations` expose recent settlement observations for audit.
 - Settlement review evidence persists the approved source policy order into each paper bet or coupon payload.
 - Manual settlement validates the cited source against `source_registry.can_settle` and stores the selected policy record without deleting prior review evidence.
+- Every automated review refresh records a non-grading `settlement_lookup_attempts` row for each due paper single or coupon. These rows capture the lookup source, recommendation, current event/outcome state, and the approved settlement source policy so the 15-minute recheck loop is auditable even before automated grading exists.
 - Strategy selection is stored in `strategy_candidate_decisions`; rejected candidates are preserved for review but blocked from paper-ledger placement.
 - Selected candidates can be auto-paper-placed into `simulated_bets` with per-scan and max-open-exposure caps. This is idempotent per candidate and remains simulation-only.
 - Multi-leg coupons are auto-paper-placed only after the active strategy baseline enables the coupon mode and provider accumulator support is verified from observed data.
@@ -159,6 +160,7 @@ Candidate tables:
 - `simulated_coupons`
 - `simulated_coupon_legs`
 - `settlement_observations`
+- `settlement_lookup_attempts`
 - `settlement_sources`
 - `simulation_performance_daily`
 - `strategy_baselines`
@@ -174,6 +176,7 @@ The UI should show:
 - Settled won/lost/void items.
 - Simulated P/L by day, product, market, strategy, and confidence bucket.
 - Settlement source and confidence.
+- Recent non-grading settlement lookup attempts and recommendations.
 - Manual-review queue for ambiguous results.
 
 All displays must clearly label results as simulated/paper results unless real-money functionality is explicitly approved later.
