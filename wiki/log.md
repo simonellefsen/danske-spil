@@ -107,6 +107,11 @@ Append-only timeline for project wiki maintenance. Use headings with the format 
 - Classified candidate odds movement as stable, normal, or large at insert time.
 - Added movement-derived candidate risk flags while keeping numeric score changes gated behind reviewed strategy experiments.
 
+## [2026-05-27] implementation | reviewed movement strategy gate
+
+- Added `excluded_risk_flags` to active strategy baselines and replay evaluation.
+- Added scan-derived Hermes proposals to exclude `large_odds_movement` when enough candidates show large odds drift.
+
 ## [2026-05-25] implementation | Candidate ranking and paper settlement POC
 
 - Added `poc_ranker_v1` candidate scoring fields: implied probability, model probability, expected value, confidence, score, risk flags, and feature snapshot.

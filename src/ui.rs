@@ -952,6 +952,9 @@ function renderStrategy(strategy) {
     if (evidence.provider_supported_double_candidate_count !== undefined) {
       evidenceParts.push(`${evidence.provider_supported_double_candidate_count} double-ready`);
     }
+    if (evidence.large_odds_movement_candidate_count !== undefined) {
+      evidenceParts.push(`${evidence.large_odds_movement_candidate_count} large moves`);
+    }
     const replay = item.decision_payload && item.decision_payload.replay_evidence
       ? item.decision_payload.replay_evidence
       : null;

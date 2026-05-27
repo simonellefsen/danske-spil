@@ -135,7 +135,7 @@ The service persists a paper-only `poc_ranker_v1` baseline and one-variable stra
 - Per-candidate baseline decisions live in `strategy_candidate_decisions`.
 - The web UI shows proposal status and lets the operator approve, reject, activate, or promote proposals.
 
-The current automatic proposals are deliberately conservative. If a scan produces enough long-price candidate risk, the service proposes lowering `max_decimal_odds` from `8.0` to `6.0`. If specialized-market exposure is more visible, the service proposes excluding those market kinds until settlement and feature coverage are stronger. The proposal is evidence for review, not an autonomous behavior change.
+The current automatic proposals are deliberately conservative. If a scan produces enough long-price candidate risk, the service proposes lowering `max_decimal_odds` from `8.0` to `6.0`. If specialized-market exposure is more visible, the service proposes excluding those market kinds until settlement and feature coverage are stronger. If large odds movement is visible, it proposes excluding the `large_odds_movement` risk flag through `excluded_risk_flags`. Each proposal is evidence for review, not an autonomous behavior change.
 
 Approved experiments can be replayed before activation or promotion. Replay compares the active baseline config with the proposed one over the proposal snapshot, stores selected/rejected deltas in `strategy_experiments.decision_payload.replay_evidence`, and does not place paper bets or change the active baseline. The UI only enables activation or promotion once replay evidence is present.
 
@@ -217,6 +217,7 @@ Stored candidate fields include:
 - A first-pass model probability from odds shape, market kind, and metadata completeness.
 - Expected value, confidence, and score.
 - Risk flags such as missing participants, specialized market, long-horizon market, line market, very short price, long price, or odds movement.
+- Active strategy baselines can reject candidates by `excluded_risk_flags`; movement-driven exclusions are proposed through Hermes review before activation.
 - A feature snapshot containing decision-time metadata from the normalized odds feed, including odds movement when a previous observation exists for the same event, market, and outcome.
 
 The ranker intentionally uses weak, transparent heuristics until sports intelligence ingestion is wired in. Later model versions should replace these heuristics with feature snapshots from stats, news, weather, form, and settlement history.

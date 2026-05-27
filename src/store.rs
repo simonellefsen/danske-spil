@@ -530,6 +530,7 @@ VALUES (
     "max_decimal_odds": 8.0,
     "min_confidence": 0.10,
     "excluded_market_kinds": [],
+    "excluded_risk_flags": [],
     "allow_live_markets": false,
     "coupon_modes": {
       "single": true,
@@ -561,6 +562,11 @@ SET config = config || '{
 }'::jsonb
 WHERE strategy_id = 'poc_ranker_v1'
   AND NOT (config ? 'coupon_modes');
+
+UPDATE strategy_baselines
+SET config = jsonb_set(config, '{excluded_risk_flags}', '[]'::jsonb, true)
+WHERE strategy_id = 'poc_ranker_v1'
+  AND NOT (config ? 'excluded_risk_flags');
 
 CREATE INDEX IF NOT EXISTS idx_sport_events_sport_key ON sport_events(sport_key);
 CREATE INDEX IF NOT EXISTS idx_sport_events_start_time ON sport_events(start_time);
@@ -851,6 +857,14 @@ impl Store {
             .filter_map(Value::as_str)
             .map(str::to_string)
             .collect();
+        let excluded_risk_flags: HashSet<String> = config
+            .get("excluded_risk_flags")
+            .and_then(Value::as_array)
+            .into_iter()
+            .flatten()
+            .filter_map(Value::as_str)
+            .map(str::to_string)
+            .collect();
 
         let transaction = client.transaction().await?;
         let mut selected_count = 0usize;
@@ -873,6 +887,16 @@ impl Store {
                 .is_some_and(|kind| excluded_market_kinds.contains(kind))
             {
                 reasons.push("excluded_market_kind");
+            }
+            if candidate
+                .risk_flags
+                .as_array()
+                .into_iter()
+                .flatten()
+                .filter_map(Value::as_str)
+                .any(|flag| excluded_risk_flags.contains(flag))
+            {
+                reasons.push("excluded_risk_flag");
             }
             if !allow_live_markets
                 && candidate
@@ -5062,6 +5086,33 @@ impl Store {
                 .await;
         }
 
+        let large_movement_candidates: Vec<&CandidateBet> = candidates
+            .iter()
+            .filter(|candidate| {
+                candidate
+                    .risk_flags
+                    .as_array()
+                    .into_iter()
+                    .flatten()
+                    .any(|flag| flag.as_str() == Some("large_odds_movement"))
+            })
+            .collect();
+        if large_movement_candidates.len() >= 3 {
+            return self
+                .insert_strategy_experiment(
+                    snapshot_id,
+                    "Exclude large odds moves",
+                    "Temporarily excluding candidates with large latest-prior odds movement may reduce paper simulations based on unstable prices until movement-specific calibration has enough settled evidence.",
+                    "excluded_risk_flags",
+                    json!([]),
+                    json!(["large_odds_movement"]),
+                    candidates,
+                    &large_movement_candidates,
+                    "large_odds_movement_candidate_count",
+                )
+                .await;
+        }
+
         let baseline = client
             .query_opt(
                 r#"
@@ -5185,7 +5236,8 @@ impl Store {
                 "outcome_name": candidate.outcome_name,
                 "decimal_odds": candidate.decimal_odds,
                 "score": candidate.score,
-                "risk_flags": candidate.risk_flags
+                "risk_flags": candidate.risk_flags,
+                "odds_movement": candidate.feature_snapshot.get("odds_movement").cloned().unwrap_or(Value::Null)
             })).collect::<Vec<_>>(),
             "safety": {
                 "paper_only": true,
@@ -6504,6 +6556,14 @@ fn strategy_rejection_reasons(candidate: &CandidateBet, config: &Value) -> Vec<S
         .filter_map(Value::as_str)
         .map(str::to_string)
         .collect();
+    let excluded_risk_flags: HashSet<String> = config
+        .get("excluded_risk_flags")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter_map(Value::as_str)
+        .map(str::to_string)
+        .collect();
 
     let mut reasons = Vec::new();
     match candidate.decimal_odds {
@@ -6520,6 +6580,16 @@ fn strategy_rejection_reasons(candidate: &CandidateBet, config: &Value) -> Vec<S
         .is_some_and(|kind| excluded_market_kinds.contains(kind))
     {
         reasons.push("excluded_market_kind".to_string());
+    }
+    if candidate
+        .risk_flags
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter_map(Value::as_str)
+        .any(|flag| excluded_risk_flags.contains(flag))
+    {
+        reasons.push("excluded_risk_flag".to_string());
     }
     if !allow_live_markets
         && candidate

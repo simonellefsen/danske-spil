@@ -63,6 +63,7 @@ hermes_self_improvement:
     require_terms_review_before_live: true
     require_backtest_before_paper: true
     require_paper_observation_before_live: true
+    reviewed_excluded_risk_flags_only: true
     max_single_stake_dkk: 0
     max_daily_stake_dkk: 0
     no_chasing_losses: true
