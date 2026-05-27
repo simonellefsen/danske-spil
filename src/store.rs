@@ -2432,6 +2432,7 @@ impl Store {
                     oo.displayed AS latest_outcome_displayed,
                     oo.decimal_odds::float8 AS latest_decimal_odds,
                     oo.payload AS latest_outcome_payload,
+                    lkp.last_lookup_at,
                     COALESCE(
                       sb.expected_result_check_after,
                       CASE
@@ -2462,6 +2463,12 @@ impl Store {
                     ORDER BY oo.observed_at DESC
                     LIMIT 1
                   ) oo ON true
+                  LEFT JOIN LATERAL (
+                    SELECT max(created_at) AS last_lookup_at
+                    FROM settlement_lookup_attempts sla
+                    WHERE sla.source_key = 'danskespil_content_service'
+                      AND sla.simulated_bet_id = sb.id
+                  ) lkp ON true
                   WHERE sb.status IN ('awaiting_result', 'unresolved', 'postponed')
                   ORDER BY se.start_time ASC NULLS LAST, sb.created_at ASC
                   LIMIT $1
@@ -2502,6 +2509,7 @@ impl Store {
                     'latest_outcome_active', review.latest_outcome_active,
                     'latest_outcome_displayed', review.latest_outcome_displayed,
                     'latest_decimal_odds', review.latest_decimal_odds,
+                    'last_lookup_at', review.last_lookup_at,
                     'latest_outcome_payload', review.latest_outcome_payload
                   )
                 )
@@ -2531,6 +2539,7 @@ impl Store {
                   review.latest_outcome_active,
                   review.latest_outcome_displayed,
                   review.latest_decimal_odds,
+                  review.last_lookup_at,
                   review.latest_outcome_payload
                 "#,
                 &[&(limit as i64), &settlement_source_policy],
@@ -2571,6 +2580,7 @@ impl Store {
                     oo.displayed AS latest_outcome_displayed,
                     oo.decimal_odds::float8 AS latest_decimal_odds,
                     oo.payload AS latest_outcome_payload,
+                    lkp.last_lookup_at,
                     COALESCE(
                       scl.expected_result_check_after,
                       CASE
@@ -2603,6 +2613,12 @@ impl Store {
                     ORDER BY oo.observed_at DESC
                     LIMIT 1
                   ) oo ON true
+                  LEFT JOIN LATERAL (
+                    SELECT max(created_at) AS last_lookup_at
+                    FROM settlement_lookup_attempts sla
+                    WHERE sla.source_key = 'danskespil_content_service'
+                      AND sla.simulated_coupon_id = sc.id
+                  ) lkp ON true
                   WHERE sc.status IN ('awaiting_result', 'unresolved', 'postponed')
                 ),
                 review AS (
@@ -2615,6 +2631,7 @@ impl Store {
                     coupon_type,
                     leg_count,
                     max(expected_result_check_after) AS expected_result_check_after,
+                    max(last_lookup_at) AS last_lookup_at,
                     jsonb_agg(
                       jsonb_build_object(
                         'leg_index', leg_index,
@@ -2640,6 +2657,7 @@ impl Store {
                         'latest_outcome_active', latest_outcome_active,
                         'latest_outcome_displayed', latest_outcome_displayed,
                         'latest_decimal_odds', latest_decimal_odds,
+                        'last_lookup_at', last_lookup_at,
                         'latest_outcome_payload', latest_outcome_payload
                       )
                       ORDER BY leg_index
@@ -2674,6 +2692,7 @@ impl Store {
                     'leg_count', review.leg_count,
                     'combined_decimal_odds', review.combined_decimal_odds,
                     'expected_result_check_after', review.expected_result_check_after,
+                    'last_lookup_at', review.last_lookup_at,
                     'legs', review.legs
                   )
                 )
@@ -2688,6 +2707,7 @@ impl Store {
                   review.combined_decimal_odds,
                   review.strategy_id,
                   review.expected_result_check_after,
+                  review.last_lookup_at,
                   review.legs
                 "#,
                 &[&(limit as i64), &settlement_source_policy],
@@ -2700,6 +2720,13 @@ impl Store {
                 let start_time: Option<DateTime<Utc>> = row.get("start_time");
                 let expected_result_check_after: Option<DateTime<Utc>> =
                     row.get("expected_result_check_after");
+                let last_lookup_at: Option<DateTime<Utc>> = row.get("last_lookup_at");
+                let lookup_stale = last_lookup_at
+                    .map(|value| {
+                        value
+                            < Utc::now() - Duration::minutes(lookup_cooldown_minutes.max(0))
+                    })
+                    .unwrap_or(true);
                 let event_status: Option<String> = row.get("event_status");
                 let event_resulted: Option<bool> = row.get("event_resulted");
                 let event_settled: Option<bool> = row.get("event_settled");
@@ -2726,6 +2753,9 @@ impl Store {
                     "observed_decimal_odds": row.get::<_, Option<f64>>("observed_decimal_odds"),
                     "start_time": start_time,
                     "expected_result_check_after": expected_result_check_after,
+                    "last_lookup_at": last_lookup_at,
+                    "lookup_stale": lookup_stale,
+                    "lookup_cooldown_minutes": lookup_cooldown_minutes,
                     "event_status": event_status,
                     "event_resulted": event_resulted,
                     "event_settled": event_settled,
@@ -2743,6 +2773,10 @@ impl Store {
         items.extend(coupon_rows.iter().map(|row| {
             let expected_result_check_after: Option<DateTime<Utc>> =
                 row.get("expected_result_check_after");
+            let last_lookup_at: Option<DateTime<Utc>> = row.get("last_lookup_at");
+            let lookup_stale = last_lookup_at
+                .map(|value| value < Utc::now() - Duration::minutes(lookup_cooldown_minutes.max(0)))
+                .unwrap_or(true);
             let legs: Value = row.get("legs");
             let recommendation =
                 coupon_settlement_review_recommendation(&legs, expected_result_check_after);
@@ -2756,6 +2790,9 @@ impl Store {
                 "combined_decimal_odds": row.get::<_, Option<f64>>("combined_decimal_odds"),
                 "strategy_id": row.get::<_, String>("strategy_id"),
                 "expected_result_check_after": expected_result_check_after,
+                "last_lookup_at": last_lookup_at,
+                "lookup_stale": lookup_stale,
+                "lookup_cooldown_minutes": lookup_cooldown_minutes,
                 "legs": legs,
                 "settlement_source_policy": settlement_source_policy.clone(),
                 "recommendation": recommendation

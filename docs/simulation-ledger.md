@@ -179,6 +179,7 @@ The UI should show:
 - Simulated P/L by day, product, market, strategy, and confidence bucket.
 - Settlement source and confidence.
 - Recent non-grading settlement lookup attempts and recommendations.
+- Lookup freshness on each settlement-review row, including the last lookup timestamp and whether it is stale relative to the configured cooldown.
 - Manual-review queue for ambiguous results.
 
 All displays must clearly label results as simulated/paper results unless real-money functionality is explicitly approved later.

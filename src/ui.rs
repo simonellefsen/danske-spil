@@ -505,10 +505,14 @@ function renderSettlementReview(summary) {
     const canSettle = openSettlementStatuses.includes(status);
     const actionAttribute = isCoupon ? "data-review-coupon-settle" : "data-review-settle";
     const actionId = isCoupon ? item.coupon_simulation_id : item.bet_id;
+    const lookupLabel = item.last_lookup_at
+      ? `last lookup ${item.last_lookup_at}`
+      : "lookup not recorded";
+    const lookupClass = item.lookup_stale ? "danger" : "ok";
     return `
       <tr>
         <td><span class="pill">${esc(item.item_type || "single")}</span> ${esc(selection)}<br><span class="label">${detail}</span></td>
-        <td>${esc(item.expected_result_check_after || "-")}<br><span class="muted">${esc(item.sport_key || firstLeg.sport_key || "")}</span></td>
+        <td>${esc(item.expected_result_check_after || "-")}<br><span class="muted">${esc(item.sport_key || firstLeg.sport_key || "")}</span><br><span class="${lookupClass}">${esc(lookupLabel)}</span></td>
         <td>${esc(item.event_status || firstLeg.event_status || "-")}<br><span class="muted">${esc(state)}</span></td>
         <td>
           <span class="pill">${esc(item.recommendation || "await_more_evidence")}</span>
