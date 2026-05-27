@@ -112,6 +112,11 @@ Append-only timeline for project wiki maintenance. Use headings with the format 
 - Added `excluded_risk_flags` to active strategy baselines and replay evaluation.
 - Added scan-derived Hermes proposals to exclude `large_odds_movement` when enough candidates show large odds drift.
 
+## [2026-05-27] implementation | risk-flag performance view
+
+- Added paper performance aggregation by candidate risk flag across singles and simulated coupons.
+- Exposed the breakdown in the web UI so movement-risk gates can be compared against settled paper outcomes.
+
 ## [2026-05-25] implementation | Candidate ranking and paper settlement POC
 
 - Added `poc_ranker_v1` candidate scoring fields: implied probability, model probability, expected value, confidence, score, risk flags, and feature snapshot.

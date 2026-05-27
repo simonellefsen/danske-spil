@@ -3076,6 +3076,76 @@ impl Store {
                 &[],
             )
             .await?;
+        let by_risk_flag = client
+            .query(
+                r#"
+                WITH single_flags AS (
+                  SELECT
+                    'single'::text AS item_type,
+                    sb.id AS item_id,
+                    sb.status,
+                    sb.hypothetical_stake,
+                    sb.profit_loss,
+                    flags.risk_flag
+                  FROM simulated_bets sb
+                  LEFT JOIN candidate_bets cb ON cb.id = sb.candidate_id
+                  LEFT JOIN LATERAL (
+                    SELECT value AS risk_flag
+                    FROM jsonb_array_elements_text(COALESCE(cb.risk_flags, '[]'::jsonb)) AS flag(value)
+                    UNION ALL
+                    SELECT 'none'
+                    WHERE jsonb_array_length(COALESCE(cb.risk_flags, '[]'::jsonb)) = 0
+                  ) flags ON true
+                ),
+                coupon_flags AS (
+                  SELECT
+                    'coupon'::text AS item_type,
+                    sc.id AS item_id,
+                    sc.status,
+                    sc.hypothetical_stake,
+                    sc.profit_loss,
+                    flags.risk_flag
+                  FROM simulated_coupons sc
+                  LEFT JOIN LATERAL (
+                    SELECT DISTINCT flag.value AS risk_flag
+                    FROM simulated_coupon_legs scl
+                    JOIN candidate_bets cb ON cb.id = scl.candidate_id
+                    CROSS JOIN LATERAL jsonb_array_elements_text(COALESCE(cb.risk_flags, '[]'::jsonb)) AS flag(value)
+                    WHERE scl.simulated_coupon_id = sc.id
+                    UNION ALL
+                    SELECT 'none'
+                    WHERE NOT EXISTS (
+                      SELECT 1
+                      FROM simulated_coupon_legs scl
+                      JOIN candidate_bets cb ON cb.id = scl.candidate_id
+                      CROSS JOIN LATERAL jsonb_array_elements_text(COALESCE(cb.risk_flags, '[]'::jsonb)) AS flag(value)
+                      WHERE scl.simulated_coupon_id = sc.id
+                    )
+                  ) flags ON true
+                ),
+                positions AS (
+                  SELECT * FROM single_flags
+                  UNION ALL
+                  SELECT * FROM coupon_flags
+                )
+                SELECT
+                  risk_flag,
+                  count(*) FILTER (WHERE status <> 'duplicate_void')::int AS played_count,
+                  count(*) FILTER (WHERE item_type = 'single' AND status <> 'duplicate_void')::int AS single_count,
+                  count(*) FILTER (WHERE item_type = 'coupon' AND status <> 'duplicate_void')::int AS coupon_count,
+                  count(*) FILTER (WHERE status IN ('open', 'awaiting_result', 'unresolved', 'postponed'))::int AS open_count,
+                  count(*) FILTER (WHERE status IN ('settled_won', 'settled_lost'))::int AS decided_count,
+                  count(*) FILTER (WHERE status = 'settled_won')::int AS won_count,
+                  COALESCE(sum(hypothetical_stake) FILTER (WHERE status <> 'duplicate_void'), 0)::float8 AS turnover,
+                  COALESCE(sum(hypothetical_stake) FILTER (WHERE status IN ('open', 'awaiting_result', 'unresolved', 'postponed')), 0)::float8 AS open_exposure,
+                  COALESCE(sum(profit_loss) FILTER (WHERE status <> 'duplicate_void'), 0)::float8 AS profit_loss
+                FROM positions
+                GROUP BY risk_flag
+                ORDER BY played_count DESC, risk_flag
+                "#,
+                &[],
+            )
+            .await?;
         let recent = client
             .query(
                 r#"
@@ -3174,6 +3244,23 @@ impl Store {
                 "count": row.get::<_, i32>("count"),
                 "stake": row.get::<_, f64>("stake")
             })).collect::<Vec<_>>(),
+            "by_risk_flag": by_risk_flag.iter().map(|row| {
+                let decided_count: i32 = row.get("decided_count");
+                let won_count: i32 = row.get("won_count");
+                json!({
+                    "risk_flag": row.get::<_, String>("risk_flag"),
+                    "played_count": row.get::<_, i32>("played_count"),
+                    "single_count": row.get::<_, i32>("single_count"),
+                    "coupon_count": row.get::<_, i32>("coupon_count"),
+                    "open_count": row.get::<_, i32>("open_count"),
+                    "decided_count": decided_count,
+                    "won_count": won_count,
+                    "hit_rate": if decided_count > 0 { Some(won_count as f64 / decided_count as f64) } else { None },
+                    "turnover": row.get::<_, f64>("turnover"),
+                    "open_exposure": row.get::<_, f64>("open_exposure"),
+                    "profit_loss": row.get::<_, f64>("profit_loss")
+                })
+            }).collect::<Vec<_>>(),
             "recent": recent.iter().map(|row| {
                 let created_at: DateTime<Utc> = row.get("created_at");
                 json!({

@@ -161,6 +161,15 @@ pub fn render_index(base_path: &str) -> String {
                         }
                     }
                     section {
+                        h2 { "Risk flag performance" }
+                        table {
+                            thead { tr {
+                                th { "Flag" } th { "Played" } th { "Open" } th { "P/L" } th { "Hit rate" }
+                            } }
+                            tbody { id: "risk-performance" }
+                        }
+                    }
+                    section {
                         h2 { "Performance history" }
                         table {
                             thead { tr {
@@ -703,6 +712,19 @@ function renderPlayed(summary) {
   `).join("");
   if (!items.length) {
     $("played").innerHTML = `<tr><td colspan="5" class="muted">No paper strategy placements yet.</td></tr>`;
+  }
+  const riskFlags = summary.by_risk_flag || [];
+  $("risk-performance").innerHTML = riskFlags.map((item) => `
+    <tr>
+      <td><span class="pill">${esc(item.risk_flag || "none")}</span><br><span class="label">singles ${esc(item.single_count || 0)} / coupons ${esc(item.coupon_count || 0)}</span></td>
+      <td>${esc(item.played_count)}<br><span class="muted">${money(item.turnover)}</span></td>
+      <td>${esc(item.open_count)}<br><span class="muted">${money(item.open_exposure)}</span></td>
+      <td>${money(item.profit_loss)}</td>
+      <td>${pct(item.hit_rate)}<br><span class="muted">${esc(item.decided_count || 0)} decided</span></td>
+    </tr>
+  `).join("");
+  if (!riskFlags.length) {
+    $("risk-performance").innerHTML = `<tr><td colspan="5" class="muted">No paper risk-flag performance yet.</td></tr>`;
   }
   const recent = summary.recent || [];
   $("recent-plays").innerHTML = recent.map((item) => {

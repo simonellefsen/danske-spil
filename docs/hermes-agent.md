@@ -42,6 +42,7 @@ Current POC status:
 - The daily reflection is paper-only and summarizes scan/performance snapshots, simulated placements, settlement observations, and whether results are ready to evaluate.
 - Successful scanner runs refresh the previous-day reflection automatically, using the current ledger status of paper positions created that day so later settlements, voids, refunds, cancellations, and postponed items remain visible in the same daily record.
 - If paper placements are still awaiting result review, the reflection explicitly blocks strategy promotion based on unresolved exposure.
+- Strategy played summaries include paper performance by candidate risk flag, so exclusions such as `large_odds_movement` can be evaluated against realized simulated outcomes before promotion.
 
 ## Initial Goal Contract
 
