@@ -127,6 +127,11 @@ Append-only timeline for project wiki maintenance. Use headings with the format 
 - Added Flashscore match pages as a settlement-capable fallback source for football, tennis, and basketball paper-result review.
 - Stale external-result review rows now surface official competition results, Flashscore, and documented third-party sources as available manual evidence classes.
 
+## [2026-05-27] implementation | batch and external settlement
+
+- Settlement review selections are now staged in the UI and committed in a batch, with selected rows highlighted before submission.
+- Added a conservative external auto-settlement pass for paper singles overdue by more than 2 hours when a configured source URL exposes a parseable final score.
+
 ## [2026-05-25] implementation | Candidate ranking and paper settlement POC
 
 - Added `poc_ranker_v1` candidate scoring fields: implied probability, model probability, expected value, confidence, score, risk flags, and feature snapshot.

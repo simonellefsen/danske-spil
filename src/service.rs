@@ -322,11 +322,43 @@ impl GamblerService {
             )
             .await
         {
-            Ok(summary) => {
+            Ok(mut summary) => {
+                let auto_external = match self
+                    .store
+                    .auto_settle_external_overdue(120, self.settings.settlement_queue_limit)
+                    .await
+                {
+                    Ok(auto_summary) => auto_summary,
+                    Err(error) => {
+                        tracing::warn!(%error, "external settlement auto-check failed");
+                        json!({
+                            "enabled": true,
+                            "settled_count": 0,
+                            "error": error.to_string()
+                        })
+                    }
+                };
+                if let Some(summary_object) = summary.as_object_mut() {
+                    summary_object.insert(
+                        "auto_external_settlement".to_string(),
+                        auto_external.clone(),
+                    );
+                }
                 self.store
                     .record_audit("settlement_review_refreshed", summary.clone())
                     .await
                     .ok();
+                if auto_external
+                    .get("settled_count")
+                    .and_then(Value::as_u64)
+                    .unwrap_or_default()
+                    > 0
+                {
+                    self.store
+                        .record_audit("external_settlement_auto_checked", auto_external)
+                        .await
+                        .ok();
+                }
                 summary
             }
             Err(error) => {

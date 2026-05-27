@@ -12,6 +12,7 @@ pub fn render_index(base_path: &str) -> String {
                     button { id: "auto-paper-coupons", "Auto paper coupons" }
                     button { id: "queue-settlement", "Queue settlement" }
                     button { id: "review-settlement", "Review results" }
+                    button { id: "commit-settlements", disabled: true, "Commit selected settlements" }
                     button { id: "reflect-yesterday", "Reflect yesterday" }
                     button { id: "refresh", "Refresh" }
                 }
@@ -324,6 +325,8 @@ th { color: #596678; font-size: 12px; text-transform: uppercase; letter-spacing:
 .muted { color: #596678; }
 .actions { display: flex; gap: 6px; flex-wrap: wrap; }
 .actions button { min-height: 28px; padding: 0 8px; font-size: 12px; }
+.settlement-selected { background: #eef6ff; outline: 2px solid #1f6feb; outline-offset: -2px; }
+.actions button.selected { background: #1f6feb; color: #ffffff; border-color: #1f6feb; }
 .danger { color: #9f1239; }
 .ok { color: #166534; }
 pre { white-space: pre-wrap; overflow: auto; max-height: 420px; background: #0f172a; color: #e2e8f0; padding: 12px; border-radius: 6px; }
@@ -366,6 +369,14 @@ const reviewSettlementButtons = (attribute, id, disabled, sourceKey) => settleme
   `<button ${attribute}="${esc(id || "")}" data-result="${result}" data-source-key="${esc(sourceKey || "")}" ${disabled || !id ? "disabled" : ""}>${label}</button>`
 ).join("");
 let currentSettlementSourceKey = "danskespil_account_history";
+const pendingSettlementReviews = new Map();
+const pendingSettlementKey = (type, id) => `${type}:${id}`;
+const updatePendingSettlementUi = () => {
+  $("commit-settlements").disabled = pendingSettlementReviews.size === 0;
+  $("commit-settlements").textContent = pendingSettlementReviews.size
+    ? `Commit selected settlements (${pendingSettlementReviews.size})`
+    : "Commit selected settlements";
+};
 const settlementSourceKey = (policy) => {
   const preferred = ((policy || {}).items || [])[0] || {};
   return preferred.source_key || currentSettlementSourceKey;
@@ -588,6 +599,8 @@ function renderSettlementReview(summary) {
     const canSettle = openSettlementStatuses.includes(status);
     const actionAttribute = isCoupon ? "data-review-coupon-settle" : "data-review-settle";
     const actionId = isCoupon ? item.coupon_simulation_id : item.bet_id;
+    const pendingKey = pendingSettlementKey(isCoupon ? "coupon" : "single", actionId || "");
+    const pending = pendingSettlementReviews.get(pendingKey);
     const lookupLabel = item.last_lookup_at
       ? `last lookup ${item.last_lookup_at}`
       : "lookup not recorded";
@@ -598,7 +611,7 @@ function renderSettlementReview(summary) {
       ? item.recommended_source_keys.join(", ")
       : sourceLabel;
     return `
-      <tr>
+      <tr data-settlement-row="${esc(pendingKey)}" class="${pending ? "settlement-selected" : ""}">
         <td><span class="pill">${esc(item.item_type || "single")}</span> ${esc(selection)}<br><span class="label">${detail}</span></td>
         <td>${esc(item.expected_result_check_after || "-")}<br><span class="muted">${esc(item.sport_key || firstLeg.sport_key || "")}</span><br><span class="${lookupClass}">${esc(lookupLabel)}</span>${overdueLabel ? `<br><span class="danger">${esc(overdueLabel)}</span>` : ""}</td>
         <td>${esc(item.event_status || firstLeg.event_status || "-")}<br><span class="muted">${esc(state)}</span></td>
@@ -606,6 +619,7 @@ function renderSettlementReview(summary) {
           <span class="pill">${esc(item.recommendation || "await_more_evidence")}</span>
           <br><span class="muted">source: ${esc(sourceOptions)}</span>
           <div class="actions">${reviewSettlementButtons(actionAttribute, actionId, !canSettle, sourceLabel)}</div>
+          ${pending ? `<span class="label">selected: ${esc(pending.result)} via ${esc(pending.source)}</span>` : ""}
         </td>
       </tr>
     `;
@@ -615,32 +629,39 @@ function renderSettlementReview(summary) {
   }
   document.querySelectorAll("[data-review-settle]").forEach((button) => {
     button.addEventListener("click", async () => {
-      await json(api("/api/ledger/settle"), {
-        method: "POST",
-        body: JSON.stringify({
-          bet_id: button.dataset.reviewSettle,
-          result: button.dataset.result,
-          source: button.dataset.sourceKey || settlementSourceKey(summary.settlement_source_policy),
-          confidence: 1
-        })
+      const key = pendingSettlementKey("single", button.dataset.reviewSettle || "");
+      pendingSettlementReviews.set(key, {
+        type: "single",
+        id: button.dataset.reviewSettle,
+        result: button.dataset.result,
+        source: button.dataset.sourceKey || settlementSourceKey(summary.settlement_source_policy)
       });
-      await load();
+      document.querySelectorAll(`[data-review-settle="${CSS.escape(button.dataset.reviewSettle || "")}"]`).forEach((item) => {
+        item.classList.toggle("selected", item.dataset.result === button.dataset.result);
+      });
+      const row = document.querySelector(`[data-settlement-row="${CSS.escape(key)}"]`);
+      if (row) row.classList.add("settlement-selected");
+      updatePendingSettlementUi();
     });
   });
   document.querySelectorAll("[data-review-coupon-settle]").forEach((button) => {
     button.addEventListener("click", async () => {
-      await json(api("/api/coupons/settle"), {
-        method: "POST",
-        body: JSON.stringify({
-          coupon_id: button.dataset.reviewCouponSettle,
-          result: button.dataset.result,
-          source: button.dataset.sourceKey || settlementSourceKey(summary.settlement_source_policy),
-          confidence: 1
-        })
+      const key = pendingSettlementKey("coupon", button.dataset.reviewCouponSettle || "");
+      pendingSettlementReviews.set(key, {
+        type: "coupon",
+        id: button.dataset.reviewCouponSettle,
+        result: button.dataset.result,
+        source: button.dataset.sourceKey || settlementSourceKey(summary.settlement_source_policy)
       });
-      await load();
+      document.querySelectorAll(`[data-review-coupon-settle="${CSS.escape(button.dataset.reviewCouponSettle || "")}"]`).forEach((item) => {
+        item.classList.toggle("selected", item.dataset.result === button.dataset.result);
+      });
+      const row = document.querySelector(`[data-settlement-row="${CSS.escape(key)}"]`);
+      if (row) row.classList.add("settlement-selected");
+      updatePendingSettlementUi();
     });
   });
+  updatePendingSettlementUi();
 }
 function renderSettlementSources(sources) {
   const items = sources.items || [];
@@ -1129,6 +1150,42 @@ $("review-settlement").addEventListener("click", async () => {
   $("review-settlement").disabled = true;
   try { await json(api("/api/settlement/review"), { method: "POST", body: "{}" }); await load(); }
   finally { $("review-settlement").disabled = false; }
+});
+$("commit-settlements").addEventListener("click", async () => {
+  const pending = Array.from(pendingSettlementReviews.values());
+  if (!pending.length) return;
+  $("commit-settlements").disabled = true;
+  try {
+    for (const item of pending) {
+      if (item.type === "coupon") {
+        await json(api("/api/coupons/settle"), {
+          method: "POST",
+          body: JSON.stringify({
+            coupon_id: item.id,
+            result: item.result,
+            source: item.source,
+            confidence: 1,
+            notes: "operator batch settlement review"
+          })
+        });
+      } else {
+        await json(api("/api/ledger/settle"), {
+          method: "POST",
+          body: JSON.stringify({
+            bet_id: item.id,
+            result: item.result,
+            source: item.source,
+            confidence: 1,
+            notes: "operator batch settlement review"
+          })
+        });
+      }
+    }
+    pendingSettlementReviews.clear();
+    await load();
+  } finally {
+    updatePendingSettlementUi();
+  }
 });
 $("reflect-yesterday").addEventListener("click", async () => {
   $("reflect-yesterday").disabled = true;

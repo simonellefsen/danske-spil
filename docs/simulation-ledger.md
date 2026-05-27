@@ -69,7 +69,8 @@ Outcome lookup should prefer sources in this order:
 1. Danske Spil settlement, history, result, or coupon status pages if accessible without submitting bets or exposing sensitive account payloads.
 2. Official league, tournament, or event result sources.
 3. Flashscore match result pages when a stable match URL is available for football, tennis, or basketball.
-4. Documented third-party result sources, only when source reliability is recorded.
+4. Sofascore or LiveScore match result pages when a stable match URL is available and source reliability is recorded.
+5. Documented third-party result sources, only when source reliability is recorded.
 
 The POC seeds these source classes into `source_registry` as settlement-capable
 sources and exposes them through `GET /api/settlement/sources`. They are policy
@@ -99,6 +100,7 @@ Current POC status:
 - Settlement review evidence persists the approved source policy order into each paper bet or coupon payload.
 - Manual settlement validates the cited source against `source_registry.can_settle` and stores the selected policy record without deleting prior review evidence.
 - Automated review refreshes record non-grading `settlement_lookup_attempts` rows for due paper singles and coupons, throttled by `GAMBLER_SETTLEMENT_LOOKUP_COOLDOWN_MINUTES` so UI refreshes do not spam duplicate checks. These rows capture the lookup source, recommendation, current event/outcome state, and the approved settlement source policy so the 15-minute recheck loop is auditable even before automated grading exists.
+- Overdue paper singles that are more than 2 hours past `expected_result_check_after` can be auto-settled only for winner markets when a configured external source URL exposes a parseable final score. The settlement observation and `paper_bet_auto_settled_external` audit event preserve the source key, URL, page title, score, selected outcome, and simulated result used as truth.
 - Strategy selection is stored in `strategy_candidate_decisions`; rejected candidates are preserved for review but blocked from paper-ledger placement.
 - Selected candidates can be auto-paper-placed into `simulated_bets` with per-scan and max-open-exposure caps. This is idempotent per candidate and remains simulation-only.
 - Multi-leg coupons are auto-paper-placed only after the active strategy baseline enables the coupon mode and provider accumulator support is verified from observed data.
@@ -183,7 +185,7 @@ The UI should show:
 - Settlement source and confidence.
 - Recent non-grading settlement lookup attempts and recommendations.
 - Lookup freshness on each settlement-review row, including the last lookup timestamp and whether it is stale relative to the configured cooldown.
-- Overdue paper positions that remain unresulted in the Danske Spil content feed for more than 24 hours after the expected result-check time are escalated to `external_result_required`, with official competition results, Flashscore, and documented third-party results as review sources.
+- Overdue paper positions that remain unresulted in the Danske Spil content feed for more than 2 hours after the expected result-check time are escalated to `external_result_required`, with official competition results, Flashscore, Sofascore, LiveScore, and documented third-party results as review sources.
 - Manual-review queue for ambiguous results.
 
 All displays must clearly label results as simulated/paper results unless real-money functionality is explicitly approved later.

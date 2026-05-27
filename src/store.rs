@@ -1,8 +1,10 @@
 use crate::models::{CandidateBet, HermesReflection, LedgerSummary, SimulatedBet};
 use anyhow::{anyhow, Context};
 use chrono::{DateTime, Duration, NaiveDate, Utc};
+use reqwest::Client as HttpClient;
 use serde_json::{json, Value};
 use std::collections::{BTreeMap, HashMap, HashSet};
+use std::time::Duration as StdDuration;
 use tokio_postgres::{Client, NoTls, Row, Transaction};
 use uuid::Uuid;
 
@@ -175,7 +177,73 @@ VALUES
     true,
     true,
     'Fallback match-result source for sports where a stable Flashscore match URL is available. Use only for manual paper-ledger review and preserve the URL used as evidence.',
-    '{"paper_only": true, "priority": 3, "fallback_only": true, "examples": ["https://www.flashscore.com/match/football/horsens-WIOwwITb/lyngby-tjPFkxq5/?mid=feSsAstf", "https://www.flashscore.com/match/football/notts-county-EwJVdqzn/salford-W4AadhN3/?mid=E3uvsQPP"]}'::jsonb
+    '{
+      "paper_only": true,
+      "priority": 3,
+      "fallback_only": true,
+      "known_matches": [
+        {
+          "event_name": "Lyngby - Horsens",
+          "url": "https://www.flashscore.com/match/football/horsens-WIOwwITb/lyngby-tjPFkxq5/?mid=feSsAstf",
+          "home_aliases": ["Lyngby", "Lyngby AC"],
+          "away_aliases": ["Horsens", "AC Horsens"]
+        },
+        {
+          "event_name": "Notts County - Salford City FC",
+          "url": "https://www.flashscore.com/match/football/notts-county-EwJVdqzn/salford-W4AadhN3/?mid=E3uvsQPP",
+          "home_aliases": ["Notts Co", "Notts County"],
+          "away_aliases": ["Salford", "Salford City", "Salford City FC"]
+        }
+      ]
+    }'::jsonb
+  ),
+  (
+    'sofascore_results',
+    'Sofascore match result pages',
+    'third_party_result',
+    'https://www.sofascore.com/*',
+    ARRAY['football','tennis','basketball'],
+    0.82,
+    true,
+    true,
+    'Fallback match-result source for manual paper-ledger review. Auto-settlement only uses it when a stable match URL and parseable final score are configured.',
+    '{
+      "paper_only": true,
+      "priority": 4,
+      "fallback_only": true,
+      "known_matches": [
+        {
+          "event_name": "Andreea Diana Soare - Katarina Kujovic",
+          "url": "https://www.sofascore.com/da/tennis/match/katarina-kujovic-andreea-diana-soare/FtiesyjFg",
+          "home_aliases": ["Andreea Diana Soare", "Soare"],
+          "away_aliases": ["Katarina Kujovic", "Kujovic"]
+        },
+        {
+          "event_name": "Notts County - Salford City FC",
+          "url": "https://www.sofascore.com/da/football/match/salford-city-notts-county/gbsYjp#id:16189253",
+          "home_aliases": ["Notts County", "Notts Co"],
+          "away_aliases": ["Salford City", "Salford City FC", "Salford"]
+        },
+        {
+          "event_name": "Lyngby - Horsens",
+          "url": "https://www.sofascore.com/da/football/match/lyngby-ac-horsens/XAsgK#id:15885987",
+          "home_aliases": ["Lyngby", "Lyngby AC"],
+          "away_aliases": ["Horsens", "AC Horsens"]
+        }
+      ]
+    }'::jsonb
+  ),
+  (
+    'livescore_results',
+    'LiveScore match result pages',
+    'third_party_result',
+    'https://www.livescore.com/*',
+    ARRAY['football','tennis','basketball'],
+    0.80,
+    true,
+    true,
+    'Fallback match-result source for manual paper-ledger review when a stable LiveScore match URL is available.',
+    '{"paper_only": true, "priority": 5, "fallback_only": true}'::jsonb
   ),
   (
     'documented_third_party_results',
@@ -187,7 +255,7 @@ VALUES
     true,
     true,
     'Fallback only when source reliability and URL pattern are documented for the sport and event.',
-    '{"paper_only": true, "priority": 4, "fallback_only": true}'::jsonb
+    '{"paper_only": true, "priority": 6, "fallback_only": true}'::jsonb
   )
 ON CONFLICT (source_key) DO UPDATE
 SET source_name = EXCLUDED.source_name,
@@ -2892,6 +2960,191 @@ impl Store {
             "settlement_source_policy": settlement_source_policy,
             "paper_only": true,
             "not_auto_graded": true
+        }))
+    }
+
+    pub async fn auto_settle_external_overdue(
+        &self,
+        min_overdue_minutes: i64,
+        limit: usize,
+    ) -> anyhow::Result<Value> {
+        if limit == 0 {
+            return Ok(json!({
+                "enabled": true,
+                "checked_count": 0,
+                "settled_count": 0,
+                "skipped": true,
+                "reason": "settlement auto-check limit is zero"
+            }));
+        }
+
+        let source_policy = self.settlement_sources().await?;
+        let client = self.connect().await?;
+        let rows = client
+            .query(
+                r#"
+                SELECT
+                  sb.id AS bet_id,
+                  cb.event_name,
+                  cb.market_kind,
+                  cb.market_name,
+                  cb.outcome_name,
+                  sb.expected_result_check_after
+                FROM simulated_bets sb
+                JOIN candidate_bets cb ON cb.id = sb.candidate_id
+                WHERE sb.status IN ('awaiting_result', 'unresolved', 'postponed')
+                  AND sb.expected_result_check_after <= now() - ($1::int * interval '1 minute')
+                ORDER BY sb.expected_result_check_after ASC NULLS LAST, sb.created_at ASC
+                LIMIT $2
+                "#,
+                &[&(min_overdue_minutes.max(0) as i32), &(limit as i64)],
+            )
+            .await?;
+        drop(client);
+
+        let http = HttpClient::builder()
+            .user_agent("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125 Safari/537.36")
+            .timeout(StdDuration::from_secs(12))
+            .build()?;
+
+        let mut checked = Vec::new();
+        let mut settled = Vec::new();
+        let mut skipped = Vec::new();
+
+        for row in rows {
+            let bet_id: String = row.get("bet_id");
+            let event_name: Option<String> = row.get("event_name");
+            let market_kind: Option<String> = row.get("market_kind");
+            let market_name: Option<String> = row.get("market_name");
+            let outcome_name: Option<String> = row.get("outcome_name");
+            let expected_result_check_after: Option<DateTime<Utc>> =
+                row.get("expected_result_check_after");
+            let overdue_minutes = settlement_overdue_minutes(expected_result_check_after);
+            let Some(event_name) = event_name else {
+                skipped.push(json!({"bet_id": bet_id, "reason": "missing_event_name"}));
+                continue;
+            };
+            let Some(outcome_name) = outcome_name else {
+                skipped.push(json!({"bet_id": bet_id, "event_name": event_name, "reason": "missing_outcome_name"}));
+                continue;
+            };
+            if !is_auto_settle_winner_market(market_kind.as_deref(), market_name.as_deref()) {
+                skipped.push(json!({
+                    "bet_id": bet_id,
+                    "event_name": event_name,
+                    "market_kind": market_kind,
+                    "market_name": market_name,
+                    "reason": "unsupported_market_for_auto_settlement"
+                }));
+                continue;
+            }
+            let Some(link) = external_result_link_for_event(&source_policy, &event_name) else {
+                skipped.push(json!({
+                    "bet_id": bet_id,
+                    "event_name": event_name,
+                    "reason": "no_configured_external_result_link"
+                }));
+                continue;
+            };
+            let evidence = match fetch_external_match_result(&http, &link).await {
+                Ok(evidence) => evidence,
+                Err(error) => {
+                    skipped.push(json!({
+                        "bet_id": bet_id,
+                        "event_name": event_name,
+                        "source_key": link.source_key,
+                        "source_url": link.url,
+                        "reason": "external_fetch_or_parse_failed",
+                        "error": error.to_string()
+                    }));
+                    continue;
+                }
+            };
+            checked.push(json!({
+                "bet_id": bet_id,
+                "event_name": event_name,
+                "source_key": evidence.source_key,
+                "source_url": evidence.url,
+                "source_title": evidence.title,
+                "score": {"home": evidence.home_score, "away": evidence.away_score}
+            }));
+            let Some(result) = grade_winner_outcome(&outcome_name, &link, &evidence) else {
+                skipped.push(json!({
+                    "bet_id": bet_id,
+                    "event_name": event_name,
+                    "outcome_name": outcome_name,
+                    "source_key": evidence.source_key,
+                    "source_url": evidence.url,
+                    "source_title": evidence.title,
+                    "score": {"home": evidence.home_score, "away": evidence.away_score},
+                    "reason": "unable_to_map_outcome_to_external_result"
+                }));
+                continue;
+            };
+            let notes = json!({
+                "mode": "auto_external_result_settlement",
+                "source_key": evidence.source_key,
+                "source_url": evidence.url,
+                "source_title": evidence.title,
+                "source_home_name": evidence.home_name,
+                "source_away_name": evidence.away_name,
+                "home_score": evidence.home_score,
+                "away_score": evidence.away_score,
+                "outcome_name": outcome_name,
+                "overdue_minutes": overdue_minutes,
+                "paper_only": true
+            })
+            .to_string();
+            match self
+                .settle_simulated_bet(
+                    &bet_id,
+                    result,
+                    &evidence.source_key,
+                    evidence.confidence,
+                    &notes,
+                )
+                .await
+            {
+                Ok(item) => {
+                    let audit = json!({
+                        "bet_id": item.id,
+                        "event_name": event_name,
+                        "outcome_name": outcome_name,
+                        "result": result,
+                        "status": item.status,
+                        "source_key": evidence.source_key,
+                        "source_url": evidence.url,
+                        "source_title": evidence.title,
+                        "score": {"home": evidence.home_score, "away": evidence.away_score},
+                        "overdue_minutes": overdue_minutes,
+                        "paper_only": true
+                    });
+                    self.record_audit("paper_bet_auto_settled_external", audit.clone())
+                        .await
+                        .ok();
+                    settled.push(audit);
+                }
+                Err(error) => skipped.push(json!({
+                    "bet_id": bet_id,
+                    "event_name": event_name,
+                    "source_key": evidence.source_key,
+                    "reason": "settlement_write_failed",
+                    "error": error.to_string()
+                })),
+            }
+        }
+
+        Ok(json!({
+            "enabled": true,
+            "paper_only": true,
+            "min_overdue_minutes": min_overdue_minutes,
+            "candidate_count": checked.len() + skipped.len(),
+            "checked_count": checked.len(),
+            "settled_count": settled.len(),
+            "skipped_count": skipped.len(),
+            "checked": checked,
+            "settled": settled,
+            "skipped": skipped
         }))
     }
 
@@ -6537,6 +6790,214 @@ fn combinations<'a>(items: &[&'a CandidateBet], leg_count: usize) -> Vec<Vec<&'a
     output
 }
 
+#[derive(Debug, Clone)]
+struct ExternalResultLink {
+    source_key: String,
+    url: String,
+    home_aliases: Vec<String>,
+    away_aliases: Vec<String>,
+}
+
+#[derive(Debug, Clone)]
+struct ExternalMatchResult {
+    source_key: String,
+    url: String,
+    title: String,
+    home_name: String,
+    away_name: String,
+    home_score: i32,
+    away_score: i32,
+    confidence: f64,
+}
+
+fn external_result_link_for_event(
+    source_policy: &Value,
+    event_name: &str,
+) -> Option<ExternalResultLink> {
+    let event_key = normalize_match_name(event_name);
+    source_policy
+        .get("items")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter(|source| {
+            matches!(
+                source.get("source_key").and_then(Value::as_str),
+                Some("flashscore_results" | "sofascore_results" | "livescore_results")
+            )
+        })
+        .find_map(|source| {
+            let source_key = source.get("source_key").and_then(Value::as_str)?;
+            source
+                .get("payload")
+                .and_then(|payload| payload.get("known_matches"))
+                .and_then(Value::as_array)
+                .into_iter()
+                .flatten()
+                .find_map(|item| {
+                    let known_event = item.get("event_name").and_then(Value::as_str)?;
+                    if normalize_match_name(known_event) != event_key {
+                        return None;
+                    }
+                    Some(ExternalResultLink {
+                        source_key: source_key.to_string(),
+                        url: item.get("url").and_then(Value::as_str)?.to_string(),
+                        home_aliases: json_string_array(item.get("home_aliases")),
+                        away_aliases: json_string_array(item.get("away_aliases")),
+                    })
+                })
+        })
+}
+
+async fn fetch_external_match_result(
+    http: &HttpClient,
+    link: &ExternalResultLink,
+) -> anyhow::Result<ExternalMatchResult> {
+    let html = http
+        .get(&link.url)
+        .send()
+        .await
+        .with_context(|| format!("fetch external result page {}", link.url))?
+        .error_for_status()
+        .with_context(|| format!("external result page returned error {}", link.url))?
+        .text()
+        .await?;
+    let title = extract_meta_content(&html, "og:title")
+        .or_else(|| extract_title(&html))
+        .ok_or_else(|| anyhow!("external result page did not expose a title"))?;
+    let (home_name, away_name, home_score, away_score) =
+        parse_score_title(&title).ok_or_else(|| {
+            anyhow!("external result title did not include a parseable final score: {title}")
+        })?;
+    Ok(ExternalMatchResult {
+        source_key: link.source_key.clone(),
+        url: link.url.clone(),
+        title,
+        home_name,
+        away_name,
+        home_score,
+        away_score,
+        confidence: if link.source_key == "flashscore_results" {
+            0.86
+        } else {
+            0.82
+        },
+    })
+}
+
+fn is_auto_settle_winner_market(market_kind: Option<&str>, market_name: Option<&str>) -> bool {
+    let kind = market_kind.unwrap_or_default().to_ascii_lowercase();
+    let name = market_name.unwrap_or_default().to_ascii_lowercase();
+    kind == "winner"
+        || name.contains("kampvinder")
+        || name.contains("match winner")
+        || name.contains("winner")
+}
+
+fn grade_winner_outcome(
+    outcome_name: &str,
+    link: &ExternalResultLink,
+    evidence: &ExternalMatchResult,
+) -> Option<&'static str> {
+    if evidence.home_score == evidence.away_score {
+        return Some(if is_draw_outcome(outcome_name) {
+            "won"
+        } else {
+            "lost"
+        });
+    }
+    let home_won = evidence.home_score > evidence.away_score;
+    let mut home_aliases = link.home_aliases.clone();
+    home_aliases.push(evidence.home_name.clone());
+    let mut away_aliases = link.away_aliases.clone();
+    away_aliases.push(evidence.away_name.clone());
+    if home_won && alias_matches(outcome_name, &home_aliases) {
+        return Some("won");
+    }
+    if !home_won && alias_matches(outcome_name, &away_aliases) {
+        return Some("won");
+    }
+    if alias_matches(outcome_name, &home_aliases)
+        || alias_matches(outcome_name, &away_aliases)
+        || is_draw_outcome(outcome_name)
+    {
+        return Some("lost");
+    }
+    None
+}
+
+fn parse_score_title(title: &str) -> Option<(String, String, i32, i32)> {
+    let clean = html_unescape(title);
+    let (teams, score) = clean.rsplit_once(' ')?;
+    let (home_score, away_score) = score.split_once(':')?;
+    let (home_name, away_name) = teams.split_once(" - ")?;
+    Some((
+        home_name.trim().to_string(),
+        away_name.trim().to_string(),
+        home_score.trim().parse().ok()?,
+        away_score.trim().parse().ok()?,
+    ))
+}
+
+fn extract_meta_content(html: &str, property: &str) -> Option<String> {
+    let property_index = html.find(property)?;
+    let start = property_index.saturating_sub(180);
+    let end = (property_index + 420).min(html.len());
+    let window = &html[start..end];
+    let content_index = window.find("content=\"")? + "content=\"".len();
+    let content = &window[content_index..];
+    let end_index = content.find('"')?;
+    Some(html_unescape(&content[..end_index]))
+}
+
+fn extract_title(html: &str) -> Option<String> {
+    let start = html.find("<title>")? + "<title>".len();
+    let end = html[start..].find("</title>")?;
+    Some(html_unescape(&html[start..start + end]))
+}
+
+fn html_unescape(value: &str) -> String {
+    value
+        .replace("&amp;", "&")
+        .replace("&quot;", "\"")
+        .replace("&#39;", "'")
+        .replace("&lt;", "<")
+        .replace("&gt;", ">")
+}
+
+fn json_string_array(value: Option<&Value>) -> Vec<String> {
+    value
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter_map(Value::as_str)
+        .map(str::to_string)
+        .collect()
+}
+
+fn alias_matches(value: &str, aliases: &[String]) -> bool {
+    let normalized = normalize_match_name(value);
+    aliases.iter().any(|alias| {
+        let alias = normalize_match_name(alias);
+        normalized == alias
+            || (normalized.len() >= 5 && alias.contains(&normalized))
+            || (alias.len() >= 5 && normalized.contains(&alias))
+    })
+}
+
+fn is_draw_outcome(value: &str) -> bool {
+    let normalized = normalize_match_name(value);
+    matches!(normalized.as_str(), "uafgjort" | "draw" | "x" | "tie")
+}
+
+fn normalize_match_name(value: &str) -> String {
+    value
+        .chars()
+        .filter(|character| character.is_ascii_alphanumeric())
+        .flat_map(char::to_lowercase)
+        .collect()
+}
+
 fn settlement_review_recommendation(
     event_status: Option<&str>,
     event_resulted: Option<bool>,
@@ -6555,7 +7016,7 @@ fn settlement_review_recommendation(
     if event_settled == Some(true) || event_resulted == Some(true) {
         return "manual_grade_ready";
     }
-    if expected_result_check_after.is_some_and(|value| value <= Utc::now() - Duration::hours(24)) {
+    if expected_result_check_after.is_some_and(|value| value <= Utc::now() - Duration::hours(2)) {
         return "external_result_required";
     }
     if expected_result_check_after.is_some_and(|value| value <= Utc::now()) {
@@ -6591,7 +7052,7 @@ fn coupon_settlement_review_recommendation(
     {
         return "manual_grade_ready";
     }
-    if expected_result_check_after.is_some_and(|value| value <= Utc::now() - Duration::hours(24)) {
+    if expected_result_check_after.is_some_and(|value| value <= Utc::now() - Duration::hours(2)) {
         return "external_result_required";
     }
     if expected_result_check_after.is_some_and(|value| value <= Utc::now()) {
@@ -6618,12 +7079,90 @@ fn settlement_recommended_source_keys(recommendation: &str) -> Value {
         "external_result_required" => json!([
             "official_competition_results",
             "flashscore_results",
+            "sofascore_results",
+            "livescore_results",
             "documented_third_party_results"
         ]),
         "manual_void_or_refund_review" | "manual_grade_ready" => {
             json!(["danskespil_account_history"])
         }
         _ => json!(["danskespil_content_service"]),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parses_flashscore_og_title_score() {
+        let parsed = parse_score_title("Notts Co - Salford 3:0").expect("score title");
+        assert_eq!(
+            parsed,
+            ("Notts Co".to_string(), "Salford".to_string(), 3, 0)
+        );
+    }
+
+    #[test]
+    fn grades_winner_market_against_aliases() {
+        let link = ExternalResultLink {
+            source_key: "flashscore_results".to_string(),
+            url: "https://example.test/match".to_string(),
+            home_aliases: vec!["Lyngby".to_string(), "Lyngby AC".to_string()],
+            away_aliases: vec!["Horsens".to_string(), "AC Horsens".to_string()],
+        };
+        let evidence = ExternalMatchResult {
+            source_key: link.source_key.clone(),
+            url: link.url.clone(),
+            title: "Lyngby - Horsens 0:2".to_string(),
+            home_name: "Lyngby".to_string(),
+            away_name: "Horsens".to_string(),
+            home_score: 0,
+            away_score: 2,
+            confidence: 0.86,
+        };
+
+        assert_eq!(
+            grade_winner_outcome("Horsens", &link, &evidence),
+            Some("won")
+        );
+        assert_eq!(
+            grade_winner_outcome("Lyngby", &link, &evidence),
+            Some("lost")
+        );
+        assert_eq!(
+            grade_winner_outcome("Uafgjort", &link, &evidence),
+            Some("lost")
+        );
+    }
+
+    #[test]
+    fn grades_draw_outcomes() {
+        let link = ExternalResultLink {
+            source_key: "flashscore_results".to_string(),
+            url: "https://example.test/match".to_string(),
+            home_aliases: vec!["Notts County".to_string()],
+            away_aliases: vec!["Salford City".to_string()],
+        };
+        let evidence = ExternalMatchResult {
+            source_key: link.source_key.clone(),
+            url: link.url.clone(),
+            title: "Notts County - Salford City 1:1".to_string(),
+            home_name: "Notts County".to_string(),
+            away_name: "Salford City".to_string(),
+            home_score: 1,
+            away_score: 1,
+            confidence: 0.86,
+        };
+
+        assert_eq!(
+            grade_winner_outcome("Uafgjort", &link, &evidence),
+            Some("won")
+        );
+        assert_eq!(
+            grade_winner_outcome("Notts County", &link, &evidence),
+            Some("lost")
+        );
     }
 }
 
