@@ -193,7 +193,7 @@ GET  /api/ledger/queue
 POST /api/ledger/queue
 ```
 
-This is only a queue transition. It does not grade a bet as won, lost, or void. Paper bets and paper coupons now store the observed event start time and an expected result-check-after timestamp, then re-check awaiting-result items on the same 15-minute worker cadence until the result is verified or the item needs manual review.
+This is only a queue transition. It does not grade a bet as won, lost, or void. Paper bets and paper coupons now store the observed event start time and an expected finish timestamp, then re-check awaiting-result items on the same 15-minute worker cadence until the result is verified or the item needs manual review.
 
 Strategy state is available at:
 
@@ -277,7 +277,7 @@ Current result-review status:
 - The web UI renders recent strategy plays from `/api/strategy/played`, including singles and coupons with stake, odds, status, score, and confidence.
 - `/api/strategy/played` also aggregates paper performance by candidate risk flag, including movement tags such as `large_odds_movement`, so strategy gates can be reviewed against realized paper outcomes before promotion.
 - The worker runs the same review refresh after advancing the settlement queue.
-- `simulated_bets`, `simulated_coupons`, and `simulated_coupon_legs` preserve event start and expected result-check-after timestamps for operator scheduling.
+- `simulated_bets`, `simulated_coupons`, and `simulated_coupon_legs` preserve event start and expected finish timestamps for operator scheduling.
 - Review evidence is written into each bet's `settlement_payload.review_evidence`, including the approved settlement source policy order used for manual grading.
 - Coupon review evidence is written into each simulated coupon's `settlement_payload.review_evidence`, including the same settlement source policy order.
 - Manual settlement must cite a `source_registry` row where `can_settle=true`; the settlement payload preserves earlier review evidence and adds the selected source policy under `manual_settlement.source_policy`.
@@ -286,6 +286,6 @@ Current result-review status:
 - `/api/performance` now includes `settlement_work.lookup_cadence`, which reports how many due paper positions have a recent lookup attempt, how many are due without a recent attempt, the last lookup time, and the next lookup due time.
 - The same performance payload includes `settlement_work.lookup_due_items`, a capped operator queue of due paper singles or coupons whose latest lookup is missing or outside the cooldown window.
 - The system recommends `manual_grade_ready`, `manual_void_or_refund_review`, `external_result_required`, `expected_finish_passed_recheck`, or `await_more_evidence`.
-- If a paper position is still not resulted or settled more than 2 hours after `expected_result_check_after`, the review loop escalates it to `external_result_required` and recommends external evidence sources instead of continuing to rely only on stale Danske Spil content-feed state. Current external review sources are `official_competition_results`, `flashscore_results`, `sofascore_results`, `livescore_results`, and `documented_third_party_results`.
+- If a paper position is still not resulted or settled more than 2 hours after the sport-specific expected event finish time, the review loop escalates it to `external_result_required` and recommends external evidence sources instead of continuing to rely only on stale Danske Spil content-feed state. For example, football uses kickoff plus roughly 130 minutes as the expected finish, then waits another 2 hours before external auto-checking. Current external review sources are `official_competition_results`, `flashscore_results`, `sofascore_results`, `livescore_results`, and `documented_third_party_results`.
 - The external auto-settlement POC only handles single-leg winner markets when a stable source URL is configured, the fetched page exposes a parseable final score, and the selected outcome maps deterministically to home, away, or draw. Every automatic settlement writes `paper_bet_auto_settled_external` audit evidence with the source URL, source title, score, selected outcome, and result.
 - It still does not auto-grade won/lost from the Danske Spil content feed because those result semantics have not been proven for each market type.

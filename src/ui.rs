@@ -93,7 +93,7 @@ pub fn render_index(base_path: &str) -> String {
                         h2 { "Settlement review" }
                         table {
                             thead { tr {
-                                th { "Selection" } th { "Expected" } th { "Event state" } th { "Recommendation" }
+                                th { "Selection" } th { "Expected finish" } th { "Event state" } th { "Recommendation" }
                             } }
                             tbody { id: "settlement-review" }
                         }

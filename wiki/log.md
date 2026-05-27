@@ -131,6 +131,7 @@ Append-only timeline for project wiki maintenance. Use headings with the format 
 
 - Settlement review selections are now staged in the UI and committed in a batch, with selected rows highlighted before submission.
 - Added a conservative external auto-settlement pass for paper singles overdue by more than 2 hours when a configured source URL exposes a parseable final score.
+- Tightened the overdue basis so the 2-hour external auto-check grace is relative to sport-specific expected finish, such as kickoff plus roughly 130 minutes for football.
 
 ## [2026-05-25] implementation | Candidate ranking and paper settlement POC
 

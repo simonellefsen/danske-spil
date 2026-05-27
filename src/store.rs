@@ -2983,18 +2983,59 @@ impl Store {
         let rows = client
             .query(
                 r#"
+                WITH base AS (
+                  SELECT
+                    sb.id AS bet_id,
+                    sb.created_at,
+                    cb.event_name,
+                    cb.sport_key,
+                    cb.market_kind,
+                    cb.market_name,
+                    cb.outcome_name,
+                    sb.expected_result_check_after AS stored_expected_result_check_after,
+                    COALESCE(
+                      sb.event_start_time,
+                      se.start_time,
+                      CASE
+                        WHEN cb.feature_snapshot ? 'start_time'
+                         AND cb.feature_snapshot->>'start_time' ~ '^[0-9]{4}-'
+                        THEN (cb.feature_snapshot->>'start_time')::timestamptz
+                        ELSE NULL
+                      END
+                    ) AS event_start_time
+                  FROM simulated_bets sb
+                  JOIN candidate_bets cb ON cb.id = sb.candidate_id
+                  LEFT JOIN sport_events se ON se.id = cb.event_id
+                  WHERE sb.status IN ('awaiting_result', 'unresolved', 'postponed')
+                ),
+                candidates AS (
+                  SELECT
+                    *,
+                    COALESCE(
+                      CASE
+                        WHEN event_start_time IS NULL THEN NULL
+                        WHEN sport_key = 'football' THEN event_start_time + interval '130 minutes'
+                        WHEN sport_key = 'basketball' THEN event_start_time + interval '150 minutes'
+                        WHEN sport_key = 'tennis' THEN event_start_time + interval '240 minutes'
+                        WHEN sport_key IN ('formula1', 'golf', 'cycling') THEN event_start_time + interval '1 day'
+                        ELSE event_start_time + interval '4 hours'
+                      END,
+                      stored_expected_result_check_after
+                    ) AS expected_event_finish_at
+                  FROM base
+                )
                 SELECT
-                  sb.id AS bet_id,
-                  cb.event_name,
-                  cb.market_kind,
-                  cb.market_name,
-                  cb.outcome_name,
-                  sb.expected_result_check_after
-                FROM simulated_bets sb
-                JOIN candidate_bets cb ON cb.id = sb.candidate_id
-                WHERE sb.status IN ('awaiting_result', 'unresolved', 'postponed')
-                  AND sb.expected_result_check_after <= now() - ($1::int * interval '1 minute')
-                ORDER BY sb.expected_result_check_after ASC NULLS LAST, sb.created_at ASC
+                  bet_id,
+                  event_name,
+                  sport_key,
+                  market_kind,
+                  market_name,
+                  outcome_name,
+                  event_start_time,
+                  expected_event_finish_at AS expected_result_check_after
+                FROM candidates
+                WHERE expected_event_finish_at <= now() - ($1::int * interval '1 minute')
+                ORDER BY expected_event_finish_at ASC NULLS LAST, created_at ASC
                 LIMIT $2
                 "#,
                 &[&(min_overdue_minutes.max(0) as i32), &(limit as i64)],
@@ -3017,6 +3058,7 @@ impl Store {
             let market_kind: Option<String> = row.get("market_kind");
             let market_name: Option<String> = row.get("market_name");
             let outcome_name: Option<String> = row.get("outcome_name");
+            let event_start_time: Option<DateTime<Utc>> = row.get("event_start_time");
             let expected_result_check_after: Option<DateTime<Utc>> =
                 row.get("expected_result_check_after");
             let overdue_minutes = settlement_overdue_minutes(expected_result_check_after);
@@ -3066,6 +3108,8 @@ impl Store {
                 "source_key": evidence.source_key,
                 "source_url": evidence.url,
                 "source_title": evidence.title,
+                "event_start_time": event_start_time,
+                "expected_event_finish_at": expected_result_check_after,
                 "score": {"home": evidence.home_score, "away": evidence.away_score}
             }));
             let Some(result) = grade_winner_outcome(&outcome_name, &link, &evidence) else {
@@ -3077,6 +3121,8 @@ impl Store {
                     "source_url": evidence.url,
                     "source_title": evidence.title,
                     "score": {"home": evidence.home_score, "away": evidence.away_score},
+                    "event_start_time": event_start_time,
+                    "expected_event_finish_at": expected_result_check_after,
                     "reason": "unable_to_map_outcome_to_external_result"
                 }));
                 continue;
@@ -3088,6 +3134,9 @@ impl Store {
                 "source_title": evidence.title,
                 "source_home_name": evidence.home_name,
                 "source_away_name": evidence.away_name,
+                "event_start_time": event_start_time,
+                "expected_event_finish_at": expected_result_check_after,
+                "external_check_grace_minutes": min_overdue_minutes,
                 "home_score": evidence.home_score,
                 "away_score": evidence.away_score,
                 "outcome_name": outcome_name,
@@ -3116,6 +3165,9 @@ impl Store {
                         "source_url": evidence.url,
                         "source_title": evidence.title,
                         "score": {"home": evidence.home_score, "away": evidence.away_score},
+                        "event_start_time": event_start_time,
+                        "expected_event_finish_at": expected_result_check_after,
+                        "external_check_grace_minutes": min_overdue_minutes,
                         "overdue_minutes": overdue_minutes,
                         "paper_only": true
                     });
@@ -3138,6 +3190,7 @@ impl Store {
             "enabled": true,
             "paper_only": true,
             "min_overdue_minutes": min_overdue_minutes,
+            "overdue_basis": "expected_event_finish_at",
             "candidate_count": checked.len() + skipped.len(),
             "checked_count": checked.len(),
             "settled_count": settled.len(),
@@ -7104,6 +7157,20 @@ mod tests {
     }
 
     #[test]
+    fn external_check_grace_is_relative_to_expected_finish() {
+        let start = parse_rfc3339_utc("2026-05-25T18:00:00Z");
+
+        assert_eq!(
+            expected_event_finish_after_for_sport("football", start),
+            parse_rfc3339_utc("2026-05-25T20:10:00Z")
+        );
+        assert_eq!(
+            external_result_check_after_for_sport("football", start, 120),
+            parse_rfc3339_utc("2026-05-25T22:10:00Z")
+        );
+    }
+
+    #[test]
     fn grades_winner_market_against_aliases() {
         let link = ExternalResultLink {
             source_key: "flashscore_results".to_string(),
@@ -7455,6 +7522,13 @@ fn expected_result_check_after_for_sport(
     sport_key: &str,
     event_start_time: Option<DateTime<Utc>>,
 ) -> Option<DateTime<Utc>> {
+    expected_event_finish_after_for_sport(sport_key, event_start_time)
+}
+
+fn expected_event_finish_after_for_sport(
+    sport_key: &str,
+    event_start_time: Option<DateTime<Utc>>,
+) -> Option<DateTime<Utc>> {
     let start = event_start_time?;
     let duration = match sport_key {
         "football" => Duration::minutes(130),
@@ -7464,6 +7538,16 @@ fn expected_result_check_after_for_sport(
         _ => Duration::hours(4),
     };
     Some(start + duration)
+}
+
+#[cfg(test)]
+fn external_result_check_after_for_sport(
+    sport_key: &str,
+    event_start_time: Option<DateTime<Utc>>,
+    grace_minutes: i64,
+) -> Option<DateTime<Utc>> {
+    expected_event_finish_after_for_sport(sport_key, event_start_time)
+        .map(|finish| finish + Duration::minutes(grace_minutes.max(0)))
 }
 
 fn parse_rfc3339_utc(value: &str) -> Option<DateTime<Utc>> {
