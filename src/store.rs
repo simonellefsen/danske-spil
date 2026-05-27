@@ -3554,6 +3554,89 @@ impl Store {
         }))
     }
 
+    pub async fn settlement_observations(&self, limit: i64) -> anyhow::Result<Value> {
+        let client = self.connect().await?;
+        let rows = client
+            .query(
+                r#"
+                SELECT
+                  so.id,
+                  so.created_at,
+                  CASE WHEN so.simulated_coupon_id IS NULL THEN 'single' ELSE 'coupon' END AS item_type,
+                  so.simulated_bet_id,
+                  so.simulated_coupon_id,
+                  so.source,
+                  so.observed_result,
+                  so.confidence::float8 AS confidence,
+                  so.payload,
+                  sb.status AS bet_status,
+                  sb.strategy_id AS bet_strategy_id,
+                  cb.sport_key AS bet_sport_key,
+                  cb.event_name AS bet_event_name,
+                  cb.competition AS bet_competition,
+                  cb.market_name AS bet_market_name,
+                  cb.outcome_name AS bet_outcome_name,
+                  sc.status AS coupon_status,
+                  sc.strategy_id AS coupon_strategy_id,
+                  cc.coupon_type,
+                  cc.leg_count
+                FROM settlement_observations so
+                LEFT JOIN simulated_bets sb ON sb.id = so.simulated_bet_id
+                LEFT JOIN candidate_bets cb ON cb.id = sb.candidate_id
+                LEFT JOIN simulated_coupons sc ON sc.id = so.simulated_coupon_id
+                LEFT JOIN candidate_coupons cc ON cc.id = sc.coupon_id
+                ORDER BY so.created_at DESC
+                LIMIT $1
+                "#,
+                &[&limit],
+            )
+            .await?;
+        Ok(json!({
+            "paper_only": true,
+            "items": rows.iter().map(|row| {
+                let created_at: DateTime<Utc> = row.get("created_at");
+                let item_type: String = row.get("item_type");
+                let payload: Value = row.get("payload");
+                let source_policy = payload
+                    .get("manual_settlement")
+                    .and_then(|manual| manual.get("source_policy"))
+                    .cloned()
+                    .unwrap_or(Value::Null);
+                let status: Option<String> = if item_type == "coupon" {
+                    row.get("coupon_status")
+                } else {
+                    row.get("bet_status")
+                };
+                let strategy_id: Option<String> = if item_type == "coupon" {
+                    row.get("coupon_strategy_id")
+                } else {
+                    row.get("bet_strategy_id")
+                };
+                json!({
+                    "id": row.get::<_, String>("id"),
+                    "created_at": created_at,
+                    "item_type": item_type,
+                    "simulated_bet_id": row.get::<_, Option<String>>("simulated_bet_id"),
+                    "simulated_coupon_id": row.get::<_, Option<String>>("simulated_coupon_id"),
+                    "source": row.get::<_, String>("source"),
+                    "observed_result": row.get::<_, String>("observed_result"),
+                    "confidence": row.get::<_, f64>("confidence"),
+                    "status": status,
+                    "strategy_id": strategy_id,
+                    "sport_key": row.get::<_, Option<String>>("bet_sport_key"),
+                    "event_name": row.get::<_, Option<String>>("bet_event_name"),
+                    "competition": row.get::<_, Option<String>>("bet_competition"),
+                    "market_name": row.get::<_, Option<String>>("bet_market_name"),
+                    "outcome_name": row.get::<_, Option<String>>("bet_outcome_name"),
+                    "coupon_type": row.get::<_, Option<String>>("coupon_type"),
+                    "leg_count": row.get::<_, Option<i32>>("leg_count"),
+                    "source_policy": source_policy,
+                    "payload": payload
+                })
+            }).collect::<Vec<_>>()
+        }))
+    }
+
     async fn settlement_source_record(&self, source_key: &str) -> anyhow::Result<Value> {
         if source_key.is_empty() {
             return Err(anyhow!("settlement source is required"));

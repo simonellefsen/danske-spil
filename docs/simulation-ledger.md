@@ -94,6 +94,7 @@ Current POC status:
 - Manual operator settlement can mark rows as won, lost, void, pushed, refunded, cancelled, postponed, or unresolved through the API.
 - Manual settlement writes `settlement_observations` and computed simulated return/profit-loss.
 - The web UI shows configured settlement-capable source classes next to the review queue so manual grading can cite an approved source class.
+- The web UI and `GET /api/settlement/observations` expose recent settlement observations for audit.
 - Settlement review evidence persists the approved source policy order into each paper bet or coupon payload.
 - Manual settlement validates the cited source against `source_registry.can_settle` and stores the selected policy record without deleting prior review evidence.
 - Strategy selection is stored in `strategy_candidate_decisions`; rejected candidates are preserved for review but blocked from paper-ledger placement.

@@ -101,6 +101,15 @@ pub fn render_index(base_path: &str) -> String {
                         }
                     }
                     section {
+                        h2 { "Settlement observations" }
+                        table {
+                            thead { tr {
+                                th { "Observed" } th { "Item" } th { "Result" } th { "Source" } th { "Confidence" }
+                            } }
+                            tbody { id: "settlement-observations" }
+                        }
+                    }
+                    section {
                         h2 { "Strategies played" }
                         table {
                             thead { tr {
@@ -540,6 +549,31 @@ function renderSettlementSources(sources) {
     $("settlement-sources").innerHTML = `<tr><td colspan="5" class="muted">No settlement-capable sources are configured.</td></tr>`;
   }
 }
+function renderSettlementObservations(observations) {
+  const items = observations.items || [];
+  $("settlement-observations").innerHTML = items.map((item) => {
+    const policy = item.source_policy || {};
+    const sourceLabel = policy.source_name || item.source;
+    const itemLabel = item.item_type === "coupon"
+      ? `${item.coupon_type || "coupon"} (${item.leg_count || 0})`
+      : `${item.event_name || item.simulated_bet_id || ""}`;
+    const detail = item.item_type === "coupon"
+      ? item.strategy_id || ""
+      : [item.market_name, item.outcome_name].filter(Boolean).join(" / ");
+    return `
+      <tr>
+        <td>${esc(item.created_at || "-")}</td>
+        <td><span class="pill">${esc(item.item_type)}</span> ${esc(itemLabel)}<br><span class="label">${esc(detail)}</span></td>
+        <td>${esc(item.observed_result)}<br><span class="muted">${esc(item.status || "")}</span></td>
+        <td>${esc(item.source)}<br><span class="muted">${esc(sourceLabel)}</span></td>
+        <td>${pct(item.confidence)}</td>
+      </tr>
+    `;
+  }).join("");
+  if (!items.length) {
+    $("settlement-observations").innerHTML = `<tr><td colspan="5" class="muted">No settlement observations have been recorded yet.</td></tr>`;
+  }
+}
 function renderPlayed(summary) {
   const items = summary.by_strategy || [];
   $("played").innerHTML = items.map((item) => `
@@ -752,6 +786,8 @@ async function load() {
   renderLedger(ledger.items || []);
   const settlementReview = await json(api("/api/settlement/review"));
   renderSettlementReview(settlementReview);
+  const settlementObservations = await json(api("/api/settlement/observations"));
+  renderSettlementObservations(settlementObservations);
   const played = await json(api("/api/strategy/played"));
   renderPlayed(played);
   const performance = await json(api("/api/performance"));
