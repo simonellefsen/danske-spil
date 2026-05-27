@@ -1,35 +1,57 @@
 # ngrok Path Routing
 
-The Docker Desktop cluster uses the ngrok Kubernetes operator and a Google OAuth traffic policy on a shared public hostname:
+The Docker Desktop cluster uses the ngrok Kubernetes operator and a Google OAuth traffic policy on a shared public hostname.
 
 `https://<shared-ngrok-hostname>`
 
-The shared public endpoint routes to multiple Kubernetes services by combining:
+The shared gateway is now owned by the local repository at:
 
-- The public endpoint default upstream for the `danske-spil` app.
-- Optional `forward-internal` actions in the existing public endpoint traffic policy when additional backends are added.
-- Optional `url-rewrite` actions for apps that are not base-path aware.
+`/Users/lindau/codex/shared-ngrok-gateway`
+
+This `danske-spil` repository owns only the app namespace, workloads, services, and base-path-aware UI behavior. It must not patch or apply the shared public ngrok `AgentEndpoint` or `NgrokTrafficPolicy`.
 
 ## Current POC Routes
 
 - `/danske-spil` routes to `gambler-api.danske-spil:8080`.
 
-The Google OAuth action and allow-list stay in the existing ngrok traffic policy and run before the path routing rules.
+The Google OAuth action and allow-list stay in the shared gateway traffic policy and run before route forwarding.
 
-## Backend Endpoints
+## App Responsibilities
 
-Apply optional internal backend endpoints with:
+- Keep `gambler-api` healthy in namespace `danske-spil`.
+- Keep `GAMBLER_BASE_PATH=/danske-spil` configured so the UI and API work under the shared path prefix.
+- Verify the service with a local port-forward before changing shared gateway routes.
+- Request shared gateway route changes in `/Users/lindau/codex/shared-ngrok-gateway`.
+
+## Local Verification
+
+Deploy this app:
 
 ```bash
-rtk kubectl --context docker-desktop apply -f k8s/ngrok/path-backends.yaml
+rtk bash scripts/deploy_local_k8s.sh
 ```
 
-Patch the existing Google OAuth traffic policy with path rules:
+Port-forward the app service:
 
 ```bash
-rtk bash scripts/patch_ngrok_path_routing.sh
+rtk kubectl --context docker-desktop -n danske-spil port-forward svc/gambler-api 18080:8080
 ```
 
-The script sets the public endpoint default upstream to `gambler-api.danske-spil:8080`. The `danske-spil` UI is configured with `GAMBLER_BASE_PATH=/danske-spil`, so it can serve its HTML and API under the path prefix without stripping the prefix at ngrok. This avoids consuming an additional ngrok internal endpoint for `danske-spil`.
+Check the base-path route locally:
 
-`scripts/deploy_local_k8s.sh` also runs the patch automatically when the ngrok endpoint and traffic policy resources are present. Set `PATCH_NGROK_PATH_ROUTING=0` before running the deploy script to skip this step.
+```bash
+rtk curl -sS http://127.0.0.1:18080/danske-spil/healthz
+```
+
+## Shared Gateway Handoff
+
+After this app is healthy, apply or update the shared gateway from its own repository:
+
+```bash
+cd /Users/lindau/codex/shared-ngrok-gateway
+make status
+make render
+make apply
+```
+
+The shared gateway repository is the source of truth for the public hostname, Google SSO configuration, and cross-app path routing.

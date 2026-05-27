@@ -33,7 +33,7 @@ Future Codex and Hermes sessions should read this file first for project-history
 - [runbooks/README](runbooks/README.md) - Runbook landing page.
 - [runbooks/browser-investigation](runbooks/browser-investigation.md) - Non-mutating Oddset/Tips browser investigation checklist.
 - [../docs/poc-deployment](../docs/poc-deployment.md) - Local Docker Desktop Kubernetes deployment.
-- [../docs/ngrok-path-routing](../docs/ngrok-path-routing.md) - Shared ngrok hostname path routing.
+- [../docs/ngrok-path-routing](../docs/ngrok-path-routing.md) - Shared gateway ownership and `/danske-spil` route expectations.
 
 ## Decisions
 

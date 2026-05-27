@@ -55,6 +55,12 @@ Append-only timeline for project wiki maintenance. Use headings with the format 
 - Documented the ngrok path-routing model for exposing the `danske-spil` UI behind Google SSO.
 - Documented the shared ngrok hostname path-routing model.
 
+## [2026-05-27] infrastructure | shared ngrok gateway ownership
+
+- Moved shared ngrok routing ownership out of this app repository and into `/Users/lindau/codex/shared-ngrok-gateway`.
+- Removed deploy-time patching of shared ngrok `AgentEndpoint` and `NgrokTrafficPolicy` resources.
+- Kept this repository responsible for the `danske-spil` namespace, `gambler-api` service, and `/danske-spil` base-path behavior.
+
 ## [2026-05-25] implementation | Candidate ranking and paper settlement POC
 
 - Added `poc_ranker_v1` candidate scoring fields: implied probability, model probability, expected value, confidence, score, risk flags, and feature snapshot.
