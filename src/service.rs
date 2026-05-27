@@ -59,7 +59,8 @@ impl GamblerService {
             "settlement_queue": {
                 "enabled": self.settings.settlement_queue_enabled,
                 "awaiting_grace_minutes": self.settings.settlement_awaiting_grace_minutes,
-                "limit": self.settings.settlement_queue_limit
+                "limit": self.settings.settlement_queue_limit,
+                "lookup_cooldown_minutes": self.settings.settlement_lookup_cooldown_minutes
             },
             "runtime": "rust-dioxus",
             "sports_scope": ["football", "tennis", "basketball", "formula1", "golf", "cycling"]
@@ -289,7 +290,10 @@ impl GamblerService {
         }
         match self
             .store
-            .refresh_settlement_review_queue(self.settings.settlement_queue_limit)
+            .refresh_settlement_review_queue(
+                self.settings.settlement_queue_limit,
+                self.settings.settlement_lookup_cooldown_minutes,
+            )
             .await
         {
             Ok(summary) => {

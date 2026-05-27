@@ -19,6 +19,7 @@ pub struct Settings {
     pub settlement_queue_enabled: bool,
     pub settlement_awaiting_grace_minutes: i64,
     pub settlement_queue_limit: usize,
+    pub settlement_lookup_cooldown_minutes: i64,
     pub database_url: Option<String>,
 }
 
@@ -84,6 +85,12 @@ impl Settings {
                 .ok()
                 .and_then(|v| v.parse().ok())
                 .unwrap_or(50),
+            settlement_lookup_cooldown_minutes: env::var(
+                "GAMBLER_SETTLEMENT_LOOKUP_COOLDOWN_MINUTES",
+            )
+            .ok()
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(15),
             database_url,
         }
     }

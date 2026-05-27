@@ -2383,7 +2383,11 @@ impl Store {
         }))
     }
 
-    pub async fn refresh_settlement_review_queue(&self, limit: usize) -> anyhow::Result<Value> {
+    pub async fn refresh_settlement_review_queue(
+        &self,
+        limit: usize,
+        lookup_cooldown_minutes: i64,
+    ) -> anyhow::Result<Value> {
         if limit == 0 {
             return Ok(json!({
                 "enabled": true,
@@ -2759,7 +2763,12 @@ impl Store {
         }));
 
         let lookup_attempt_count = self
-            .record_settlement_lookup_attempts(&client, &items, &settlement_source_policy)
+            .record_settlement_lookup_attempts(
+                &client,
+                &items,
+                &settlement_source_policy,
+                lookup_cooldown_minutes,
+            )
             .await?;
 
         Ok(json!({
@@ -2768,6 +2777,7 @@ impl Store {
             "single_review_count": rows.len(),
             "coupon_review_count": coupon_rows.len(),
             "lookup_attempt_count": lookup_attempt_count,
+            "lookup_cooldown_minutes": lookup_cooldown_minutes,
             "limit": limit,
             "items": items,
             "settlement_source_policy": settlement_source_policy,
@@ -3719,8 +3729,10 @@ impl Store {
         client: &Client,
         items: &[Value],
         settlement_source_policy: &Value,
+        lookup_cooldown_minutes: i64,
     ) -> anyhow::Result<usize> {
         let mut recorded = 0;
+        let cooldown_minutes = lookup_cooldown_minutes.max(0) as i32;
         for item in items {
             let item_type = item
                 .get("item_type")
@@ -3770,7 +3782,17 @@ impl Store {
                       id, item_type, simulated_bet_id, simulated_coupon_id, source_key,
                       recommendation, outcome_state, payload
                     )
-                    VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
+                    SELECT $1,$2,$3,$4,$5,$6,$7,$8
+                    WHERE NOT EXISTS (
+                      SELECT 1
+                      FROM settlement_lookup_attempts previous
+                      WHERE previous.source_key = $5
+                        AND previous.created_at >= now() - ($9::int * interval '1 minute')
+                        AND (
+                          ($3::text IS NOT NULL AND previous.simulated_bet_id = $3)
+                          OR ($4::text IS NOT NULL AND previous.simulated_coupon_id = $4)
+                        )
+                    )
                     "#,
                     &[
                         &new_id(),
@@ -3781,10 +3803,11 @@ impl Store {
                         &recommendation,
                         &outcome_state,
                         &payload,
+                        &cooldown_minutes,
                     ],
                 )
-                .await?;
-            recorded += 1;
+                .await
+                .map(|count| recorded += count as usize)?;
         }
         Ok(recorded)
     }
