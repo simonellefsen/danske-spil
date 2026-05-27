@@ -134,6 +134,7 @@ Append-only timeline for project wiki maintenance. Use headings with the format 
 - Tightened the overdue basis so the 2-hour external auto-check grace is relative to sport-specific expected finish, such as kickoff plus roughly 130 minutes for football.
 - Tested Sofascore with plain and browser-like User-Agent headers. Direct HTTP still returned 403, while `agent-browser` loaded the page, so Sofascore is flagged as requiring browser automation evidence.
 - Added `external_result_evidence` and API routes for browser-backed result evidence. Submitted evidence can settle matching open single-leg winner markets only when the selected outcome maps deterministically to the supplied final score.
+- Added `scripts/sofascore_evidence_probe.py`, a local `agent-browser` probe that extracts sanitized Sofascore result evidence and submits it to the API with `settle=false` by default.
 
 ## [2026-05-25] implementation | Candidate ranking and paper settlement POC
 
