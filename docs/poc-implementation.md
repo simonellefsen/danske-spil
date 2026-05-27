@@ -100,9 +100,12 @@ The web UI and API expose catalog coverage at:
 
 ```text
 GET /api/catalog/coverage
+GET /api/odds/movement
 ```
 
 This endpoint is meant for feed-quality inspection before strategy work. It shows whether the scanner is actually identifying sports, competitions, market kinds, outcomes, and candidates across the configured sport scope.
+
+`GET /api/odds/movement` compares the latest and previous stored observation for the same event, market, and outcome. It is an operator monitoring view only: it surfaces odds drift, active/displayed state, and observation timestamps without treating movement as a settlement-grade or placement signal.
 
 ## Sports Intelligence Feature Snapshots
 
@@ -247,6 +250,7 @@ Current implementation status:
 - `/api/coupons/simulated` lists simulated coupon placements with leg evidence, stake, combined odds, status, and simulated P/L.
 - `/api/coupons/settle` allows manual paper settlement of a simulated coupon as won, lost, void, pushed, refunded, cancelled, postponed, or unresolved.
 - The Dioxus UI shows provider coupon rules, candidate coupons, and simulated coupons as separate tables, with real submission still disabled.
+- The Dioxus UI shows an odds movement table so repeated scanner runs can be inspected for price drift by event, market, and outcome.
 - The settlement queue now treats simulated coupons as first-class paper-ledger items: a coupon moves to `awaiting_result` only after the latest leg start time has passed, and its legs move with it.
 - The default baseline still disables doubles, triples, and accumulators. When a scan observes enough same-sport, distinct-event selections with provider accumulator metadata for a double, Hermes can propose a reviewed `coupon_modes` experiment that enables paper doubles only.
 - `POST /api/hermes/reflect/yesterday` records an idempotent daily Hermes reflection for the previous Europe/Copenhagen calendar day. It summarizes performance snapshots, paper placements, current open/realized status, settlement observations, and whether results are evaluable.

@@ -25,6 +25,7 @@ pub fn render_index(base_path: &str) -> String {
                     div { class: "metric", div { class: "label", "Next scan due" } div { class: "value", id: "next-scan-due", "-" } }
                     div { class: "metric", div { class: "label", "Catalog events" } div { class: "value", id: "catalog-events", "-" } }
                     div { class: "metric", div { class: "label", "Coupon rules" } div { class: "value", id: "coupon-rules-count", "-" } }
+                    div { class: "metric", div { class: "label", "Odds moves" } div { class: "value", id: "odds-moves-count", "-" } }
                     div { class: "metric", div { class: "label", "Feature snapshots" } div { class: "value", id: "feature-snapshots", "-" } }
                     div { class: "metric", div { class: "label", "Strategy selected" } div { class: "value", id: "strategy-selected", "-" } }
                     div { class: "metric", div { class: "label", "Strategy rejected" } div { class: "value", id: "strategy-rejected", "-" } }
@@ -193,6 +194,15 @@ pub fn render_index(base_path: &str) -> String {
                                 th { "Sport" } th { "Market" } th { "Accumulator" } th { "Scope" } th { "Observed" }
                             } }
                             tbody { id: "coupon-rules" }
+                        }
+                    }
+                    section {
+                        h2 { "Odds movement" }
+                        table {
+                            thead { tr {
+                                th { "Selection" } th { "Previous" } th { "Current" } th { "Move" } th { "Observed" }
+                            } }
+                            tbody { id: "odds-movement" }
                         }
                     }
                     section {
@@ -834,6 +844,36 @@ function renderCouponRules(rules) {
     $("coupon-rules").innerHTML = `<tr><td colspan="5" class="muted">No provider accumulator metadata has been observed yet. Run a scan.</td></tr>`;
   }
 }
+function renderOddsMovement(movement) {
+  const items = movement.items || [];
+  const summary = movement.summary || {};
+  $("odds-moves-count").textContent = String(summary.returned_count || items.length);
+  $("odds-movement").innerHTML = items.map((item) => {
+    const moveClass = item.direction === "up" ? "ok" : item.direction === "down" ? "danger" : "muted";
+    const delta = item.decimal_odds_delta === null || item.decimal_odds_delta === undefined
+      ? "-"
+      : `${Number(item.decimal_odds_delta) >= 0 ? "+" : ""}${Number(item.decimal_odds_delta).toFixed(2)}`;
+    const pctMove = item.decimal_odds_delta_pct === null || item.decimal_odds_delta_pct === undefined
+      ? "-"
+      : `${Number(item.decimal_odds_delta_pct) >= 0 ? "+" : ""}${(Number(item.decimal_odds_delta_pct) * 100).toFixed(1)}%`;
+    const status = [
+      item.current_active === false ? "inactive" : null,
+      item.current_displayed === false ? "hidden" : null
+    ].filter(Boolean).join(", ");
+    return `
+      <tr>
+        <td><span class="pill">${esc(item.sport_key)}</span> ${esc(item.event_name || item.event_id || "")}<br><span class="label">${esc(item.market_name || "")} / ${esc(item.outcome_name || "")}</span></td>
+        <td>${num(item.previous_decimal_odds)}<br><span class="muted">${esc(item.previous_observed_at || "")}</span></td>
+        <td>${num(item.current_decimal_odds)}<br><span class="muted">${esc(status || "active/displayed")}</span></td>
+        <td><span class="${moveClass}">${esc(delta)}</span><br><span class="muted">${esc(pctMove)}</span></td>
+        <td>${esc(item.current_observed_at || "-")}<br><span class="label">${esc(item.snapshot_id || "")}</span></td>
+      </tr>
+    `;
+  }).join("");
+  if (!items.length) {
+    $("odds-movement").innerHTML = `<tr><td colspan="5" class="muted">No repeated outcome observations yet. Run at least two scans with overlapping events.</td></tr>`;
+  }
+}
 function renderIntelligence(coverage) {
   const features = coverage.features || [];
   const totalFeatures = features.reduce((sum, item) => sum + Number(item.feature_count || 0), 0);
@@ -996,6 +1036,8 @@ async function load() {
   renderCoverage(coverage);
   const couponRules = await json(api("/api/coupon-rules"));
   renderCouponRules(couponRules);
+  const oddsMovement = await json(api("/api/odds/movement"));
+  renderOddsMovement(oddsMovement);
   const intelligence = await json(api("/api/intelligence/coverage"));
   renderIntelligence(intelligence);
   const auditEvents = await json(api("/api/audit/events"));

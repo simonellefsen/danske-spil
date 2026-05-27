@@ -92,6 +92,11 @@ Append-only timeline for project wiki maintenance. Use headings with the format 
 - Added `coupon_rule_observations` for provider accumulator metadata observed during scans.
 - Added `GET /api/coupon-rules` and a web UI table for accumulator bounds, sport scope, market context, and snapshot evidence.
 
+## [2026-05-27] implementation | odds movement visibility
+
+- Added `GET /api/odds/movement` to compare latest and previous observations for the same event, market, and outcome.
+- Added a web UI odds movement table with previous odds, current odds, absolute move, percentage move, and latest active/displayed state.
+
 ## [2026-05-25] implementation | Candidate ranking and paper settlement POC
 
 - Added `poc_ranker_v1` candidate scoring fields: implied probability, model probability, expected value, confidence, score, risk flags, and feature snapshot.

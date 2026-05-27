@@ -3892,6 +3892,145 @@ impl Store {
         }))
     }
 
+    pub async fn odds_movement(&self, limit: i64) -> anyhow::Result<Value> {
+        let client = self.connect().await?;
+        let rows = client
+            .query(
+                r#"
+                WITH observed AS (
+                  SELECT
+                    os.id AS snapshot_id,
+                    os.observed_at AS current_observed_at,
+                    se.sport_key,
+                    se.event_name,
+                    se.competition_name,
+                    se.start_time,
+                    mo.event_id,
+                    mo.market_id,
+                    mo.market_name,
+                    mo.market_kind,
+                    mo.group_code,
+                    oo.outcome_id,
+                    oo.outcome_name,
+                    oo.decimal_odds::float8 AS current_decimal_odds,
+                    oo.active AS current_active,
+                    oo.displayed AS current_displayed,
+                    lag(oo.decimal_odds::float8) OVER (
+                      PARTITION BY mo.event_id, mo.market_id, oo.outcome_id
+                      ORDER BY os.observed_at ASC
+                    ) AS previous_decimal_odds,
+                    lag(os.observed_at) OVER (
+                      PARTITION BY mo.event_id, mo.market_id, oo.outcome_id
+                      ORDER BY os.observed_at ASC
+                    ) AS previous_observed_at,
+                    row_number() OVER (
+                      PARTITION BY mo.event_id, mo.market_id, oo.outcome_id
+                      ORDER BY os.observed_at DESC
+                    ) AS latest_rank
+                  FROM outcome_observations oo
+                  JOIN market_observations mo ON mo.id = oo.market_observation_id
+                  JOIN odds_snapshots os ON os.id = oo.snapshot_id
+                  JOIN sport_events se ON se.id = mo.event_id
+                  WHERE oo.decimal_odds IS NOT NULL
+                    AND mo.market_id IS NOT NULL
+                    AND oo.outcome_id IS NOT NULL
+                )
+                SELECT
+                  snapshot_id,
+                  current_observed_at,
+                  previous_observed_at,
+                  sport_key,
+                  event_id,
+                  event_name,
+                  competition_name,
+                  start_time,
+                  market_id,
+                  market_name,
+                  market_kind,
+                  group_code,
+                  outcome_id,
+                  outcome_name,
+                  current_decimal_odds,
+                  previous_decimal_odds,
+                  current_decimal_odds - previous_decimal_odds AS decimal_odds_delta,
+                  CASE
+                    WHEN previous_decimal_odds = 0 THEN NULL
+                    ELSE (current_decimal_odds - previous_decimal_odds) / previous_decimal_odds
+                  END AS decimal_odds_delta_pct,
+                  current_active,
+                  current_displayed
+                FROM observed
+                WHERE latest_rank = 1
+                  AND previous_decimal_odds IS NOT NULL
+                ORDER BY abs(current_decimal_odds - previous_decimal_odds) DESC,
+                         current_observed_at DESC
+                LIMIT $1
+                "#,
+                &[&limit],
+            )
+            .await?;
+        let items = rows
+            .iter()
+            .map(|row| {
+                let current_observed_at: DateTime<Utc> = row.get("current_observed_at");
+                let previous_observed_at: DateTime<Utc> = row.get("previous_observed_at");
+                let current_decimal_odds: f64 = row.get("current_decimal_odds");
+                let previous_decimal_odds: f64 = row.get("previous_decimal_odds");
+                let decimal_odds_delta: f64 = row.get("decimal_odds_delta");
+                let direction = if decimal_odds_delta > 0.0 {
+                    "up"
+                } else if decimal_odds_delta < 0.0 {
+                    "down"
+                } else {
+                    "flat"
+                };
+                json!({
+                    "snapshot_id": row.get::<_, String>("snapshot_id"),
+                    "current_observed_at": current_observed_at,
+                    "previous_observed_at": previous_observed_at,
+                    "sport_key": row.get::<_, String>("sport_key"),
+                    "event_id": row.get::<_, String>("event_id"),
+                    "event_name": row.get::<_, Option<String>>("event_name"),
+                    "competition_name": row.get::<_, Option<String>>("competition_name"),
+                    "start_time": row.get::<_, Option<DateTime<Utc>>>("start_time"),
+                    "market_id": row.get::<_, Option<String>>("market_id"),
+                    "market_name": row.get::<_, Option<String>>("market_name"),
+                    "market_kind": row.get::<_, Option<String>>("market_kind"),
+                    "group_code": row.get::<_, Option<String>>("group_code"),
+                    "outcome_id": row.get::<_, Option<String>>("outcome_id"),
+                    "outcome_name": row.get::<_, Option<String>>("outcome_name"),
+                    "current_decimal_odds": current_decimal_odds,
+                    "previous_decimal_odds": previous_decimal_odds,
+                    "decimal_odds_delta": decimal_odds_delta,
+                    "decimal_odds_delta_pct": row.get::<_, Option<f64>>("decimal_odds_delta_pct"),
+                    "direction": direction,
+                    "current_active": row.get::<_, Option<bool>>("current_active"),
+                    "current_displayed": row.get::<_, Option<bool>>("current_displayed"),
+                    "paper_only": true
+                })
+            })
+            .collect::<Vec<_>>();
+        let up_count = items
+            .iter()
+            .filter(|item| item.get("direction").and_then(Value::as_str) == Some("up"))
+            .count();
+        let down_count = items
+            .iter()
+            .filter(|item| item.get("direction").and_then(Value::as_str) == Some("down"))
+            .count();
+        Ok(json!({
+            "items": items,
+            "summary": {
+                "returned_count": rows.len(),
+                "up_count": up_count,
+                "down_count": down_count,
+                "limit": limit,
+                "source": "outcome_observations_latest_vs_previous",
+                "paper_only": true
+            }
+        }))
+    }
+
     pub async fn intelligence_coverage(&self) -> anyhow::Result<Value> {
         let client = self.connect().await?;
         let sources = client

@@ -180,6 +180,10 @@ async fn get_handler(State(state): State<Arc<AppState>>, uri: OriginalUri) -> Re
             Ok(rules) => Json(rules).into_response(),
             Err(error) => error_response(StatusCode::INTERNAL_SERVER_ERROR, error),
         },
+        "/api/odds/movement" => match state.service.store().odds_movement(50).await {
+            Ok(movement) => Json(movement).into_response(),
+            Err(error) => error_response(StatusCode::INTERNAL_SERVER_ERROR, error),
+        },
         "/api/intelligence/coverage" => {
             match state.service.store().intelligence_coverage().await {
                 Ok(coverage) => Json(coverage).into_response(),

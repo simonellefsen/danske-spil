@@ -18,6 +18,7 @@ The UI is not a marketing site. It is an operational dashboard for repeated revi
 - Sports intelligence ingestion health by sport and source.
 - Recent ingestion runs with source, status, covered sports, event count, and snapshot id.
 - Provider coupon-rule observations, including observed accumulator bounds and restriction scope.
+- Latest odds movements between repeated observations of the same event, market, and outcome.
 - Candidate count by product, market, confidence, and status.
 - Open simulated placements, unresolved settlements, and settled paper results.
 - Recent paper plays, including both singles and multi-leg coupons with strategy, stake, observed odds, status, score, and confidence.
@@ -34,6 +35,7 @@ For each candidate bet or coupon, show:
 - Implied probability and estimated probability.
 - Estimated edge and confidence.
 - Evidence inputs, such as market movement, sport stats, team/player news, weather, seasonality, model features, and historical calibration.
+- Odds movement should show previous odds, current odds, absolute move, percentage move, and whether the latest outcome is still active/displayed.
 - Missing or stale data warnings for stats, weather, news, rankings, and availability signals.
 - Rejected alternatives and rejection reasons.
 - Risk checks: duplicate exposure, stake limits, loss-cooldown, odds staleness, responsible-gambling flags, and terms/safety gate.
@@ -97,6 +99,8 @@ Candidate tables:
 - `feature_snapshots`
 - `source_registry`
 - `odds_snapshots`
+- `market_observations`
+- `outcome_observations`
 - `tips_coupons`
 - `candidate_bets`
 - `candidate_coupons`

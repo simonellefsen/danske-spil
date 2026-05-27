@@ -91,6 +91,7 @@ Current POC status:
 - `feature_snapshots` stores one `market_context_v1` row per observed event per snapshot.
 - The first feature set is intentionally limited to market-feed context: competition, start time, participant count, market count, outcome count, market kinds, external providers, live/result flags, and missing-signal markers.
 - `coupon_rule_observations` stores observed provider accumulator bounds for markets that expose `minimum_accumulator` or `maximum_accumulator`.
+- `GET /api/odds/movement` derives latest-vs-previous odds drift from `outcome_observations` for decision-time monitoring.
 - Weather, news, rankings, form, and injury/availability are explicitly marked missing until separate sources are configured and reviewed.
 - Coverage is exposed through `GET /api/intelligence/coverage` and shown in the web UI.
 
