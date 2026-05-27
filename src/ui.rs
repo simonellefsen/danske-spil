@@ -24,6 +24,7 @@ pub fn render_index(base_path: &str) -> String {
                     div { class: "metric", div { class: "label", "Scan cadence" } div { class: "value", id: "scan-cadence", "-" } }
                     div { class: "metric", div { class: "label", "Next scan due" } div { class: "value", id: "next-scan-due", "-" } }
                     div { class: "metric", div { class: "label", "Catalog events" } div { class: "value", id: "catalog-events", "-" } }
+                    div { class: "metric", div { class: "label", "Coupon rules" } div { class: "value", id: "coupon-rules-count", "-" } }
                     div { class: "metric", div { class: "label", "Feature snapshots" } div { class: "value", id: "feature-snapshots", "-" } }
                     div { class: "metric", div { class: "label", "Strategy selected" } div { class: "value", id: "strategy-selected", "-" } }
                     div { class: "metric", div { class: "label", "Strategy rejected" } div { class: "value", id: "strategy-rejected", "-" } }
@@ -183,6 +184,15 @@ pub fn render_index(base_path: &str) -> String {
                                 th { "Sport" } th { "Events" } th { "Competitions" } th { "Markets" } th { "Outcomes" } th { "Candidates" }
                             } }
                             tbody { id: "coverage" }
+                        }
+                    }
+                    section {
+                        h2 { "Provider coupon rules" }
+                        table {
+                            thead { tr {
+                                th { "Sport" } th { "Market" } th { "Accumulator" } th { "Scope" } th { "Observed" }
+                            } }
+                            tbody { id: "coupon-rules" }
                         }
                     }
                     section {
@@ -799,6 +809,31 @@ function renderCoverage(coverage) {
     $("coverage").innerHTML = `<tr><td colspan="6" class="muted">No market catalog rows yet. Run a scan.</td></tr>`;
   }
 }
+function renderCouponRules(rules) {
+  const items = rules.items || [];
+  const summary = rules.summary || [];
+  const totalRules = summary.reduce((sum, item) => sum + Number(item.rule_count || 0), 0);
+  $("coupon-rules-count").textContent = String(totalRules);
+  $("coupon-rules").innerHTML = items.map((item) => {
+    const bounds = [
+      item.minimum_accumulator !== null && item.minimum_accumulator !== undefined ? `min ${item.minimum_accumulator}` : null,
+      item.maximum_accumulator !== null && item.maximum_accumulator !== undefined ? `max ${item.maximum_accumulator}` : null
+    ].filter(Boolean).join(" / ");
+    const label = [item.market_name, item.group_code].filter(Boolean).join(" / ");
+    return `
+      <tr>
+        <td><span class="pill">${esc(item.sport_key)}</span><br><span class="label">${esc(item.competition_name || "")}</span></td>
+        <td>${esc(label || item.market_id || "-")}<br><span class="muted">${esc(item.market_kind || "")}</span></td>
+        <td>${esc(bounds || "not bounded")}</td>
+        <td>${esc(item.restriction_scope || "-")}<br><span class="muted">unknown cross-market exclusions preserved in payload</span></td>
+        <td>${esc(item.observed_at || "-")}<br><span class="label">${esc(item.snapshot_id || "")}</span></td>
+      </tr>
+    `;
+  }).join("");
+  if (!items.length) {
+    $("coupon-rules").innerHTML = `<tr><td colspan="5" class="muted">No provider accumulator metadata has been observed yet. Run a scan.</td></tr>`;
+  }
+}
 function renderIntelligence(coverage) {
   const features = coverage.features || [];
   const totalFeatures = features.reduce((sum, item) => sum + Number(item.feature_count || 0), 0);
@@ -959,6 +994,8 @@ async function load() {
   renderPerformanceHistory(performanceHistory);
   const coverage = await json(api("/api/catalog/coverage"));
   renderCoverage(coverage);
+  const couponRules = await json(api("/api/coupon-rules"));
+  renderCouponRules(couponRules);
   const intelligence = await json(api("/api/intelligence/coverage"));
   renderIntelligence(intelligence);
   const auditEvents = await json(api("/api/audit/events"));

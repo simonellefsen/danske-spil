@@ -78,6 +78,7 @@ Core tables:
 - `feature_snapshots`
 - `source_registry`
 - `ingestion_runs`
+- `coupon_rule_observations`
 
 Feature snapshots should be immutable and tied to the decision timestamp. If data changes later, create a new snapshot rather than rewriting the old one.
 
@@ -89,6 +90,7 @@ Current POC status:
 - The web UI surfaces recent ingestion runs so scanner completion history can be reviewed without querying Postgres directly.
 - `feature_snapshots` stores one `market_context_v1` row per observed event per snapshot.
 - The first feature set is intentionally limited to market-feed context: competition, start time, participant count, market count, outcome count, market kinds, external providers, live/result flags, and missing-signal markers.
+- `coupon_rule_observations` stores observed provider accumulator bounds for markets that expose `minimum_accumulator` or `maximum_accumulator`.
 - Weather, news, rankings, form, and injury/availability are explicitly marked missing until separate sources are configured and reviewed.
 - Coverage is exposed through `GET /api/intelligence/coverage` and shown in the web UI.
 

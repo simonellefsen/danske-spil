@@ -220,7 +220,7 @@ The ranker intentionally uses weak, transparent heuristics until sports intellig
 
 The strategy model should support single-leg candidates and provider-supported multi-leg coupon candidates. The initial baseline keeps only singles enabled, but the config shape reserves explicit switches for doubles, triples, and larger accumulators.
 
-Before a strategy can create a multi-leg paper coupon, it must prove from the observed market metadata that the provider allows the legs to be combined. The normalized Danske Spil market payload already preserves `minimum_accumulator` and `maximum_accumulator`; the next implementation should also persist any sport, category, product, and market-combination restrictions detected during browser or feed investigation.
+Before a strategy can create a multi-leg paper coupon, it must prove from the observed market metadata that the provider allows the legs to be combined. The normalized Danske Spil market payload preserves `minimum_accumulator` and `maximum_accumulator`, and scanner runs persist those bounds in `coupon_rule_observations` for operator review. Unknown cross-sport, cross-category, and market-exclusion restrictions are explicitly retained as unknowns until browser or feed investigation proves them.
 
 Multi-leg candidates should store:
 
@@ -236,15 +236,17 @@ The web UI should label these as simulated coupons and keep real submission disa
 Current implementation status:
 
 - `candidate_coupons` and `candidate_coupon_legs` are initialized in Postgres.
+- `coupon_rule_observations` stores observed provider accumulator metadata by sport, event, market, and snapshot.
 - `simulated_coupons` and `simulated_coupon_legs` are initialized in Postgres for paper-only coupon placements.
 - Scans attempt coupon-candidate generation after single-leg strategy decisions are stored.
+- `/api/coupon-rules` lists recent provider accumulator-rule observations and per-sport summary counts.
 - `/api/coupons` lists stored multi-leg coupon proposals.
 - `/api/coupons/generate` re-runs generation for the latest or supplied snapshot.
 - `/api/coupons/simulate` writes a candidate coupon into the paper coupon ledger without opening or submitting a provider coupon.
 - `/api/coupons/simulate/selected` walks ranked candidate coupons for the latest or supplied snapshot and paper-places eligible coupons until the per-scan or exposure cap is reached.
 - `/api/coupons/simulated` lists simulated coupon placements with leg evidence, stake, combined odds, status, and simulated P/L.
 - `/api/coupons/settle` allows manual paper settlement of a simulated coupon as won, lost, void, pushed, refunded, cancelled, postponed, or unresolved.
-- The Dioxus UI shows candidate coupons and simulated coupons as separate tables, with real submission still disabled.
+- The Dioxus UI shows provider coupon rules, candidate coupons, and simulated coupons as separate tables, with real submission still disabled.
 - The settlement queue now treats simulated coupons as first-class paper-ledger items: a coupon moves to `awaiting_result` only after the latest leg start time has passed, and its legs move with it.
 - The default baseline still disables doubles, triples, and accumulators. When a scan observes enough same-sport, distinct-event selections with provider accumulator metadata for a double, Hermes can propose a reviewed `coupon_modes` experiment that enables paper doubles only.
 - `POST /api/hermes/reflect/yesterday` records an idempotent daily Hermes reflection for the previous Europe/Copenhagen calendar day. It summarizes performance snapshots, paper placements, current open/realized status, settlement observations, and whether results are evaluable.

@@ -176,6 +176,10 @@ async fn get_handler(State(state): State<Arc<AppState>>, uri: OriginalUri) -> Re
             Ok(coverage) => Json(coverage).into_response(),
             Err(error) => error_response(StatusCode::INTERNAL_SERVER_ERROR, error),
         },
+        "/api/coupon-rules" => match state.service.store().coupon_rule_observations(50).await {
+            Ok(rules) => Json(rules).into_response(),
+            Err(error) => error_response(StatusCode::INTERNAL_SERVER_ERROR, error),
+        },
         "/api/intelligence/coverage" => {
             match state.service.store().intelligence_coverage().await {
                 Ok(coverage) => Json(coverage).into_response(),

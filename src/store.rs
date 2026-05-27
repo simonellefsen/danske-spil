@@ -84,6 +84,25 @@ CREATE TABLE IF NOT EXISTS market_observations (
   UNIQUE (snapshot_id, event_id, market_id)
 );
 
+CREATE TABLE IF NOT EXISTS coupon_rule_observations (
+  id text PRIMARY KEY,
+  snapshot_id text NOT NULL REFERENCES odds_snapshots(id) ON DELETE CASCADE,
+  sport_key text NOT NULL REFERENCES sports(sport_key) ON DELETE CASCADE,
+  event_id text NOT NULL REFERENCES sport_events(id) ON DELETE CASCADE,
+  market_observation_id text NOT NULL REFERENCES market_observations(id) ON DELETE CASCADE,
+  market_id text,
+  market_name text,
+  market_kind text,
+  group_code text,
+  competition_name text,
+  minimum_accumulator integer,
+  maximum_accumulator integer,
+  restriction_scope text NOT NULL,
+  observed_at timestamptz NOT NULL DEFAULT now(),
+  payload jsonb NOT NULL DEFAULT '{}'::jsonb,
+  UNIQUE (snapshot_id, event_id, market_id)
+);
+
 CREATE TABLE IF NOT EXISTS outcome_observations (
   id text PRIMARY KEY,
   snapshot_id text NOT NULL REFERENCES odds_snapshots(id) ON DELETE CASCADE,
@@ -547,6 +566,8 @@ CREATE INDEX IF NOT EXISTS idx_sport_events_sport_key ON sport_events(sport_key)
 CREATE INDEX IF NOT EXISTS idx_sport_events_start_time ON sport_events(start_time);
 CREATE INDEX IF NOT EXISTS idx_market_observations_snapshot ON market_observations(snapshot_id);
 CREATE INDEX IF NOT EXISTS idx_market_observations_kind ON market_observations(market_kind);
+CREATE INDEX IF NOT EXISTS idx_coupon_rule_observations_snapshot ON coupon_rule_observations(snapshot_id);
+CREATE INDEX IF NOT EXISTS idx_coupon_rule_observations_sport ON coupon_rule_observations(sport_key);
 CREATE INDEX IF NOT EXISTS idx_outcome_observations_snapshot ON outcome_observations(snapshot_id);
 CREATE INDEX IF NOT EXISTS idx_feature_snapshots_snapshot ON feature_snapshots(snapshot_id);
 CREATE INDEX IF NOT EXISTS idx_feature_snapshots_sport_key ON feature_snapshots(sport_key);
@@ -3802,6 +3823,75 @@ impl Store {
         }))
     }
 
+    pub async fn coupon_rule_observations(&self, limit: i64) -> anyhow::Result<Value> {
+        let client = self.connect().await?;
+        let summary = client
+            .query(
+                r#"
+                SELECT
+                  sport_key,
+                  count(*)::int AS rule_count,
+                  count(DISTINCT event_id)::int AS event_count,
+                  min(minimum_accumulator)::int AS min_accumulator,
+                  max(maximum_accumulator)::int AS max_accumulator,
+                  max(observed_at) AS last_observed_at
+                FROM coupon_rule_observations
+                GROUP BY sport_key
+                ORDER BY sport_key
+                "#,
+                &[],
+            )
+            .await?;
+        let rows = client
+            .query(
+                r#"
+                SELECT
+                  id, snapshot_id, sport_key, event_id, market_observation_id,
+                  market_id, market_name, market_kind, group_code, competition_name,
+                  minimum_accumulator, maximum_accumulator, restriction_scope,
+                  observed_at, payload
+                FROM coupon_rule_observations
+                ORDER BY observed_at DESC
+                LIMIT $1
+                "#,
+                &[&limit],
+            )
+            .await?;
+        Ok(json!({
+            "summary": summary.iter().map(|row| {
+                let last_observed_at: DateTime<Utc> = row.get("last_observed_at");
+                json!({
+                    "sport_key": row.get::<_, String>("sport_key"),
+                    "rule_count": row.get::<_, i32>("rule_count"),
+                    "event_count": row.get::<_, i32>("event_count"),
+                    "min_accumulator": row.get::<_, Option<i32>>("min_accumulator"),
+                    "max_accumulator": row.get::<_, Option<i32>>("max_accumulator"),
+                    "last_observed_at": last_observed_at
+                })
+            }).collect::<Vec<_>>(),
+            "items": rows.iter().map(|row| {
+                let observed_at: DateTime<Utc> = row.get("observed_at");
+                json!({
+                    "id": row.get::<_, String>("id"),
+                    "snapshot_id": row.get::<_, String>("snapshot_id"),
+                    "sport_key": row.get::<_, String>("sport_key"),
+                    "event_id": row.get::<_, String>("event_id"),
+                    "market_observation_id": row.get::<_, String>("market_observation_id"),
+                    "market_id": row.get::<_, Option<String>>("market_id"),
+                    "market_name": row.get::<_, Option<String>>("market_name"),
+                    "market_kind": row.get::<_, Option<String>>("market_kind"),
+                    "group_code": row.get::<_, Option<String>>("group_code"),
+                    "competition_name": row.get::<_, Option<String>>("competition_name"),
+                    "minimum_accumulator": row.get::<_, Option<i32>>("minimum_accumulator"),
+                    "maximum_accumulator": row.get::<_, Option<i32>>("maximum_accumulator"),
+                    "restriction_scope": row.get::<_, String>("restriction_scope"),
+                    "observed_at": observed_at,
+                    "payload": row.get::<_, Value>("payload")
+                })
+            }).collect::<Vec<_>>()
+        }))
+    }
+
     pub async fn intelligence_coverage(&self) -> anyhow::Result<Value> {
         let client = self.connect().await?;
         let sources = client
@@ -5551,6 +5641,66 @@ async fn save_market_catalog(
                     )
                     .await?;
                 let stored_market_id: String = row.get("id");
+                let minimum_accumulator = json_i32(market.get("minimum_accumulator"));
+                let maximum_accumulator = json_i32(market.get("maximum_accumulator"));
+                if minimum_accumulator.is_some() || maximum_accumulator.is_some() {
+                    transaction
+                        .execute(
+                            r#"
+                            INSERT INTO coupon_rule_observations (
+                              id, snapshot_id, sport_key, event_id, market_observation_id,
+                              market_id, market_name, market_kind, group_code, competition_name,
+                              minimum_accumulator, maximum_accumulator, restriction_scope, payload
+                            )
+                            VALUES (
+                              $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14
+                            )
+                            ON CONFLICT (snapshot_id, event_id, market_id) DO UPDATE
+                            SET market_observation_id = EXCLUDED.market_observation_id,
+                                market_name = EXCLUDED.market_name,
+                                market_kind = EXCLUDED.market_kind,
+                                group_code = EXCLUDED.group_code,
+                                competition_name = EXCLUDED.competition_name,
+                                minimum_accumulator = EXCLUDED.minimum_accumulator,
+                                maximum_accumulator = EXCLUDED.maximum_accumulator,
+                                restriction_scope = EXCLUDED.restriction_scope,
+                                observed_at = now(),
+                                payload = EXCLUDED.payload
+                            "#,
+                            &[
+                                &new_id(),
+                                &snapshot_id,
+                                &sport_key,
+                                &event_id,
+                                &stored_market_id,
+                                &text(market, "id"),
+                                &text(market, "name"),
+                                &text(market, "kind"),
+                                &text(market, "group_code"),
+                                &competition,
+                                &minimum_accumulator,
+                                &maximum_accumulator,
+                                &"same_sport_market_metadata",
+                                &json!({
+                                    "source": "normalized_danskespil_market_metadata",
+                                    "paper_only": true,
+                                    "sport_key": sport_key,
+                                    "event_id": event_id,
+                                    "market": market,
+                                    "known_limits": {
+                                        "minimum_accumulator": minimum_accumulator,
+                                        "maximum_accumulator": maximum_accumulator
+                                    },
+                                    "unknown_restrictions": [
+                                        "cross_sport_combination_rules",
+                                        "cross_category_combination_rules",
+                                        "market_exclusion_pairs"
+                                    ]
+                                }),
+                            ],
+                        )
+                        .await?;
+                }
 
                 for outcome in market
                     .get("outcomes")
@@ -5817,6 +5967,15 @@ fn json_usize(value: Option<&Value>) -> Option<usize> {
             .as_u64()
             .map(|value| value as usize)
             .or_else(|| value.as_str().and_then(|text| text.parse::<usize>().ok()))
+    })
+}
+
+fn json_i32(value: Option<&Value>) -> Option<i32> {
+    value.and_then(|value| {
+        value
+            .as_i64()
+            .and_then(|value| i32::try_from(value).ok())
+            .or_else(|| value.as_str().and_then(|text| text.parse::<i32>().ok()))
     })
 }
 

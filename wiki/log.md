@@ -87,6 +87,11 @@ Append-only timeline for project wiki maintenance. Use headings with the format 
 - Added `GET /api/audit/events` for recent immutable app audit events.
 - Added a web UI audit events table for scan, paper-placement, settlement, reflection, and strategy-review actions.
 
+## [2026-05-27] implementation | provider coupon rule visibility
+
+- Added `coupon_rule_observations` for provider accumulator metadata observed during scans.
+- Added `GET /api/coupon-rules` and a web UI table for accumulator bounds, sport scope, market context, and snapshot evidence.
+
 ## [2026-05-25] implementation | Candidate ranking and paper settlement POC
 
 - Added `poc_ranker_v1` candidate scoring fields: implied probability, model probability, expected value, confidence, score, risk flags, and feature snapshot.
