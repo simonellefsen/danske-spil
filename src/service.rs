@@ -199,6 +199,22 @@ impl GamblerService {
                 })
             }
         };
+        let daily_reflection = match self.store.record_daily_reflection(None).await {
+            Ok(reflection) => {
+                self.store
+                    .record_audit("hermes_daily_reflection_auto_recorded", reflection.clone())
+                    .await
+                    .ok();
+                reflection
+            }
+            Err(error) => {
+                tracing::warn!(%error, snapshot_id = %snapshot_id, "daily reflection recording failed");
+                json!({
+                    "recorded": false,
+                    "error": error.to_string()
+                })
+            }
+        };
         self.store
             .record_audit(
                 "scan_completed",
@@ -212,6 +228,7 @@ impl GamblerService {
                     "settlement_queue_summary": settlement_queue_summary,
                     "settlement_review_summary": settlement_review_summary,
                     "performance_snapshot_id": performance_snapshot.get("id").cloned().unwrap_or(Value::Null),
+                    "daily_reflection_id": daily_reflection.get("id").cloned().unwrap_or(Value::Null),
                     "include_live": include_live,
                     "paper_only": true,
                     "runtime": "rust-dioxus"
@@ -231,6 +248,7 @@ impl GamblerService {
             "strategy_proposal": strategy_proposal,
             "strategy_proposal_error": strategy_proposal_error,
             "performance_snapshot": performance_snapshot,
+            "daily_reflection": daily_reflection,
             "snapshot": snapshot
         }))
     }

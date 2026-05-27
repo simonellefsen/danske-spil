@@ -40,6 +40,7 @@ Current POC status:
 
 - `POST /api/hermes/reflect/yesterday` writes an idempotent daily reflection into `hermes_reflections` for the previous Europe/Copenhagen calendar day.
 - The daily reflection is paper-only and summarizes scan/performance snapshots, simulated placements, settlement observations, and whether results are ready to evaluate.
+- Successful scanner runs refresh the previous-day reflection automatically, using the current ledger status of paper positions created that day so later settlements, voids, refunds, cancellations, and postponed items remain visible in the same daily record.
 - If paper placements are still awaiting result review, the reflection explicitly blocks strategy promotion based on unresolved exposure.
 
 ## Initial Goal Contract

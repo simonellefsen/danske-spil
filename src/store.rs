@@ -4061,15 +4061,25 @@ impl Store {
         let bet_turnover: f64 = bet_row.get("turnover");
         let coupon_count: i32 = coupon_row.get("placed_count");
         let settlement_count: i32 = settlement_row.get("observation_count");
+        let bet_statuses: Value = bet_row.get("by_status");
+        let coupon_statuses: Value = coupon_row.get("by_status");
+        let bet_realized_count = json_status_closed_count(&bet_statuses);
+        let coupon_realized_count = json_status_closed_count(&coupon_statuses);
+        let bet_open_count = json_status_open_count(&bet_statuses);
+        let coupon_open_count = json_status_open_count(&coupon_statuses);
+        let realized_count = bet_realized_count + coupon_realized_count;
+        let open_count = bet_open_count + coupon_open_count;
+        let total_profit_loss =
+            bet_row.get::<_, f64>("profit_loss") + coupon_row.get::<_, f64>("profit_loss");
         let first_snapshot_at: Option<DateTime<Utc>> = performance_row.get("first_snapshot_at");
         let last_snapshot_at: Option<DateTime<Utc>> = performance_row.get("last_snapshot_at");
         let title = format!("Daily paper reflection {local_date}");
         let summary = if bet_count + coupon_count == 0 {
             format!("{local_date}: no paper placements were created. {snapshot_count} performance snapshots were recorded; no settlement observations were available.")
-        } else if settlement_count == 0 {
-            format!("{local_date}: recorded {snapshot_count} performance snapshots and {bet_count} paper singles / {coupon_count} paper coupons. Paper single turnover was {bet_turnover:.2}. No settlement observations were recorded yet, so won/lost performance is not evaluable.")
+        } else if realized_count == 0 {
+            format!("{local_date}: recorded {snapshot_count} performance snapshots and {bet_count} paper singles / {coupon_count} paper coupons. Paper single turnover was {bet_turnover:.2}. {open_count} paper positions remain open or awaiting result, so won/lost performance is not evaluable.")
         } else {
-            format!("{local_date}: recorded {snapshot_count} performance snapshots, {bet_count} paper singles, {coupon_count} paper coupons, and {settlement_count} settlement observations.")
+            format!("{local_date}: recorded {snapshot_count} performance snapshots, {bet_count} paper singles, {coupon_count} paper coupons, {realized_count} realized paper results, and paper P/L {total_profit_loss:.2}.")
         };
         let evidence = json!({
             "reflection_date": local_date,
@@ -4083,24 +4093,33 @@ impl Store {
                 "placed_count": bet_count,
                 "turnover": bet_turnover,
                 "profit_loss": bet_row.get::<_, f64>("profit_loss"),
-                "by_status": bet_row.get::<_, Value>("by_status")
+                "by_status": bet_statuses,
+                "open_count": bet_open_count,
+                "realized_count": bet_realized_count
             },
             "coupons": {
                 "placed_count": coupon_count,
                 "turnover": coupon_row.get::<_, f64>("turnover"),
                 "profit_loss": coupon_row.get::<_, f64>("profit_loss"),
-                "by_status": coupon_row.get::<_, Value>("by_status")
+                "by_status": coupon_statuses,
+                "open_count": coupon_open_count,
+                "realized_count": coupon_realized_count
             },
             "settlement_observation_count": settlement_count,
             "assessment": {
-                "has_realized_results": settlement_count > 0,
-                "needs_result_review": settlement_count == 0 && (bet_count + coupon_count) > 0,
-                "recommendation": if settlement_count == 0 && (bet_count + coupon_count) > 0 {
+                "has_realized_results": realized_count > 0,
+                "needs_result_review": realized_count == 0 && (bet_count + coupon_count) > 0,
+                "open_or_awaiting_count": open_count,
+                "realized_count": realized_count,
+                "profit_loss": total_profit_loss,
+                "recommendation": if realized_count == 0 && (bet_count + coupon_count) > 0 {
                     "Keep positions in awaiting-result review; do not promote strategy based on unresolved paper exposure."
                 } else if bet_count + coupon_count == 0 {
                     "No paper results to evaluate for this date."
+                } else if open_count > 0 {
+                    "Evaluate realized rows, but keep strategy promotion blocked until all same-day paper exposure is settled or explicitly voided."
                 } else {
-                    "Review settled outcomes before considering any strategy promotion."
+                    "Review realized P/L and calibration before considering any one-variable strategy promotion."
                 }
             }
         });
@@ -5561,6 +5580,29 @@ fn is_closed_settlement_status(status: &str) -> bool {
             status,
             "void" | "pushed" | "cancelled" | "abandoned" | "refunded"
         )
+}
+
+fn json_status_open_count(statuses: &Value) -> i64 {
+    json_status_count_by(statuses, is_open_settlement_status)
+}
+
+fn json_status_closed_count(statuses: &Value) -> i64 {
+    json_status_count_by(statuses, is_closed_settlement_status)
+}
+
+fn json_status_count_by(statuses: &Value, predicate: fn(&str) -> bool) -> i64 {
+    statuses
+        .as_object()
+        .into_iter()
+        .flat_map(|items| items.iter())
+        .filter(|(status, _)| predicate(status.as_str()))
+        .map(|(_, count)| {
+            count
+                .as_i64()
+                .or_else(|| count.as_u64().map(|value| value as i64))
+        })
+        .sum::<Option<i64>>()
+        .unwrap_or(0)
 }
 
 fn candidate_event_start_time(candidate: &CandidateBet) -> Option<DateTime<Utc>> {

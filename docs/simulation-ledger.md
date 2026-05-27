@@ -103,6 +103,7 @@ Current POC status:
 - Open paper bets move to `awaiting_result` after the event start time has passed. This queues them for result lookup without grading the outcome.
 - Open paper bets and paper coupons store the event start time and expected result-check-after timestamp so the operator can see when each simulated position should be reviewed.
 - The intended worker cadence is roughly every 15 minutes: scan for new opportunities, auto-place eligible paper bets, queue finished or likely-finished bets, and re-check awaiting-result bets for verified outcomes.
+- Each successful scan refreshes the previous Europe/Copenhagen calendar day's Hermes paper reflection so operators can see whether that day's paper positions are still open, awaiting result, settled, voided, refunded, or ready for strategy review.
 - Automated result lookup is still pending and should use the source ordering above.
 
 ## Metrics

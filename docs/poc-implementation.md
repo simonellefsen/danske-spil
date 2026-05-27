@@ -235,7 +235,8 @@ Current implementation status:
 - The Dioxus UI shows candidate coupons and simulated coupons as separate tables, with real submission still disabled.
 - The settlement queue now treats simulated coupons as first-class paper-ledger items: a coupon moves to `awaiting_result` only after the latest leg start time has passed, and its legs move with it.
 - The default baseline still disables doubles, triples, and accumulators. When a scan observes enough same-sport, distinct-event selections with provider accumulator metadata for a double, Hermes can propose a reviewed `coupon_modes` experiment that enables paper doubles only.
-- `POST /api/hermes/reflect/yesterday` records an idempotent daily Hermes reflection for the previous Europe/Copenhagen calendar day. It summarizes performance snapshots, paper placements, settlement observations, and whether results are evaluable.
+- `POST /api/hermes/reflect/yesterday` records an idempotent daily Hermes reflection for the previous Europe/Copenhagen calendar day. It summarizes performance snapshots, paper placements, current open/realized status, settlement observations, and whether results are evaluable.
+- Each successful scan refreshes that previous-day reflection automatically so manual settlements or refund/cancellation outcomes update the daily record without a separate operator action.
 
 ## Paper Settlement POC
 
