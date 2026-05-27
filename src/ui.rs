@@ -139,6 +139,15 @@ pub fn render_index(base_path: &str) -> String {
                         }
                     }
                     section {
+                        h2 { "Recent plays" }
+                        table {
+                            thead { tr {
+                                th { "Created" } th { "Type" } th { "Selection" } th { "Stake" } th { "Status" }
+                            } }
+                            tbody { id: "recent-plays" }
+                        }
+                    }
+                    section {
                         h2 { "Performance" }
                         table {
                             thead { tr {
@@ -641,6 +650,25 @@ function renderPlayed(summary) {
   `).join("");
   if (!items.length) {
     $("played").innerHTML = `<tr><td colspan="5" class="muted">No paper strategy placements yet.</td></tr>`;
+  }
+  const recent = summary.recent || [];
+  $("recent-plays").innerHTML = recent.map((item) => {
+    const selection = item.item_type === "coupon"
+      ? `${item.market_name || "coupon"} / ${item.outcome_name || ""}`
+      : `${item.event_name || item.id || ""} / ${item.outcome_name || ""}`;
+    const context = [item.sport_key, item.competition, item.market_kind].filter(Boolean).join(" / ");
+    return `
+      <tr>
+        <td>${esc(item.created_at || "-")}</td>
+        <td><span class="pill">${esc(item.item_type || "single")}</span><br><span class="label">${esc(item.strategy_id || "")}</span></td>
+        <td>${esc(selection)}<br><span class="label">${esc(context)}</span></td>
+        <td>${money(item.hypothetical_stake)}<br><span class="muted">@ ${esc(item.observed_decimal_odds ?? "-")}</span></td>
+        <td>${esc(item.status || "-")}<br><span class="muted">score ${num(item.score)} / conf ${pct(item.confidence)}</span></td>
+      </tr>
+    `;
+  }).join("");
+  if (!recent.length) {
+    $("recent-plays").innerHTML = `<tr><td colspan="5" class="muted">No recent paper plays yet.</td></tr>`;
   }
 }
 function renderPerformance(report) {

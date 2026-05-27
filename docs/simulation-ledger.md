@@ -141,6 +141,7 @@ Current POC metrics are exposed through `/api/ledger/summary`:
 - Lookup due queue: the oldest due paper singles or coupons that do not have a fresh lookup attempt inside the cooldown window.
 - Paper performance by sport and strategy.
 - Strategy played summaries include both single simulated bets and multi-leg simulated coupons, with separate single/coupon counts so doubles, triples, and larger accumulators are reflected in paper performance.
+- The web UI shows a recent plays feed from the same strategy-played payload so operators can inspect the latest paper singles and coupons behind aggregate metrics.
 
 Each scan records the live report into `simulation_performance_snapshots`.
 `/api/performance/history` exposes recent snapshots so operators can compare

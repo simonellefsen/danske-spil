@@ -253,6 +253,7 @@ Current result-review status:
 - The same review endpoint also refreshes simulated coupon evidence with leg-level event, market, outcome, latest price, and result-state metadata.
 - Review rows include `last_lookup_at`, `lookup_stale`, and the lookup cooldown so operators can see whether each due paper single or coupon has a fresh non-grading lookup attempt.
 - Strategy played and sport performance summaries aggregate both single simulated bets and multi-leg simulated coupons.
+- The web UI renders recent strategy plays from `/api/strategy/played`, including singles and coupons with stake, odds, status, score, and confidence.
 - The worker runs the same review refresh after advancing the settlement queue.
 - `simulated_bets`, `simulated_coupons`, and `simulated_coupon_legs` preserve event start and expected result-check-after timestamps for operator scheduling.
 - Review evidence is written into each bet's `settlement_payload.review_evidence`, including the approved settlement source policy order used for manual grading.

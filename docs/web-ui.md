@@ -17,6 +17,7 @@ The UI is not a marketing site. It is an operational dashboard for repeated revi
 - Sports intelligence ingestion health by sport and source.
 - Candidate count by product, market, confidence, and status.
 - Open simulated placements, unresolved settlements, and settled paper results.
+- Recent paper plays, including both singles and multi-leg coupons with strategy, stake, observed odds, status, score, and confidence.
 - Active local limits and whether real-money placement is disabled.
 - Recent warnings, login expiry, maintenance windows, and blocked states.
 

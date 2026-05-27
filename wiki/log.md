@@ -67,6 +67,11 @@ Append-only timeline for project wiki maintenance. Use headings with the format 
 - Updated sport performance aggregation so doubles, triples, and larger paper coupon positions contribute to turnover, exposure, P/L, and hit-rate metrics.
 - Exposed separate single and coupon counts in the web UI strategy table.
 
+## [2026-05-27] implementation | recent paper plays feed
+
+- Added a web UI recent plays table backed by `/api/strategy/played`.
+- Included paper singles and multi-leg coupons with strategy, stake, observed odds, status, score, and confidence.
+
 ## [2026-05-25] implementation | Candidate ranking and paper settlement POC
 
 - Added `poc_ranker_v1` candidate scoring fields: implied probability, model probability, expected value, confidence, score, risk flags, and feature snapshot.
