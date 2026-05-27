@@ -1,6 +1,9 @@
 use crate::models::{CandidateBet, HermesReflection, LedgerSummary, SimulatedBet};
 use anyhow::{anyhow, Context};
 use chrono::{DateTime, Duration, NaiveDate, Utc};
+use reqwest::header::{
+    HeaderMap, HeaderName, HeaderValue, ACCEPT, ACCEPT_LANGUAGE, CACHE_CONTROL, PRAGMA,
+};
 use reqwest::Client as HttpClient;
 use serde_json::{json, Value};
 use std::collections::{BTreeMap, HashMap, HashSet};
@@ -206,11 +209,13 @@ VALUES
     0.82,
     true,
     true,
-    'Fallback match-result source for manual paper-ledger review. Auto-settlement only uses it when a stable match URL and parseable final score are configured.',
+    'Fallback match-result source for manual paper-ledger review. Direct HTTP is blocked by Sofascore in local testing, so automated settlement requires browser automation evidence for this source.',
     '{
       "paper_only": true,
       "priority": 4,
       "fallback_only": true,
+      "requires_browser_automation": true,
+      "direct_http_blocked_observed_at": "2026-05-27",
       "known_matches": [
         {
           "event_name": "Andreea Diana Soare - Katarina Kujovic",
@@ -3043,8 +3048,26 @@ impl Store {
             .await?;
         drop(client);
 
+        let mut headers = HeaderMap::new();
+        headers.insert(
+            ACCEPT,
+            HeaderValue::from_static(
+                "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
+            ),
+        );
+        headers.insert(
+            ACCEPT_LANGUAGE,
+            HeaderValue::from_static("da-DK,da;q=0.9,en-US;q=0.8,en;q=0.7"),
+        );
+        headers.insert(CACHE_CONTROL, HeaderValue::from_static("no-cache"));
+        headers.insert(PRAGMA, HeaderValue::from_static("no-cache"));
+        headers.insert(
+            HeaderName::from_static("upgrade-insecure-requests"),
+            HeaderValue::from_static("1"),
+        );
         let http = HttpClient::builder()
-            .user_agent("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125 Safari/537.36")
+            .user_agent("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36")
+            .default_headers(headers)
             .timeout(StdDuration::from_secs(12))
             .build()?;
 
@@ -3088,6 +3111,21 @@ impl Store {
                 }));
                 continue;
             };
+            if link.requires_browser_automation {
+                skipped.push(json!({
+                    "bet_id": bet_id,
+                    "event_name": event_name,
+                    "source_key": link.source_key,
+                    "source_url": link.url,
+                    "reason": "browser_automation_required_for_source",
+                    "direct_http_fetch": "blocked_in_local_testing",
+                    "manual_browser_verification": "agent-browser can access the page",
+                    "event_start_time": event_start_time,
+                    "expected_event_finish_at": expected_result_check_after,
+                    "overdue_minutes": overdue_minutes
+                }));
+                continue;
+            }
             let evidence = match fetch_external_match_result(&http, &link).await {
                 Ok(evidence) => evidence,
                 Err(error) => {
@@ -6849,6 +6887,7 @@ struct ExternalResultLink {
     url: String,
     home_aliases: Vec<String>,
     away_aliases: Vec<String>,
+    requires_browser_automation: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -6897,6 +6936,15 @@ fn external_result_link_for_event(
                         url: item.get("url").and_then(Value::as_str)?.to_string(),
                         home_aliases: json_string_array(item.get("home_aliases")),
                         away_aliases: json_string_array(item.get("away_aliases")),
+                        requires_browser_automation: source
+                            .get("payload")
+                            .and_then(|payload| payload.get("requires_browser_automation"))
+                            .and_then(Value::as_bool)
+                            .unwrap_or(false)
+                            || item
+                                .get("requires_browser_automation")
+                                .and_then(Value::as_bool)
+                                .unwrap_or(false),
                     })
                 })
         })
@@ -7177,6 +7225,7 @@ mod tests {
             url: "https://example.test/match".to_string(),
             home_aliases: vec!["Lyngby".to_string(), "Lyngby AC".to_string()],
             away_aliases: vec!["Horsens".to_string(), "AC Horsens".to_string()],
+            requires_browser_automation: false,
         };
         let evidence = ExternalMatchResult {
             source_key: link.source_key.clone(),
@@ -7210,6 +7259,7 @@ mod tests {
             url: "https://example.test/match".to_string(),
             home_aliases: vec!["Notts County".to_string()],
             away_aliases: vec!["Salford City".to_string()],
+            requires_browser_automation: false,
         };
         let evidence = ExternalMatchResult {
             source_key: link.source_key.clone(),
