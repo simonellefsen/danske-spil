@@ -76,6 +76,15 @@ The POC seeds these source classes into `source_registry` as settlement-capable
 sources and exposes them through `GET /api/settlement/sources`. They are policy
 records, not credentials or browser sessions.
 
+Browser-only sources can submit structured result evidence through:
+
+```text
+POST /api/settlement/external-evidence
+GET  /api/settlement/external-evidence
+```
+
+The POST endpoint stores source URL, match names, final score, confidence, and a short browser text excerpt in `external_result_evidence`. When `settle` is true, it settles only matching open single-leg winner markets whose selected outcome maps deterministically to home, away, or draw.
+
 Every settlement observation should record:
 
 - Source name and URL pattern.
@@ -101,6 +110,7 @@ Current POC status:
 - Manual settlement validates the cited source against `source_registry.can_settle` and stores the selected policy record without deleting prior review evidence.
 - Automated review refreshes record non-grading `settlement_lookup_attempts` rows for due paper singles and coupons, throttled by `GAMBLER_SETTLEMENT_LOOKUP_COOLDOWN_MINUTES` so UI refreshes do not spam duplicate checks. These rows capture the lookup source, recommendation, current event/outcome state, and the approved settlement source policy so the 15-minute recheck loop is auditable even before automated grading exists.
 - Overdue paper singles that are more than 2 hours past the sport-specific expected event finish can be auto-settled only for winner markets when a configured external source URL exposes a parseable final score. For football this means kickoff plus roughly 130 minutes, then another 2 hours before external auto-checking. The settlement observation and `paper_bet_auto_settled_external` audit event preserve the source key, URL, page title, score, selected outcome, and simulated result used as truth.
+- Browser-backed source evidence is stored separately in `external_result_evidence` and may create `paper_bet_settled_from_external_evidence` audit events when it drives a deterministic paper settlement.
 - Strategy selection is stored in `strategy_candidate_decisions`; rejected candidates are preserved for review but blocked from paper-ledger placement.
 - Selected candidates can be auto-paper-placed into `simulated_bets` with per-scan and max-open-exposure caps. This is idempotent per candidate and remains simulation-only.
 - Multi-leg coupons are auto-paper-placed only after the active strategy baseline enables the coupon mode and provider accumulator support is verified from observed data.

@@ -517,6 +517,27 @@ CREATE TABLE IF NOT EXISTS settlement_lookup_attempts (
 CREATE INDEX IF NOT EXISTS idx_settlement_lookup_attempts_created_at
 ON settlement_lookup_attempts(created_at DESC);
 
+CREATE TABLE IF NOT EXISTS external_result_evidence (
+  id text PRIMARY KEY,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  source_key text REFERENCES source_registry(source_key),
+  source_url text,
+  event_name text NOT NULL,
+  home_name text NOT NULL,
+  away_name text NOT NULL,
+  home_score integer NOT NULL,
+  away_score integer NOT NULL,
+  confidence numeric NOT NULL,
+  used_for_settlement boolean NOT NULL DEFAULT false,
+  payload jsonb NOT NULL DEFAULT '{}'::jsonb
+);
+
+CREATE INDEX IF NOT EXISTS idx_external_result_evidence_created_at
+ON external_result_evidence(created_at DESC);
+
+CREATE INDEX IF NOT EXISTS idx_external_result_evidence_event_name
+ON external_result_evidence(event_name);
+
 CREATE TABLE IF NOT EXISTS audit_events (
   id text PRIMARY KEY,
   created_at timestamptz NOT NULL DEFAULT now(),
@@ -3239,6 +3260,290 @@ impl Store {
         }))
     }
 
+    pub async fn ingest_external_result_evidence(&self, payload: &Value) -> anyhow::Result<Value> {
+        let source_key = payload
+            .get("source_key")
+            .or_else(|| payload.get("source"))
+            .and_then(Value::as_str)
+            .unwrap_or("documented_third_party_results");
+        let source_record = self.settlement_source_record(source_key).await?;
+        let source_url = payload
+            .get("source_url")
+            .or_else(|| payload.get("url"))
+            .and_then(Value::as_str)
+            .map(str::to_string);
+        let title = payload
+            .get("source_title")
+            .or_else(|| payload.get("title"))
+            .and_then(Value::as_str)
+            .map(str::to_string);
+        let event_name = payload
+            .get("event_name")
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .map(str::to_string)
+            .or_else(|| {
+                title
+                    .as_deref()
+                    .and_then(parse_score_title)
+                    .map(|(home, away, _, _)| format!("{home} - {away}"))
+            })
+            .ok_or_else(|| anyhow!("event_name is required for external result evidence"))?;
+        let parsed_title = title.as_deref().and_then(parse_score_title);
+        let home_name = payload
+            .get("home_name")
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .map(str::to_string)
+            .or_else(|| parsed_title.as_ref().map(|(home, _, _, _)| home.clone()))
+            .ok_or_else(|| anyhow!("home_name is required for external result evidence"))?;
+        let away_name = payload
+            .get("away_name")
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .map(str::to_string)
+            .or_else(|| parsed_title.as_ref().map(|(_, away, _, _)| away.clone()))
+            .ok_or_else(|| anyhow!("away_name is required for external result evidence"))?;
+        let home_score = json_i32(payload.get("home_score"))
+            .or_else(|| {
+                parsed_title
+                    .as_ref()
+                    .map(|(_, _, home_score, _)| *home_score)
+            })
+            .ok_or_else(|| anyhow!("home_score is required for external result evidence"))?;
+        let away_score = json_i32(payload.get("away_score"))
+            .or_else(|| {
+                parsed_title
+                    .as_ref()
+                    .map(|(_, _, _, away_score)| *away_score)
+            })
+            .ok_or_else(|| anyhow!("away_score is required for external result evidence"))?;
+        let confidence = payload
+            .get("confidence")
+            .and_then(Value::as_f64)
+            .or_else(|| source_record.get("reliability").and_then(Value::as_f64))
+            .unwrap_or(0.7)
+            .clamp(0.0, 1.0);
+        let settle = payload
+            .get("settle")
+            .and_then(Value::as_bool)
+            .unwrap_or(true);
+        let bet_id_filter = payload
+            .get("bet_id")
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .map(str::to_string);
+
+        let evidence_id = new_id();
+        let evidence_payload = json!({
+            "source_key": source_key,
+            "source_record": source_record,
+            "source_url": source_url,
+            "source_title": title,
+            "event_name": event_name,
+            "home_name": home_name,
+            "away_name": away_name,
+            "home_score": home_score,
+            "away_score": away_score,
+            "confidence": confidence,
+            "browser_automation": payload.get("browser_automation").cloned().unwrap_or(Value::Null),
+            "browser_session": payload.get("browser_session").cloned().unwrap_or(Value::Null),
+            "raw_text_excerpt": payload.get("raw_text_excerpt").cloned().unwrap_or(Value::Null),
+            "paper_only": true
+        });
+        let client = self.connect().await?;
+        client
+            .execute(
+                r#"
+                INSERT INTO external_result_evidence (
+                  id, source_key, source_url, event_name, home_name, away_name,
+                  home_score, away_score, confidence, payload
+                )
+                VALUES ($1,$2,$3,$4,$5,$6,$7,$8,($9::float8)::numeric,$10)
+                "#,
+                &[
+                    &evidence_id,
+                    &source_key,
+                    &source_url,
+                    &event_name,
+                    &home_name,
+                    &away_name,
+                    &home_score,
+                    &away_score,
+                    &confidence,
+                    &evidence_payload,
+                ],
+            )
+            .await?;
+
+        let rows = client
+            .query(
+                r#"
+                SELECT
+                  sb.id AS bet_id,
+                  cb.event_name,
+                  cb.market_kind,
+                  cb.market_name,
+                  cb.outcome_name
+                FROM simulated_bets sb
+                JOIN candidate_bets cb ON cb.id = sb.candidate_id
+                WHERE sb.status IN ('awaiting_result', 'unresolved', 'postponed')
+                  AND (
+                    ($1::text IS NOT NULL AND sb.id = $1)
+                    OR ($1::text IS NULL AND cb.event_name = $2)
+                  )
+                ORDER BY sb.created_at ASC
+                LIMIT 25
+                "#,
+                &[&bet_id_filter, &event_name],
+            )
+            .await?;
+        drop(client);
+
+        let source_policy = self.settlement_sources().await?;
+        let mut link =
+            external_result_link_for_event(&source_policy, &event_name).unwrap_or_else(|| {
+                ExternalResultLink {
+                    source_key: source_key.to_string(),
+                    url: source_url.clone().unwrap_or_default(),
+                    home_aliases: json_string_array(payload.get("home_aliases")),
+                    away_aliases: json_string_array(payload.get("away_aliases")),
+                    requires_browser_automation: false,
+                }
+            });
+        link.home_aliases.push(home_name.clone());
+        link.away_aliases.push(away_name.clone());
+        let evidence = ExternalMatchResult {
+            source_key: source_key.to_string(),
+            url: source_url.clone().unwrap_or_default(),
+            title: title
+                .clone()
+                .unwrap_or_else(|| format!("{home_name} - {away_name} {home_score}:{away_score}")),
+            home_name: home_name.clone(),
+            away_name: away_name.clone(),
+            home_score,
+            away_score,
+            confidence,
+        };
+
+        let mut settled = Vec::new();
+        let mut skipped = Vec::new();
+        for row in rows {
+            let bet_id: String = row.get("bet_id");
+            let market_kind: Option<String> = row.get("market_kind");
+            let market_name: Option<String> = row.get("market_name");
+            let outcome_name: Option<String> = row.get("outcome_name");
+            let row_event_name: Option<String> = row.get("event_name");
+            let Some(outcome_name) = outcome_name else {
+                skipped.push(json!({
+                    "bet_id": bet_id,
+                    "reason": "missing_outcome_name"
+                }));
+                continue;
+            };
+            if !is_auto_settle_winner_market(market_kind.as_deref(), market_name.as_deref()) {
+                skipped.push(json!({
+                    "bet_id": bet_id,
+                    "event_name": row_event_name,
+                    "market_kind": market_kind,
+                    "market_name": market_name,
+                    "reason": "unsupported_market_for_external_evidence_settlement"
+                }));
+                continue;
+            }
+            let Some(result) = grade_winner_outcome(&outcome_name, &link, &evidence) else {
+                skipped.push(json!({
+                    "bet_id": bet_id,
+                    "event_name": row_event_name,
+                    "outcome_name": outcome_name,
+                    "reason": "unable_to_map_outcome_to_external_result"
+                }));
+                continue;
+            };
+            if !settle {
+                skipped.push(json!({
+                    "bet_id": bet_id,
+                    "event_name": row_event_name,
+                    "outcome_name": outcome_name,
+                    "mapped_result": result,
+                    "reason": "settle_false"
+                }));
+                continue;
+            }
+            let notes = json!({
+                "mode": "browser_external_result_evidence_settlement",
+                "external_result_evidence_id": evidence_id,
+                "source_key": source_key,
+                "source_url": source_url,
+                "source_title": title,
+                "home_name": home_name,
+                "away_name": away_name,
+                "home_score": home_score,
+                "away_score": away_score,
+                "outcome_name": outcome_name,
+                "paper_only": true
+            })
+            .to_string();
+            match self
+                .settle_simulated_bet(&bet_id, result, source_key, confidence, &notes)
+                .await
+            {
+                Ok(item) => {
+                    let audit = json!({
+                        "external_result_evidence_id": evidence_id,
+                        "bet_id": item.id,
+                        "event_name": row_event_name,
+                        "outcome_name": outcome_name,
+                        "result": result,
+                        "status": item.status,
+                        "source_key": source_key,
+                        "source_url": source_url,
+                        "score": {"home": home_score, "away": away_score},
+                        "paper_only": true
+                    });
+                    self.record_audit("paper_bet_settled_from_external_evidence", audit.clone())
+                        .await
+                        .ok();
+                    settled.push(audit);
+                }
+                Err(error) => skipped.push(json!({
+                    "bet_id": bet_id,
+                    "event_name": row_event_name,
+                    "source_key": source_key,
+                    "reason": "settlement_write_failed",
+                    "error": error.to_string()
+                })),
+            }
+        }
+        if !settled.is_empty() {
+            let client = self.connect().await?;
+            client
+                .execute(
+                    "UPDATE external_result_evidence SET used_for_settlement = true WHERE id = $1",
+                    &[&evidence_id],
+                )
+                .await?;
+        }
+
+        Ok(json!({
+            "paper_only": true,
+            "external_result_evidence_id": evidence_id,
+            "source_key": source_key,
+            "source_url": source_url,
+            "event_name": event_name,
+            "score": {"home": home_score, "away": away_score},
+            "matched_bet_count": settled.len() + skipped.len(),
+            "settled_count": settled.len(),
+            "skipped_count": skipped.len(),
+            "settled": settled,
+            "skipped": skipped
+        }))
+    }
+
     pub async fn simulated_bets(&self, limit: i64) -> anyhow::Result<Vec<SimulatedBet>> {
         let client = self.connect().await?;
         let rows = client
@@ -4779,6 +5084,53 @@ impl Store {
                     "outcome_name": row.get::<_, Option<String>>("bet_outcome_name"),
                     "coupon_type": row.get::<_, Option<String>>("coupon_type"),
                     "leg_count": row.get::<_, Option<i32>>("leg_count")
+                })
+            }).collect::<Vec<_>>()
+        }))
+    }
+
+    pub async fn external_result_evidence(&self, limit: i64) -> anyhow::Result<Value> {
+        let client = self.connect().await?;
+        let rows = client
+            .query(
+                r#"
+                SELECT
+                  id,
+                  created_at,
+                  source_key,
+                  source_url,
+                  event_name,
+                  home_name,
+                  away_name,
+                  home_score,
+                  away_score,
+                  confidence::float8 AS confidence,
+                  used_for_settlement,
+                  payload
+                FROM external_result_evidence
+                ORDER BY created_at DESC
+                LIMIT $1
+                "#,
+                &[&limit],
+            )
+            .await?;
+        Ok(json!({
+            "paper_only": true,
+            "items": rows.iter().map(|row| {
+                let created_at: DateTime<Utc> = row.get("created_at");
+                json!({
+                    "id": row.get::<_, String>("id"),
+                    "created_at": created_at,
+                    "source_key": row.get::<_, Option<String>>("source_key"),
+                    "source_url": row.get::<_, Option<String>>("source_url"),
+                    "event_name": row.get::<_, String>("event_name"),
+                    "home_name": row.get::<_, String>("home_name"),
+                    "away_name": row.get::<_, String>("away_name"),
+                    "home_score": row.get::<_, i32>("home_score"),
+                    "away_score": row.get::<_, i32>("away_score"),
+                    "confidence": row.get::<_, f64>("confidence"),
+                    "used_for_settlement": row.get::<_, bool>("used_for_settlement"),
+                    "payload": row.get::<_, Value>("payload")
                 })
             }).collect::<Vec<_>>()
         }))
@@ -6826,7 +7178,12 @@ fn json_i32(value: Option<&Value>) -> Option<i32> {
         value
             .as_i64()
             .and_then(|value| i32::try_from(value).ok())
-            .or_else(|| value.as_str().and_then(|text| text.parse::<i32>().ok()))
+            .or_else(|| value.as_u64().and_then(|value| i32::try_from(value).ok()))
+            .or_else(|| {
+                value
+                    .as_str()
+                    .and_then(|text| text.trim().parse::<i32>().ok())
+            })
     })
 }
 

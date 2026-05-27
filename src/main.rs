@@ -172,6 +172,15 @@ async fn get_handler(State(state): State<Arc<AppState>>, uri: OriginalUri) -> Re
             Ok(attempts) => Json(attempts).into_response(),
             Err(error) => error_response(StatusCode::INTERNAL_SERVER_ERROR, error),
         },
+        "/api/settlement/external-evidence" => match state
+            .service
+            .store()
+            .external_result_evidence(50)
+            .await
+        {
+            Ok(evidence) => Json(evidence).into_response(),
+            Err(error) => error_response(StatusCode::INTERNAL_SERVER_ERROR, error),
+        },
         "/api/catalog/coverage" => match state.service.store().market_catalog_coverage().await {
             Ok(coverage) => Json(coverage).into_response(),
             Err(error) => error_response(StatusCode::INTERNAL_SERVER_ERROR, error),
@@ -514,6 +523,23 @@ async fn post_handler(
         "/api/settlement/review" => {
             Json(state.service.refresh_settlement_review_queue().await).into_response()
         }
+        "/api/settlement/external-evidence" => match state
+            .service
+            .store()
+            .ingest_external_result_evidence(&payload)
+            .await
+        {
+            Ok(summary) => {
+                state
+                    .service
+                    .store()
+                    .record_audit("external_result_evidence_ingested", summary.clone())
+                    .await
+                    .ok();
+                Json(summary).into_response()
+            }
+            Err(error) => error_response(StatusCode::BAD_REQUEST, error),
+        },
         "/api/hermes/reflect/yesterday" => {
             let local_date = payload.get("date").and_then(Value::as_str);
             match state

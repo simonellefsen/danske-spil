@@ -86,6 +86,7 @@ Current POC status:
 
 - `source_registry` records the read-only Danske Spil content-service as a market snapshot source.
 - `source_registry` also seeds settlement-capable source classes for Danske Spil account/coupon history, official competition results, Flashscore, Sofascore, LiveScore match pages, and documented third-party fallbacks. Sofascore is flagged as requiring browser automation because direct HTTP tests returned 403 even with browser-like request headers, while `agent-browser` could access the same match page.
+- `external_result_evidence` stores sanitized browser-backed result evidence for sources that require a real browser session. It records source URL, event name, participant names, final score, confidence, and a short text excerpt, not cookies or browser storage.
 - `ingestion_runs` records scanner runs, the snapshot id, covered sports, event count, and completion status.
 - The web UI surfaces recent ingestion runs so scanner completion history can be reviewed without querying Postgres directly.
 - `feature_snapshots` stores one `market_context_v1` row per observed event per snapshot.
