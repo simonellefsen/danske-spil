@@ -166,6 +166,18 @@ VALUES
     '{"paper_only": true, "priority": 2}'::jsonb
   ),
   (
+    'flashscore_results',
+    'Flashscore match result pages',
+    'third_party_result',
+    'https://www.flashscore.com/match/*',
+    ARRAY['football','tennis','basketball'],
+    0.82,
+    true,
+    true,
+    'Fallback match-result source for sports where a stable Flashscore match URL is available. Use only for manual paper-ledger review and preserve the URL used as evidence.',
+    '{"paper_only": true, "priority": 3, "fallback_only": true, "examples": ["https://www.flashscore.com/match/football/horsens-WIOwwITb/lyngby-tjPFkxq5/?mid=feSsAstf", "https://www.flashscore.com/match/football/notts-county-EwJVdqzn/salford-W4AadhN3/?mid=E3uvsQPP"]}'::jsonb
+  ),
+  (
     'documented_third_party_results',
     'Documented third-party result source',
     'third_party_result',
@@ -175,7 +187,7 @@ VALUES
     true,
     true,
     'Fallback only when source reliability and URL pattern are documented for the sport and event.',
-    '{"paper_only": true, "priority": 3, "fallback_only": true}'::jsonb
+    '{"paper_only": true, "priority": 4, "fallback_only": true}'::jsonb
   )
 ON CONFLICT (source_key) DO UPDATE
 SET source_name = EXCLUDED.source_name,
@@ -2786,6 +2798,7 @@ impl Store {
                 );
                 let overdue_minutes = settlement_overdue_minutes(expected_result_check_after);
                 let recommended_source_key = settlement_recommended_source_key(recommendation);
+                let recommended_source_keys = settlement_recommended_source_keys(recommendation);
                 json!({
                     "item_type": "single",
                     "bet_id": row.get::<_, String>("id"),
@@ -2818,7 +2831,8 @@ impl Store {
                     "latest_outcome_payload": row.get::<_, Option<Value>>("latest_outcome_payload"),
                     "settlement_source_policy": settlement_source_policy.clone(),
                     "recommendation": recommendation,
-                    "recommended_source_key": recommended_source_key
+                    "recommended_source_key": recommended_source_key,
+                    "recommended_source_keys": recommended_source_keys
                 })
             })
             .collect();
@@ -2834,6 +2848,7 @@ impl Store {
                 coupon_settlement_review_recommendation(&legs, expected_result_check_after);
             let overdue_minutes = settlement_overdue_minutes(expected_result_check_after);
             let recommended_source_key = settlement_recommended_source_key(recommendation);
+            let recommended_source_keys = settlement_recommended_source_keys(recommendation);
             json!({
                 "item_type": "coupon",
                 "coupon_simulation_id": row.get::<_, String>("id"),
@@ -2851,7 +2866,8 @@ impl Store {
                 "legs": legs,
                 "settlement_source_policy": settlement_source_policy.clone(),
                 "recommendation": recommendation,
-                "recommended_source_key": recommended_source_key
+                "recommended_source_key": recommended_source_key,
+                "recommended_source_keys": recommended_source_keys
             })
         }));
 
@@ -6594,6 +6610,20 @@ fn settlement_recommended_source_key(recommendation: &str) -> &'static str {
         "manual_void_or_refund_review" => "danskespil_account_history",
         "manual_grade_ready" => "danskespil_account_history",
         _ => "danskespil_content_service",
+    }
+}
+
+fn settlement_recommended_source_keys(recommendation: &str) -> Value {
+    match recommendation {
+        "external_result_required" => json!([
+            "official_competition_results",
+            "flashscore_results",
+            "documented_third_party_results"
+        ]),
+        "manual_void_or_refund_review" | "manual_grade_ready" => {
+            json!(["danskespil_account_history"])
+        }
+        _ => json!(["danskespil_content_service"]),
     }
 }
 

@@ -122,6 +122,11 @@ Append-only timeline for project wiki maintenance. Use headings with the format 
 - Added a stale settlement recommendation for paper positions still unresulted more than 24 hours after the expected result-check time.
 - Settlement review now recommends official competition results for stale rows instead of repeatedly treating the stale Danske Spil content-feed state as enough context.
 
+## [2026-05-27] implementation | Flashscore settlement source
+
+- Added Flashscore match pages as a settlement-capable fallback source for football, tennis, and basketball paper-result review.
+- Stale external-result review rows now surface official competition results, Flashscore, and documented third-party sources as available manual evidence classes.
+
 ## [2026-05-25] implementation | Candidate ranking and paper settlement POC
 
 - Added `poc_ranker_v1` candidate scoring fields: implied probability, model probability, expected value, confidence, score, risk flags, and feature snapshot.

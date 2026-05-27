@@ -68,7 +68,8 @@ Outcome lookup should prefer sources in this order:
 
 1. Danske Spil settlement, history, result, or coupon status pages if accessible without submitting bets or exposing sensitive account payloads.
 2. Official league, tournament, or event result sources.
-3. Documented third-party result sources, only when source reliability is recorded.
+3. Flashscore match result pages when a stable match URL is available for football, tennis, or basketball.
+4. Documented third-party result sources, only when source reliability is recorded.
 
 The POC seeds these source classes into `source_registry` as settlement-capable
 sources and exposes them through `GET /api/settlement/sources`. They are policy
@@ -182,7 +183,7 @@ The UI should show:
 - Settlement source and confidence.
 - Recent non-grading settlement lookup attempts and recommendations.
 - Lookup freshness on each settlement-review row, including the last lookup timestamp and whether it is stale relative to the configured cooldown.
-- Overdue paper positions that remain unresulted in the Danske Spil content feed for more than 24 hours after the expected result-check time are escalated to `external_result_required`, with official competition or tournament result pages as the recommended next source.
+- Overdue paper positions that remain unresulted in the Danske Spil content feed for more than 24 hours after the expected result-check time are escalated to `external_result_required`, with official competition results, Flashscore, and documented third-party results as review sources.
 - Manual-review queue for ambiguous results.
 
 All displays must clearly label results as simulated/paper results unless real-money functionality is explicitly approved later.

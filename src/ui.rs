@@ -362,6 +362,9 @@ const settlementActions = [
 const settlementButtons = (attribute, id, disabled) => settlementActions.map(([result, label]) =>
   `<button ${attribute}="${esc(id || "")}" data-result="${result}" ${disabled || !id ? "disabled" : ""}>${label}</button>`
 ).join("");
+const reviewSettlementButtons = (attribute, id, disabled, sourceKey) => settlementActions.map(([result, label]) =>
+  `<button ${attribute}="${esc(id || "")}" data-result="${result}" data-source-key="${esc(sourceKey || "")}" ${disabled || !id ? "disabled" : ""}>${label}</button>`
+).join("");
 let currentSettlementSourceKey = "danskespil_account_history";
 const settlementSourceKey = (policy) => {
   const preferred = ((policy || {}).items || [])[0] || {};
@@ -591,6 +594,9 @@ function renderSettlementReview(summary) {
     const lookupClass = item.lookup_stale ? "danger" : "ok";
     const overdueLabel = item.overdue_minutes > 0 ? `overdue ${durationMins(item.overdue_minutes)}` : "";
     const sourceLabel = item.recommended_source_key || preferredSource.source_key || "-";
+    const sourceOptions = Array.isArray(item.recommended_source_keys) && item.recommended_source_keys.length
+      ? item.recommended_source_keys.join(", ")
+      : sourceLabel;
     return `
       <tr>
         <td><span class="pill">${esc(item.item_type || "single")}</span> ${esc(selection)}<br><span class="label">${detail}</span></td>
@@ -598,8 +604,8 @@ function renderSettlementReview(summary) {
         <td>${esc(item.event_status || firstLeg.event_status || "-")}<br><span class="muted">${esc(state)}</span></td>
         <td>
           <span class="pill">${esc(item.recommendation || "await_more_evidence")}</span>
-          <br><span class="muted">source: ${esc(sourceLabel)}</span>
-          <div class="actions">${settlementButtons(actionAttribute, actionId, !canSettle)}</div>
+          <br><span class="muted">source: ${esc(sourceOptions)}</span>
+          <div class="actions">${reviewSettlementButtons(actionAttribute, actionId, !canSettle, sourceLabel)}</div>
         </td>
       </tr>
     `;
@@ -614,7 +620,7 @@ function renderSettlementReview(summary) {
         body: JSON.stringify({
           bet_id: button.dataset.reviewSettle,
           result: button.dataset.result,
-          source: settlementSourceKey(summary.settlement_source_policy),
+          source: button.dataset.sourceKey || settlementSourceKey(summary.settlement_source_policy),
           confidence: 1
         })
       });
@@ -628,7 +634,7 @@ function renderSettlementReview(summary) {
         body: JSON.stringify({
           coupon_id: button.dataset.reviewCouponSettle,
           result: button.dataset.result,
-          source: settlementSourceKey(summary.settlement_source_policy),
+          source: button.dataset.sourceKey || settlementSourceKey(summary.settlement_source_policy),
           confidence: 1
         })
       });

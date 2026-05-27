@@ -85,7 +85,7 @@ Feature snapshots should be immutable and tied to the decision timestamp. If dat
 Current POC status:
 
 - `source_registry` records the read-only Danske Spil content-service as a market snapshot source.
-- `source_registry` also seeds settlement-capable source classes for Danske Spil account/coupon history, official competition results, and documented third-party fallbacks.
+- `source_registry` also seeds settlement-capable source classes for Danske Spil account/coupon history, official competition results, Flashscore match pages, and documented third-party fallbacks.
 - `ingestion_runs` records scanner runs, the snapshot id, covered sports, event count, and completion status.
 - The web UI surfaces recent ingestion runs so scanner completion history can be reviewed without querying Postgres directly.
 - `feature_snapshots` stores one `market_context_v1` row per observed event per snapshot.
