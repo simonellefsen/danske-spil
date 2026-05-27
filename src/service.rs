@@ -2,6 +2,7 @@ use crate::config::Settings;
 use crate::danske_spil::scan_sports;
 use crate::models::CandidateBet;
 use crate::store::{new_id, Store};
+use chrono::{DateTime, Duration, Utc};
 use serde_json::{json, Value};
 
 const PRIMARY_MARKET_KINDS: &[&str] = &[
@@ -35,6 +36,17 @@ impl GamblerService {
 
     pub async fn status(&self) -> Value {
         let latest = self.store.latest_snapshot().await.ok().flatten();
+        let latest_observed_at = latest
+            .as_ref()
+            .and_then(|item| item.get("observed_at"))
+            .and_then(Value::as_str)
+            .and_then(|value| DateTime::parse_from_rfc3339(value).ok())
+            .map(|value| value.with_timezone(&Utc));
+        let latest_snapshot_age_seconds =
+            latest_observed_at.map(|observed_at| (Utc::now() - observed_at).num_seconds().max(0));
+        let next_scan_due_at = latest_observed_at.map(|observed_at| {
+            observed_at + Duration::seconds(self.settings.scan_interval_seconds as i64)
+        });
         let candidates = self.store.candidates(5).await.unwrap_or_default();
         let ledger = self.store.simulated_bets(5).await.unwrap_or_default();
         let ledger_summary = self.store.ledger_summary().await.ok();
@@ -45,10 +57,23 @@ impl GamblerService {
             "allow_real_money_placement": self.settings.allow_real_money_placement,
             "database": self.store.status().await,
             "latest_snapshot_id": latest.as_ref().and_then(|item| item.get("id")).cloned(),
+            "latest_snapshot_observed_at": latest_observed_at,
+            "latest_snapshot_age_seconds": latest_snapshot_age_seconds,
             "recent_candidate_count": candidates.len(),
             "recent_simulated_bet_count": ledger.len(),
             "ledger_summary": ledger_summary,
             "strategy_id": "poc_ranker_v1",
+            "scanner": {
+                "interval_seconds": self.settings.scan_interval_seconds,
+                "scan_limit": self.settings.scan_limit,
+                "scan_max_markets": self.settings.scan_max_markets,
+                "latest_snapshot_observed_at": latest_observed_at,
+                "latest_snapshot_age_seconds": latest_snapshot_age_seconds,
+                "next_scan_due_at": next_scan_due_at,
+                "due": next_scan_due_at
+                    .map(|due_at| due_at <= Utc::now())
+                    .unwrap_or(true)
+            },
             "auto_paper": {
                 "enabled": self.settings.auto_paper_enabled,
                 "per_scan_limit": self.settings.auto_paper_per_scan_limit,

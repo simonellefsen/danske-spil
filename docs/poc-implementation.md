@@ -160,6 +160,10 @@ GET /api/performance
 GET /api/performance/history
 ```
 
+`GET /api/status` exposes the configured scanner cadence, scan limits, latest
+snapshot age, and next scan due time so the web UI can show whether the roughly
+15-minute worker loop is fresh or overdue.
+
 Each scan writes a row to `simulation_performance_snapshots` after placement,
 settlement queueing, and review refresh complete. The web UI shows this history
 so exposure and due-review pressure can be compared across scan cycles.

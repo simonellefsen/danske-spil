@@ -14,6 +14,7 @@ The UI is not a marketing site. It is an operational dashboard for repeated revi
 
 - Browser observation health.
 - Last successful Oddset and Tips snapshots.
+- Scanner cadence, latest snapshot age, and whether the next worker scan is due.
 - Sports intelligence ingestion health by sport and source.
 - Candidate count by product, market, confidence, and status.
 - Open simulated placements, unresolved settlements, and settled paper results.

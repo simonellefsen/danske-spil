@@ -21,6 +21,8 @@ pub fn render_index(base_path: &str) -> String {
                     div { class: "metric", div { class: "label", "Mode" } div { class: "value", id: "mode", "-" } }
                     div { class: "metric", div { class: "label", "Database" } div { class: "value", id: "database", "-" } }
                     div { class: "metric", div { class: "label", "Latest snapshot" } div { class: "value", id: "snapshot", "-" } }
+                    div { class: "metric", div { class: "label", "Scan cadence" } div { class: "value", id: "scan-cadence", "-" } }
+                    div { class: "metric", div { class: "label", "Next scan due" } div { class: "value", id: "next-scan-due", "-" } }
                     div { class: "metric", div { class: "label", "Catalog events" } div { class: "value", id: "catalog-events", "-" } }
                     div { class: "metric", div { class: "label", "Feature snapshots" } div { class: "value", id: "feature-snapshots", "-" } }
                     div { class: "metric", div { class: "label", "Strategy selected" } div { class: "value", id: "strategy-selected", "-" } }
@@ -287,6 +289,7 @@ const api = (path) => `${appBase}${path}`;
 const money = (value) => Number(value || 0).toFixed(2);
 const pct = (value) => value === null || value === undefined ? "-" : `${(Number(value) * 100).toFixed(1)}%`;
 const num = (value) => value === null || value === undefined ? "-" : Number(value).toFixed(3);
+const mins = (value) => value === null || value === undefined ? "-" : `${Math.round(Number(value) / 60)}m`;
 const esc = (value) => String(value ?? "").replace(/[&<>"']/g, (ch) => ({
   "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;"
 }[ch]));
@@ -869,7 +872,13 @@ async function load() {
   $("mode").textContent = status.mode;
   $("database").textContent = status.database.connected ? "connected" : "degraded";
   $("database").className = status.database.connected ? "value ok" : "value danger";
-  $("snapshot").textContent = status.latest_snapshot_id || "-";
+  const scanner = status.scanner || {};
+  $("snapshot").textContent = status.latest_snapshot_id
+    ? `${status.latest_snapshot_id} (${mins(scanner.latest_snapshot_age_seconds)} old)`
+    : "-";
+  $("scan-cadence").textContent = `${mins(scanner.interval_seconds)} / ${scanner.scan_limit ?? "-"} sports`;
+  $("next-scan-due").textContent = scanner.next_scan_due_at || "now";
+  $("next-scan-due").className = scanner.due ? "value danger" : "value ok";
   $("placement").textContent = status.allow_real_money_placement ? "enabled" : "disabled";
   const autoPaper = status.auto_paper || {};
   $("auto-paper-state").textContent = autoPaper.enabled

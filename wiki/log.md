@@ -72,6 +72,11 @@ Append-only timeline for project wiki maintenance. Use headings with the format 
 - Added a web UI recent plays table backed by `/api/strategy/played`.
 - Included paper singles and multi-leg coupons with strategy, stake, observed odds, status, score, and confidence.
 
+## [2026-05-27] implementation | scan cadence visibility
+
+- Added scanner cadence, latest snapshot age, and next scan due metadata to `/api/status`.
+- Added dashboard metrics for the configured scan cadence and next scan due time.
+
 ## [2026-05-25] implementation | Candidate ranking and paper settlement POC
 
 - Added `poc_ranker_v1` candidate scoring fields: implied probability, model probability, expected value, confidence, score, risk flags, and feature snapshot.
