@@ -12,6 +12,7 @@ use std::time::Duration as StdDuration;
 const FLASHSCORE_SEARCH_URL: &str = "https://s.flashscore.com/search/";
 const FLASHSCORE_BASE_URL: &str = "https://www.flashscore.com";
 const FLASHSCORE_SOURCE_KEY: &str = "flashscore_results";
+const FLASHSCORE_DEFAULT_XFSIGN: &str = "SW9D1eZo";
 const FLASHSCORE_FINISHED_STAGES: &[&str] = &["3", "10", "11"];
 
 const PRIMARY_MARKET_KINDS: &[&str] = &[
@@ -1189,10 +1190,14 @@ async fn flashscore_discover(
         return Ok(None);
     };
     let gender_scope = infer_selection_gender_scope(selection);
-    let Some(home) = best_flashscore_participant(http, &home_name, &sport_key).await? else {
+    let Some(home) =
+        best_flashscore_participant(http, &home_name, &sport_key, gender_scope.as_deref()).await?
+    else {
         return Ok(None);
     };
-    let Some(away) = best_flashscore_participant(http, &away_name, &sport_key).await? else {
+    let Some(away) =
+        best_flashscore_participant(http, &away_name, &sport_key, gender_scope.as_deref()).await?
+    else {
         return Ok(None);
     };
     let Some(feed_sign) = fetch_flashscore_feed_sign(http, &home, &sport_key).await? else {
@@ -1262,6 +1267,8 @@ async fn flashscore_discover(
     let event_id = row_text(&row, "AA").unwrap_or_default();
     let stage = row_text(&row, "AC").unwrap_or_default();
     let source_url = flashscore_match_url(&sport_key, &event_id, &home, &away);
+    let home_aliases = flashscore_aliases(&home_name, &feed_home, &home.title, &sport_key);
+    let away_aliases = flashscore_aliases(&away_name, &feed_away, &away.title, &sport_key);
     Ok(Some(FlashscoreEvidence {
         source_url,
         sport_key,
@@ -1275,8 +1282,8 @@ async fn flashscore_discover(
         stage: stage.clone(),
         finished: FLASHSCORE_FINISHED_STAGES.contains(&stage.as_str()),
         match_score,
-        home_aliases: dedup_texts(vec![home_name, feed_home, strip_country_suffix(&home.title)]),
-        away_aliases: dedup_texts(vec![away_name, feed_away, strip_country_suffix(&away.title)]),
+        home_aliases,
+        away_aliases,
         raw_text_excerpt: format!(
             "Flashscore feed {feed_name} matched {event_id}; stage={stage}; score={home_score}:{away_score}"
         ),
@@ -1287,16 +1294,24 @@ async fn best_flashscore_participant(
     http: &HttpClient,
     name: &str,
     sport_key: &str,
+    gender_scope: Option<&str>,
 ) -> anyhow::Result<Option<FlashscoreParticipant>> {
-    let mut participants = flashscore_search_participants(http, name, sport_key).await?;
-    participants.sort_by(|left, right| {
-        token_score(name, &right.title)
-            .partial_cmp(&token_score(name, &left.title))
+    let queries = flashscore_name_variants(name, sport_key);
+    let mut candidates = Vec::new();
+    for query in queries {
+        for participant in flashscore_search_participants(http, &query, sport_key).await? {
+            let score = flashscore_participant_score(name, &query, &participant, gender_scope);
+            if score >= 0.5 {
+                candidates.push((score, participant));
+            }
+        }
+    }
+    candidates.sort_by(|(left_score, _), (right_score, _)| {
+        right_score
+            .partial_cmp(left_score)
             .unwrap_or(std::cmp::Ordering::Equal)
     });
-    Ok(participants
-        .into_iter()
-        .find(|item| token_score(name, &item.title) >= 0.5))
+    Ok(candidates.into_iter().map(|(_, item)| item).next())
 }
 
 async fn flashscore_search_participants(
@@ -1365,7 +1380,11 @@ async fn fetch_flashscore_feed_sign(
         .error_for_status()?
         .text()
         .await?;
-    Ok(extract_between(&page, r#""feed_sign":""#, r#"""#).map(str::to_string))
+    Ok(Some(
+        extract_between(&page, r#""feed_sign":""#, r#"""#)
+            .map(str::to_string)
+            .unwrap_or_else(|| FLASHSCORE_DEFAULT_XFSIGN.to_string()),
+    ))
 }
 
 fn parse_jsonp(value: &str) -> anyhow::Result<Value> {
@@ -1476,6 +1495,165 @@ fn split_event_name(event_name: &str) -> Option<(String, String)> {
             .split_once(separator)
             .map(|(home, away)| (home.trim().to_string(), away.trim().to_string()))
     })
+}
+
+fn flashscore_name_variants(name: &str, sport_key: &str) -> Vec<String> {
+    let trimmed = name.trim();
+    let mut variants = vec![trimmed.to_string(), strip_country_suffix(trimmed)];
+    if let Some(country) = localized_country_alias(trimmed) {
+        variants.push(country.to_string());
+    }
+    variants.extend(flashscore_known_name_aliases(trimmed));
+
+    let normalized = normalize_token_text(trimmed);
+    if sport_key == "tennis" {
+        let tokens = normalized.split_whitespace().collect::<Vec<_>>();
+        if tokens.len() >= 2 {
+            let last = tokens.last().copied().unwrap_or_default();
+            let first = tokens[..tokens.len() - 1].join(" ");
+            variants.push(format!("{last} {first}"));
+        }
+    } else {
+        variants.extend(team_name_variants(trimmed));
+    }
+
+    dedup_texts(variants)
+}
+
+fn flashscore_aliases(
+    requested_name: &str,
+    feed_name: &str,
+    flashscore_title: &str,
+    sport_key: &str,
+) -> Vec<String> {
+    let mut aliases = vec![
+        requested_name.to_string(),
+        feed_name.to_string(),
+        strip_country_suffix(flashscore_title),
+    ];
+    aliases.extend(flashscore_name_variants(requested_name, sport_key));
+    aliases.extend(flashscore_known_name_aliases(requested_name));
+    dedup_texts(aliases)
+}
+
+fn flashscore_participant_score(
+    requested_name: &str,
+    query: &str,
+    participant: &FlashscoreParticipant,
+    gender_scope: Option<&str>,
+) -> f64 {
+    let title = strip_country_suffix(&participant.title);
+    let mut score = token_score(query, &title).max(token_score(requested_name, &title));
+    let title_gender = flashscore_title_gender(&participant.title);
+    match (gender_scope, title_gender.as_deref()) {
+        (Some("women"), Some("women")) => score += 0.25,
+        (Some("women"), Some("men")) => score *= 0.35,
+        (Some("men"), Some("women")) => score *= 0.2,
+        (None, Some("women")) if !selection_name_has_women_marker(requested_name) => score *= 0.2,
+        _ => {}
+    }
+    score
+}
+
+fn flashscore_title_gender(title: &str) -> Option<String> {
+    let normalized = format!(" {} ", normalize_token_text(title));
+    if normalized.contains(" w ")
+        || normalized.contains(" women ")
+        || normalized.contains(" womens ")
+        || normalized.contains(" female ")
+    {
+        return Some("women".to_string());
+    }
+    if normalized.contains(" men ")
+        || normalized.contains(" mens ")
+        || normalized.contains(" male ")
+    {
+        return Some("men".to_string());
+    }
+    None
+}
+
+fn selection_name_has_women_marker(name: &str) -> bool {
+    let normalized = format!(" {} ", normalize_token_text(name));
+    normalized.contains(" w ")
+        || normalized.contains(" women ")
+        || normalized.contains(" womens ")
+        || normalized.contains(" dame ")
+        || normalized.contains(" damer ")
+        || normalized.contains(" kvinde ")
+        || normalized.contains(" kvinder ")
+        || normalized.contains(" k ")
+}
+
+fn localized_country_alias(name: &str) -> Option<&'static str> {
+    let normalized = normalize_token_text(name);
+    match normalized.as_str() {
+        "danmark" => Some("Denmark"),
+        "england" => Some("England"),
+        "finland" => Some("Finland"),
+        "frankrig" => Some("France"),
+        "graekenland" => Some("Greece"),
+        "holland" | "nederlandene" => Some("Netherlands"),
+        "hviderusland" => Some("Belarus"),
+        "indien" => Some("India"),
+        "irland" => Some("Ireland"),
+        "island" => Some("Iceland"),
+        "italien" => Some("Italy"),
+        "japan" => Some("Japan"),
+        "kina" => Some("China"),
+        "kroatien" => Some("Croatia"),
+        "norge" => Some("Norway"),
+        "polen" => Some("Poland"),
+        "portugal" => Some("Portugal"),
+        "schweiz" => Some("Switzerland"),
+        "serbien" => Some("Serbia"),
+        "spanien" => Some("Spain"),
+        "storbritannien" => Some("Great Britain"),
+        "sverige" => Some("Sweden"),
+        "sydafrika" => Some("South Africa"),
+        "sydkorea" => Some("South Korea"),
+        "tjekkiet" => Some("Czech Republic"),
+        "tyrkiet" => Some("Turkey"),
+        "tyskland" => Some("Germany"),
+        "ungarn" => Some("Hungary"),
+        "usa" => Some("USA"),
+        "oestrig" => Some("Austria"),
+        _ => None,
+    }
+}
+
+fn flashscore_known_name_aliases(name: &str) -> Vec<String> {
+    match normalize_token_text(name).as_str() {
+        "derthona basket" | "derthona" => {
+            vec!["Tortona".to_string(), "Derthona Tortona".to_string()]
+        }
+        "reyer venezia" | "umana reyer venezia" => vec!["Venezia".to_string()],
+        "brescia leonessa" => vec!["Brescia".to_string()],
+        "trieste 2004" | "pallacanestro trieste 2004" => vec!["Trieste".to_string()],
+        "team fog naestved" | "team fog naestved basketball" => {
+            vec!["Naestved".to_string(), "Team FOG Naestved".to_string()]
+        }
+        "bakken bears" => vec!["Bakken Bears".to_string()],
+        "scu torreense" => vec!["Torreense".to_string()],
+        "casa pia ac" => vec!["Casa Pia".to_string()],
+        _ => Vec::new(),
+    }
+}
+
+fn team_name_variants(name: &str) -> Vec<String> {
+    let mut variants = Vec::new();
+    let normalized = name.trim();
+    for suffix in [" FC", " SC", " AC", " IF", " BK", " KK"] {
+        if let Some(stripped) = normalized.strip_suffix(suffix) {
+            variants.push(stripped.trim().to_string());
+        }
+    }
+    for prefix in ["FC ", "SC ", "AC ", "IF ", "BK ", "KK "] {
+        if let Some(stripped) = normalized.strip_prefix(prefix) {
+            variants.push(stripped.trim().to_string());
+        }
+    }
+    variants
 }
 
 fn infer_selection_gender_scope(selection: &Value) -> Option<String> {
@@ -1635,4 +1813,40 @@ fn text<'a>(value: &'a Value, key: &str) -> Option<&'a str> {
 
 fn boolish(value: Option<&Value>) -> bool {
     value.and_then(Value::as_bool).unwrap_or(false)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn flashscore_variants_expand_localized_and_known_names() {
+        assert!(flashscore_name_variants("Indien", "football").contains(&"India".to_string()));
+        assert!(flashscore_name_variants("Derthona Basket", "basketball")
+            .contains(&"Tortona".to_string()));
+        assert!(flashscore_name_variants("Kamil Majchrzak", "tennis")
+            .contains(&"majchrzak kamil".to_string()));
+    }
+
+    #[test]
+    fn flashscore_participant_score_penalizes_wrong_gender() {
+        let participant = FlashscoreParticipant {
+            id: "example".to_string(),
+            title: "Derthona Basket W (Italy)".to_string(),
+            url: "derthona-basket".to_string(),
+        };
+
+        assert!(
+            flashscore_participant_score("Derthona Basket", "Derthona Basket", &participant, None)
+                < 0.5
+        );
+        assert!(
+            flashscore_participant_score(
+                "Derthona Basket W",
+                "Derthona Basket W",
+                &participant,
+                Some("women"),
+            ) > 1.0
+        );
+    }
 }

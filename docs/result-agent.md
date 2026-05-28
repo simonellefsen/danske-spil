@@ -110,9 +110,14 @@ runner on links that require browser automation and skips direct HTTP links.
 "only configured links" behavior.
 
 Built-in Flashscore discovery currently covers football, tennis, and basketball
-where a participant feed exposes the event row and final score. If a row still returns
-`flashscore_discovery_no_match`, the next step is to add another source adapter
-or a sport-specific pagination path, not an operator prompt.
+where a participant feed exposes the event row and final score. Participant
+lookup expands common aliases before search, including Danish country names,
+Flashscore basketball naming differences, tennis first/last-name order, and
+gender-scoped team variants. The feed fetch falls back to Flashscore's stable
+`x-fsign` value when current pages do not expose a page-local `feed_sign`. If a
+row still returns `flashscore_discovery_no_match`, the next step is to add
+another source adapter or a sport-specific pagination path, not an operator
+prompt.
 
 ## Evidence Contract
 

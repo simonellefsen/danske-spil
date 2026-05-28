@@ -154,6 +154,7 @@ Append-only timeline for project wiki maintenance. Use headings with the format 
 - Added a Rust-native Flashscore result-agent cycle to the worker so missing public result links can be discovered inside the scratch container without the Python runner.
 - Added `POST /api/result-agent/run` and a web UI action to trigger the same read-only discovery pass manually.
 - The worker now attempts result-agent discovery on the normal 15-minute scan cadence, stores discovered Flashscore links, records aliases with sport/gender scope when known, and posts sanitized paper-settlement evidence for finished events.
+- Expanded Flashscore participant matching with alias variants, Danish-to-English country names, gender-aware ranking, and a stable `x-fsign` fallback for current Flashscore pages that no longer expose `feed_sign` in page HTML.
 
 ## [2026-05-25] implementation | Candidate ranking and paper settlement POC
 
