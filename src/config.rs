@@ -23,6 +23,7 @@ pub struct Settings {
     pub result_agent_enabled: bool,
     pub result_agent_per_cycle_limit: usize,
     pub result_agent_interval_seconds: u64,
+    pub result_agent_url: Option<String>,
     pub database_url: Option<String>,
 }
 
@@ -103,6 +104,10 @@ impl Settings {
                 .ok()
                 .and_then(|v| v.parse().ok())
                 .unwrap_or(900),
+            result_agent_url: env::var("GAMBLER_RESULT_AGENT_URL")
+                .ok()
+                .map(|value| value.trim_end_matches('/').to_string())
+                .filter(|value| !value.is_empty()),
             database_url,
         }
     }

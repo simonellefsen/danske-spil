@@ -58,6 +58,8 @@ spec:
           env:
             - name: APP_COMPONENT
               value: gambler-api
+            - name: GAMBLER_RESULT_AGENT_URL
+              value: http://gambler-result-agent:8080
             - name: DATABASE_USER
               valueFrom:
                 secretKeyRef:

@@ -9,6 +9,7 @@ use axum::{Json, Router};
 use danske_spil_gambler::config::Settings;
 use danske_spil_gambler::service::GamblerService;
 use danske_spil_gambler::store::Store;
+use reqwest::Method;
 use serde_json::{json, Value};
 use std::net::SocketAddr;
 use std::sync::Arc;
@@ -184,8 +185,30 @@ async fn get_handler(State(state): State<Arc<AppState>>, uri: OriginalUri) -> Re
         "/api/settlement/review" => {
             Json(state.service.refresh_settlement_review_queue().await).into_response()
         },
-        "/api/result-agent/queue" => Json(state.service.result_agent_queue().await).into_response(),
-        "/api/result-agent/run" => Json(state.service.run_result_agent_once().await).into_response(),
+        "/api/result-agent/queue" => match proxy_result_agent_json(
+            &state.settings,
+            Method::GET,
+            "/api/result-agent/queue",
+            None,
+        )
+        .await
+        {
+            Ok(Some(value)) => Json(value).into_response(),
+            Ok(None) => Json(state.service.result_agent_queue().await).into_response(),
+            Err(error) => error_response(StatusCode::BAD_GATEWAY, error),
+        },
+        "/api/result-agent/run" => match proxy_result_agent_json(
+            &state.settings,
+            Method::GET,
+            "/api/result-agent/run",
+            None,
+        )
+        .await
+        {
+            Ok(Some(value)) => Json(value).into_response(),
+            Ok(None) => Json(state.service.run_result_agent_once().await).into_response(),
+            Err(error) => error_response(StatusCode::BAD_GATEWAY, error),
+        },
         "/api/settlement/sources" => match state.service.store().settlement_sources().await {
             Ok(sources) => Json(sources).into_response(),
             Err(error) => error_response(StatusCode::INTERNAL_SERVER_ERROR, error),
@@ -569,7 +592,18 @@ async fn post_handler(
             Json(state.service.refresh_settlement_review_queue().await).into_response()
         }
         "/api/result-agent/run" => {
-            Json(state.service.run_result_agent_once().await).into_response()
+            match proxy_result_agent_json(
+                &state.settings,
+                Method::POST,
+                "/api/result-agent/run",
+                Some(payload),
+            )
+            .await
+            {
+                Ok(Some(value)) => Json(value).into_response(),
+                Ok(None) => Json(state.service.run_result_agent_once().await).into_response(),
+                Err(error) => error_response(StatusCode::BAD_GATEWAY, error),
+            }
         }
         "/api/settlement/external-evidence" => match state
             .service
@@ -694,6 +728,35 @@ fn parse_json_body(body: Bytes) -> Value {
     } else {
         serde_json::from_slice(&body).unwrap_or_else(|_| json!({}))
     }
+}
+
+async fn proxy_result_agent_json(
+    settings: &Settings,
+    method: Method,
+    path: &str,
+    body: Option<Value>,
+) -> anyhow::Result<Option<Value>> {
+    let Some(base_url) = settings.result_agent_url.as_deref() else {
+        return Ok(None);
+    };
+    let url = format!("{base_url}{path}");
+    let client = reqwest::Client::builder()
+        .timeout(Duration::from_secs(120))
+        .build()?;
+    let request = client.request(method, &url);
+    let request = if let Some(body) = body {
+        request.json(&body)
+    } else {
+        request
+    };
+    let response = request.send().await?;
+    let status = response.status();
+    let text = response.text().await?;
+    if !status.is_success() {
+        anyhow::bail!("result-agent proxy returned {status}: {text}");
+    }
+    let value = serde_json::from_str(&text)?;
+    Ok(Some(value))
 }
 
 fn error_response(status: StatusCode, error: anyhow::Error) -> Response {

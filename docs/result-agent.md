@@ -89,7 +89,9 @@ Kubernetes enables this by default with
 `GAMBLER_RESULT_AGENT_INTERVAL_SECONDS=900`, and limits each cycle with
 `GAMBLER_RESULT_AGENT_PER_CYCLE_LIMIT`. The scanner worker sets
 `GAMBLER_RESULT_AGENT_ENABLED=false` so it advances settlement-review state
-without also running public result reconciliation.
+without also running public result reconciliation. The web/API deployment sets
+`GAMBLER_RESULT_AGENT_URL=http://gambler-result-agent:8080`, so UI-triggered
+queue and run requests are forwarded to the dedicated result-agent service.
 
 ## Local Browser Public-Source Agent
 
