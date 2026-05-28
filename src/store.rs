@@ -5146,6 +5146,53 @@ impl Store {
         }))
     }
 
+    pub async fn external_result_links(&self, limit: i64) -> anyhow::Result<Value> {
+        let client = self.connect().await?;
+        let rows = client
+            .query(
+                r#"
+                SELECT
+                  erl.id,
+                  erl.source_key,
+                  sr.source_name,
+                  erl.event_name,
+                  erl.source_url,
+                  erl.home_aliases,
+                  erl.away_aliases,
+                  erl.requires_browser_automation,
+                  erl.payload,
+                  erl.created_at,
+                  erl.updated_at
+                FROM external_result_links erl
+                JOIN source_registry sr ON sr.source_key = erl.source_key
+                ORDER BY erl.updated_at DESC, erl.event_name
+                LIMIT $1
+                "#,
+                &[&limit],
+            )
+            .await?;
+        Ok(json!({
+            "paper_only": true,
+            "items": rows.iter().map(|row| {
+                let created_at: DateTime<Utc> = row.get("created_at");
+                let updated_at: DateTime<Utc> = row.get("updated_at");
+                json!({
+                    "id": row.get::<_, String>("id"),
+                    "source_key": row.get::<_, String>("source_key"),
+                    "source_name": row.get::<_, String>("source_name"),
+                    "event_name": row.get::<_, String>("event_name"),
+                    "source_url": row.get::<_, String>("source_url"),
+                    "home_aliases": row.get::<_, Vec<String>>("home_aliases"),
+                    "away_aliases": row.get::<_, Vec<String>>("away_aliases"),
+                    "requires_browser_automation": row.get::<_, bool>("requires_browser_automation"),
+                    "created_at": created_at,
+                    "updated_at": updated_at,
+                    "payload": row.get::<_, Value>("payload")
+                })
+            }).collect::<Vec<_>>()
+        }))
+    }
+
     pub async fn settlement_observations(&self, limit: i64) -> anyhow::Result<Value> {
         let client = self.connect().await?;
         let rows = client

@@ -108,6 +108,15 @@ pub fn render_index(base_path: &str) -> String {
                         }
                     }
                     section {
+                        h2 { "Operator result links" }
+                        table {
+                            thead { tr {
+                                th { "Updated" } th { "Event" } th { "Source" } th { "Aliases" } th { "Mode" }
+                            } }
+                            tbody { id: "external-result-links" }
+                        }
+                    }
+                    section {
                         h2 { "Settlement observations" }
                         table {
                             thead { tr {
@@ -743,6 +752,26 @@ function renderSettlementSources(sources) {
     $("settlement-sources").innerHTML = `<tr><td colspan="5" class="muted">No settlement-capable sources are configured.</td></tr>`;
   }
 }
+function renderExternalResultLinksTable(links) {
+  const items = links.items || [];
+  $("external-result-links").innerHTML = items.map((item) => {
+    const sourceLink = item.source_url
+      ? `<a class="muted" href="${esc(item.source_url)}" target="_blank" rel="noreferrer">${esc(hostLabel(item.source_url))}</a>`
+      : "-";
+    return `
+      <tr>
+        <td>${esc(item.updated_at || "-")}<br><span class="label">${esc(item.created_at || "")}</span></td>
+        <td>${esc(item.event_name || "-")}<br><span class="label">${esc(item.id || "")}</span></td>
+        <td><span class="pill">${esc(item.source_key || "-")}</span><br>${sourceLink}</td>
+        <td><span class="label">home</span> ${esc((item.home_aliases || []).join(", ") || "-")}<br><span class="label">away</span> ${esc((item.away_aliases || []).join(", ") || "-")}</td>
+        <td>${item.requires_browser_automation ? "browser evidence" : "direct check"}</td>
+      </tr>
+    `;
+  }).join("");
+  if (!items.length) {
+    $("external-result-links").innerHTML = `<tr><td colspan="5" class="muted">No operator result links have been added.</td></tr>`;
+  }
+}
 function renderSettlementObservations(observations) {
   const items = observations.items || [];
   $("settlement-observations").innerHTML = items.map((item) => {
@@ -1176,6 +1205,8 @@ async function load() {
   renderCoupons(coupons.items || []);
   const settlementSources = await json(api("/api/settlement/sources"));
   renderSettlementSources(settlementSources);
+  const externalResultLinks = await json(api("/api/settlement/source-links"));
+  renderExternalResultLinksTable(externalResultLinks);
   const simulatedCoupons = await json(api("/api/coupons/simulated"));
   renderSimulatedCoupons(simulatedCoupons.items || []);
   const ledger = await json(api("/api/ledger"));

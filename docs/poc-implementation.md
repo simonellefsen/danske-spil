@@ -269,6 +269,7 @@ Current result-review status:
 
 - `GET/POST /api/settlement/review` refreshes review evidence for `awaiting_result`, `unresolved`, and `postponed` paper bets.
 - `GET /api/settlement/sources` lists approved settlement-capable source classes from `source_registry`.
+- `GET /api/settlement/source-links` lists operator-managed public result URLs that have been added for stale event review.
 - `GET /api/settlement/observations` lists recent manual settlement observations for audit and Hermes-safe review.
 - `GET /api/settlement/lookup-attempts` lists recent non-grading review-loop lookup attempts for due paper singles and coupons.
 - The same review endpoint also refreshes simulated coupon evidence with leg-level event, market, outcome, latest price, and result-state metadata.
@@ -292,5 +293,5 @@ Current result-review status:
 - Browser-backed result evidence can be submitted through `POST /api/settlement/external-evidence`. The payload stores an `external_result_evidence` row and, when `settle` is true, attempts deterministic paper settlement for matching open single-leg winner markets only. The evidence payload should include `source_key`, `source_url`, `event_name`, `home_name`, `away_name`, `home_score`, `away_score`, and a short `raw_text_excerpt`; it must not include cookies, credentials, browser storage, or full account payloads.
 - `scripts/external_result_evidence_probe.py` is the local operator probe for browser-backed Sofascore, Flashscore, and LiveScore evidence. It opens the public match URL with `agent-browser`, extracts a compact final-score payload, and posts to the API only when not run with `--dry-run`. It defaults to `settle=false`, and explicit score/team arguments can be supplied when the page loads but does not expose a parseable final score.
 - Settlement-review rows include all configured external result links when known match URLs exist, including whether each source requires browser evidence. The direct auto-check attempts every non-browser source before reporting that browser evidence is required.
-- Operators can attach additional public result URLs from the settlement-review UI. These are persisted in `external_result_links`, validated against the selected source host, merged into source policies at read time, and audited as `external_result_link_added`.
+- Operators can attach additional public result URLs from the settlement-review UI. These are persisted in `external_result_links`, validated against the selected source host, merged into source policies at read time, listed in the UI for audit, and audited as `external_result_link_added`.
 - It still does not auto-grade won/lost from the Danske Spil content feed because those result semantics have not been proven for each market type.

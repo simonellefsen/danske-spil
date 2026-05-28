@@ -154,6 +154,11 @@ async fn get_handler(State(state): State<Arc<AppState>>, uri: OriginalUri) -> Re
             Ok(sources) => Json(sources).into_response(),
             Err(error) => error_response(StatusCode::INTERNAL_SERVER_ERROR, error),
         },
+        "/api/settlement/source-links" => match state.service.store().external_result_links(50).await
+        {
+            Ok(links) => Json(links).into_response(),
+            Err(error) => error_response(StatusCode::INTERNAL_SERVER_ERROR, error),
+        },
         "/api/settlement/observations" => match state
             .service
             .store()

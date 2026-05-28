@@ -139,6 +139,7 @@ Append-only timeline for project wiki maintenance. Use headings with the format 
 - Added a generalized browser evidence probe for Sofascore, Flashscore, and LiveScore public match URLs, and surfaced known external result links directly on settlement-review rows.
 - Settlement-review rows now carry all configured external result links for a match, and the direct external auto-check tries each non-browser source before requiring browser evidence.
 - Added persistent operator-managed external result links, host validation, a `POST /api/settlement/source-link` endpoint, and settlement-review UI controls for attaching public result URLs.
+- Added `GET /api/settlement/source-links` and an operator result-links UI table so persisted result URLs are directly auditable.
 
 ## [2026-05-25] implementation | Candidate ranking and paper settlement POC
 
