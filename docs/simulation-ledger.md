@@ -81,9 +81,17 @@ Browser-only sources can submit structured result evidence through:
 ```text
 POST /api/settlement/external-evidence
 GET  /api/settlement/external-evidence
+POST /api/settlement/source-link
 ```
 
 The POST endpoint stores source URL, match names, final score, confidence, and a short browser text excerpt in `external_result_evidence`. When `settle` is true, it settles only matching open single-leg winner markets whose selected outcome maps deterministically to home, away, or draw.
+
+`POST /api/settlement/source-link` stores operator-provided public result URLs in
+`external_result_links` instead of mutating seeded source-policy payloads. The
+link is merged into settlement-review source policy responses on read, so it
+survives app restarts and schema bootstrap refreshes. Accepted source keys are
+`flashscore_results`, `sofascore_results`, and `livescore_results`, with host
+validation before the URL is persisted.
 
 For browser-backed public match pages, run the local evidence probe from a
 workstation that has access to the API, usually through a short-lived

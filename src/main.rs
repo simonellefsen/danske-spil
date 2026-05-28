@@ -540,6 +540,23 @@ async fn post_handler(
             }
             Err(error) => error_response(StatusCode::BAD_REQUEST, error),
         },
+        "/api/settlement/source-link" => match state
+            .service
+            .store()
+            .add_external_result_link(&payload)
+            .await
+        {
+            Ok(summary) => {
+                state
+                    .service
+                    .store()
+                    .record_audit("external_result_link_added", summary.clone())
+                    .await
+                    .ok();
+                Json(summary).into_response()
+            }
+            Err(error) => error_response(StatusCode::BAD_REQUEST, error),
+        },
         "/api/hermes/reflect/yesterday" => {
             let local_date = payload.get("date").and_then(Value::as_str);
             match state

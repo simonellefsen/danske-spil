@@ -397,6 +397,16 @@ const settlementButtons = (attribute, id, disabled) => settlementActions.map(([r
 const reviewSettlementButtons = (attribute, id, disabled, sourceKey) => settlementActions.map(([result, label]) =>
   `<button ${attribute}="${esc(id || "")}" data-result="${result}" data-source-key="${esc(sourceKey || "")}" ${disabled || !id ? "disabled" : ""}>${label}</button>`
 ).join("");
+const externalSourceLinkButtons = (item, disabled) => {
+  if (item.item_type === "coupon" || !item.event_name) return "";
+  return [
+    ["flashscore_results", "Add Flashscore"],
+    ["sofascore_results", "Add Sofascore"],
+    ["livescore_results", "Add LiveScore"]
+  ].map(([sourceKey, label]) =>
+    `<button data-add-source-link="${esc(item.bet_id || "")}" data-event-name="${esc(item.event_name)}" data-source-key="${sourceKey}" ${disabled ? "disabled" : ""}>${label}</button>`
+  ).join("");
+};
 let currentSettlementSourceKey = "danskespil_account_history";
 const pendingSettlementReviews = new Map();
 const pendingSettlementKey = (type, id) => `${type}:${id}`;
@@ -648,6 +658,7 @@ function renderSettlementReview(summary) {
           <span class="pill">${esc(item.recommendation || "await_more_evidence")}</span>
           <br><span class="muted">source: ${esc(sourceOptions)}</span>
           ${renderExternalResultLinks(item)}
+          <div class="actions">${externalSourceLinkButtons(item, false)}</div>
           <div class="actions">${reviewSettlementButtons(actionAttribute, actionId, !canSettle, sourceLabel)}</div>
           ${pending ? `<span class="label">selected: ${esc(pending.result)} via ${esc(pending.source)}</span>` : ""}
         </td>
@@ -689,6 +700,26 @@ function renderSettlementReview(summary) {
       const row = document.querySelector(`[data-settlement-row="${CSS.escape(key)}"]`);
       if (row) row.classList.add("settlement-selected");
       updatePendingSettlementUi();
+    });
+  });
+  document.querySelectorAll("[data-add-source-link]").forEach((button) => {
+    button.addEventListener("click", async () => {
+      const url = window.prompt(`Result URL for ${button.dataset.eventName || "event"}`);
+      if (!url) return;
+      button.disabled = true;
+      try {
+        await json(api("/api/settlement/source-link"), {
+          method: "POST",
+          body: JSON.stringify({
+            event_name: button.dataset.eventName,
+            source_key: button.dataset.sourceKey,
+            source_url: url
+          })
+        });
+        await load();
+      } finally {
+        button.disabled = false;
+      }
     });
   });
   updatePendingSettlementUi();

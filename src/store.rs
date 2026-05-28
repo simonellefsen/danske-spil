@@ -4,7 +4,7 @@ use chrono::{DateTime, Duration, NaiveDate, Utc};
 use reqwest::header::{
     HeaderMap, HeaderName, HeaderValue, ACCEPT, ACCEPT_LANGUAGE, CACHE_CONTROL, PRAGMA,
 };
-use reqwest::Client as HttpClient;
+use reqwest::{Client as HttpClient, Url};
 use serde_json::{json, Value};
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::time::Duration as StdDuration;
@@ -537,6 +537,23 @@ ON external_result_evidence(created_at DESC);
 
 CREATE INDEX IF NOT EXISTS idx_external_result_evidence_event_name
 ON external_result_evidence(event_name);
+
+CREATE TABLE IF NOT EXISTS external_result_links (
+  id text PRIMARY KEY,
+  source_key text NOT NULL REFERENCES source_registry(source_key),
+  event_name text NOT NULL,
+  source_url text NOT NULL,
+  home_aliases text[] NOT NULL DEFAULT '{}',
+  away_aliases text[] NOT NULL DEFAULT '{}',
+  requires_browser_automation boolean NOT NULL DEFAULT false,
+  payload jsonb NOT NULL DEFAULT '{}'::jsonb,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  updated_at timestamptz NOT NULL DEFAULT now(),
+  UNIQUE (source_key, event_name, source_url)
+);
+
+CREATE INDEX IF NOT EXISTS idx_external_result_links_event_name
+ON external_result_links(event_name);
 
 CREATE TABLE IF NOT EXISTS audit_events (
   id text PRIMARY KEY,
@@ -4959,13 +4976,53 @@ impl Store {
                 &[],
             )
             .await?;
+        let link_rows = client
+            .query(
+                r#"
+                SELECT
+                  source_key,
+                  event_name,
+                  source_url,
+                  home_aliases,
+                  away_aliases,
+                  requires_browser_automation,
+                  payload,
+                  updated_at
+                FROM external_result_links
+                ORDER BY updated_at DESC, event_name
+                "#,
+                &[],
+            )
+            .await?;
+        let mut links_by_source: HashMap<String, Vec<Value>> = HashMap::new();
+        for row in link_rows {
+            let updated_at: DateTime<Utc> = row.get("updated_at");
+            links_by_source
+                .entry(row.get::<_, String>("source_key"))
+                .or_default()
+                .push(json!({
+                    "event_name": row.get::<_, String>("event_name"),
+                    "url": row.get::<_, String>("source_url"),
+                    "home_aliases": row.get::<_, Vec<String>>("home_aliases"),
+                    "away_aliases": row.get::<_, Vec<String>>("away_aliases"),
+                    "requires_browser_automation": row.get::<_, bool>("requires_browser_automation"),
+                    "operator_configured": true,
+                    "updated_at": updated_at,
+                    "payload": row.get::<_, Value>("payload")
+                }));
+        }
         Ok(json!({
             "paper_only": true,
             "manual_review_required": true,
             "items": rows.iter().map(|row| {
                 let last_seen_at: DateTime<Utc> = row.get("last_seen_at");
+                let source_key = row.get::<_, String>("source_key");
+                let payload = merge_operator_result_links(
+                    row.get::<_, Value>("payload"),
+                    links_by_source.get(&source_key).map(Vec::as_slice).unwrap_or(&[])
+                );
                 json!({
-                    "source_key": row.get::<_, String>("source_key"),
+                    "source_key": source_key,
                     "source_name": row.get::<_, String>("source_name"),
                     "source_type": row.get::<_, String>("source_type"),
                     "url_pattern": row.get::<_, Option<String>>("url_pattern"),
@@ -4974,9 +5031,118 @@ impl Store {
                     "manual_review_required": row.get::<_, bool>("manual_review_required"),
                     "notes": row.get::<_, Option<String>>("notes"),
                     "last_seen_at": last_seen_at,
-                    "payload": row.get::<_, Value>("payload")
+                    "payload": payload
                 })
             }).collect::<Vec<_>>()
+        }))
+    }
+
+    pub async fn add_external_result_link(&self, payload: &Value) -> anyhow::Result<Value> {
+        let source_key = payload
+            .get("source_key")
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .ok_or_else(|| anyhow!("source_key is required"))?;
+        let source_record = self.settlement_source_record(source_key).await?;
+        if !is_external_result_source(source_key) {
+            return Err(anyhow!(
+                "source_key is not an external result source: {source_key}"
+            ));
+        }
+        let source_url = payload
+            .get("source_url")
+            .or_else(|| payload.get("url"))
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .ok_or_else(|| anyhow!("source_url is required"))?;
+        validate_external_result_url(source_key, source_url)?;
+        let event_name = payload
+            .get("event_name")
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .ok_or_else(|| anyhow!("event_name is required"))?;
+        let (default_home_aliases, default_away_aliases) = event_aliases_from_name(event_name);
+        let home_aliases = json_string_array(payload.get("home_aliases"))
+            .into_iter()
+            .chain(default_home_aliases)
+            .collect::<Vec<_>>();
+        let away_aliases = json_string_array(payload.get("away_aliases"))
+            .into_iter()
+            .chain(default_away_aliases)
+            .collect::<Vec<_>>();
+        let source_requires_browser = source_record
+            .get("payload")
+            .and_then(|payload| payload.get("requires_browser_automation"))
+            .and_then(Value::as_bool)
+            .unwrap_or(false);
+        let requires_browser_automation = payload
+            .get("requires_browser_automation")
+            .and_then(Value::as_bool)
+            .unwrap_or(source_requires_browser);
+        let link_payload = json!({
+            "paper_only": true,
+            "operator_configured": true,
+            "source_record": source_record,
+            "notes": payload.get("notes").cloned().unwrap_or(Value::Null)
+        });
+        let client = self.connect().await?;
+        let row = client
+            .query_one(
+                r#"
+                INSERT INTO external_result_links (
+                  id, source_key, event_name, source_url, home_aliases, away_aliases,
+                  requires_browser_automation, payload
+                )
+                VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
+                ON CONFLICT (source_key, event_name, source_url) DO UPDATE
+                SET home_aliases = EXCLUDED.home_aliases,
+                    away_aliases = EXCLUDED.away_aliases,
+                    requires_browser_automation = EXCLUDED.requires_browser_automation,
+                    payload = EXCLUDED.payload,
+                    updated_at = now()
+                RETURNING id, created_at, updated_at
+                "#,
+                &[
+                    &new_id(),
+                    &source_key,
+                    &event_name,
+                    &source_url,
+                    &dedup_strings(home_aliases),
+                    &dedup_strings(away_aliases),
+                    &requires_browser_automation,
+                    &link_payload,
+                ],
+            )
+            .await?;
+        let created_at: DateTime<Utc> = row.get("created_at");
+        let updated_at: DateTime<Utc> = row.get("updated_at");
+        let link = ExternalResultLink {
+            source_key: source_key.to_string(),
+            url: source_url.to_string(),
+            home_aliases: dedup_strings(
+                json_string_array(payload.get("home_aliases"))
+                    .into_iter()
+                    .chain(event_aliases_from_name(event_name).0)
+                    .collect(),
+            ),
+            away_aliases: dedup_strings(
+                json_string_array(payload.get("away_aliases"))
+                    .into_iter()
+                    .chain(event_aliases_from_name(event_name).1)
+                    .collect(),
+            ),
+            requires_browser_automation,
+        };
+        Ok(json!({
+            "paper_only": true,
+            "id": row.get::<_, String>("id"),
+            "created_at": created_at,
+            "updated_at": updated_at,
+            "event_name": event_name,
+            "link": external_result_link_json(&link)
         }))
     }
 
@@ -7374,6 +7540,88 @@ fn external_result_link_json(link: &ExternalResultLink) -> Value {
     })
 }
 
+fn merge_operator_result_links(mut payload: Value, links: &[Value]) -> Value {
+    if links.is_empty() {
+        return payload;
+    }
+    let Some(object) = payload.as_object_mut() else {
+        return json!({"known_matches": links});
+    };
+    let known_matches = object.entry("known_matches").or_insert_with(|| json!([]));
+    if let Some(items) = known_matches.as_array_mut() {
+        let mut existing = items
+            .iter()
+            .filter_map(|item| {
+                Some((
+                    normalize_match_name(item.get("event_name")?.as_str()?),
+                    item.get("url")?.as_str()?.to_string(),
+                ))
+            })
+            .collect::<HashSet<_>>();
+        for link in links {
+            let key = (
+                normalize_match_name(link.get("event_name").and_then(Value::as_str).unwrap_or("")),
+                link.get("url")
+                    .and_then(Value::as_str)
+                    .unwrap_or_default()
+                    .to_string(),
+            );
+            if existing.insert(key) {
+                items.push(link.clone());
+            }
+        }
+    }
+    payload
+}
+
+fn is_external_result_source(source_key: &str) -> bool {
+    matches!(
+        source_key,
+        "flashscore_results" | "sofascore_results" | "livescore_results"
+    )
+}
+
+fn validate_external_result_url(source_key: &str, source_url: &str) -> anyhow::Result<()> {
+    let parsed = Url::parse(source_url).with_context(|| format!("invalid URL: {source_url}"))?;
+    let scheme = parsed.scheme();
+    if scheme != "https" && scheme != "http" {
+        return Err(anyhow!("external result URL must be http or https"));
+    }
+    let host = parsed
+        .host_str()
+        .ok_or_else(|| anyhow!("external result URL must include a host"))?
+        .to_ascii_lowercase();
+    let allowed = match source_key {
+        "flashscore_results" => host == "flashscore.com" || host.ends_with(".flashscore.com"),
+        "sofascore_results" => host == "sofascore.com" || host.ends_with(".sofascore.com"),
+        "livescore_results" => host == "livescore.com" || host.ends_with(".livescore.com"),
+        _ => false,
+    };
+    if !allowed {
+        return Err(anyhow!(
+            "URL host {host} is not allowed for settlement source {source_key}"
+        ));
+    }
+    Ok(())
+}
+
+fn event_aliases_from_name(event_name: &str) -> (Vec<String>, Vec<String>) {
+    event_name
+        .split_once(" - ")
+        .map(|(home, away)| (vec![home.trim().to_string()], vec![away.trim().to_string()]))
+        .unwrap_or_else(|| (Vec::new(), Vec::new()))
+}
+
+fn dedup_strings(values: Vec<String>) -> Vec<String> {
+    let mut seen = HashSet::new();
+    values
+        .into_iter()
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
+        .filter(|value| seen.insert(value.to_ascii_lowercase()))
+        .collect()
+}
+
 async fn fetch_external_match_result(
     http: &HttpClient,
     link: &ExternalResultLink,
@@ -7682,6 +7930,23 @@ mod tests {
         assert!(!links[0].requires_browser_automation);
         assert_eq!(links[1].source_key, "sofascore_results");
         assert!(links[1].requires_browser_automation);
+    }
+
+    #[test]
+    fn validates_external_result_url_host() {
+        assert!(validate_external_result_url(
+            "flashscore_results",
+            "https://www.flashscore.com/match/example"
+        )
+        .is_ok());
+        assert!(validate_external_result_url(
+            "sofascore_results",
+            "https://www.flashscore.com/match/example"
+        )
+        .is_err());
+        assert!(
+            validate_external_result_url("flashscore_results", "file:///tmp/result.html").is_err()
+        );
     }
 
     #[test]
