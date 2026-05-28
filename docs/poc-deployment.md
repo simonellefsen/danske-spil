@@ -2,7 +2,12 @@
 
 This deployment is local-only for Docker Desktop Kubernetes. It keeps `gambler` in observe-only mode and exposes only a ClusterIP service.
 
-The active runtime is a Rust binary. The Dockerfile builds it in a Rust builder stage and copies only the binary and CA bundle into a `scratch` final image.
+The active runtime is a Rust binary. The Dockerfile first builds a tiny stub
+binary from `Cargo.toml` and `Cargo.lock` to cache dependency compilation, then
+copies the real source and rebuilds the application crate. The final image still
+copies only the binary and CA bundle into `scratch`. The first build after
+Docker cache eviction is still slow, but source-only edits should reuse compiled
+dependencies and mainly rebuild `danske-spil-gambler`.
 
 ## Components
 

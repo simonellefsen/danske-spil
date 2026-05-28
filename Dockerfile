@@ -1,10 +1,20 @@
-FROM rust:1.87-alpine AS builder
+FROM rust:1.87-alpine AS deps
 
 RUN apk add --no-cache musl-dev ca-certificates
 
 WORKDIR /app
 
 COPY Cargo.toml Cargo.lock ./
+
+RUN mkdir src \
+    && printf 'fn main() {}\n' > src/main.rs \
+    && cargo build --release --locked \
+    && rm -rf src \
+        target/release/danske-spil-gambler \
+        target/release/deps/danske_spil_gambler-* \
+        target/release/.fingerprint/danske-spil-gambler-*
+
+FROM deps AS builder
 COPY src ./src
 
 RUN cargo build --release --locked
