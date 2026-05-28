@@ -41,6 +41,8 @@ Current POC status:
 - `POST /api/hermes/reflect/yesterday` writes an idempotent daily reflection into `hermes_reflections` for the previous Europe/Copenhagen calendar day.
 - `POST /api/hermes/run` executes one safe Hermes loop cycle. The cycle refreshes the same paper-only daily reflection, summarizes active baseline/proposal counts, records a `hermes_cycle_completed` audit event, and returns the sanitized strategy and ledger context used.
 - The Kubernetes `hermes-agent` deployment runs `/gambler hermes-agent`, serves the same read-only Hermes API, and refreshes the daily reflection on `HERMES_REFLECTION_INTERVAL_SECONDS` so Hermes state stays current even when no operator clicks the UI.
+- `GET /api/hermes` and `POST /api/hermes/run` include promotion gates for active experiments. These gates explain why promotion is blocked or eligible based on replay evidence, operator-reviewed status, settled paper sample size, unresolved exposure, and paper-only safety.
+- `POST /api/strategy/experiment/review` rejects `promote` actions unless the Hermes promotion gate for that experiment is clear.
 - The daily reflection is paper-only and summarizes scan/performance snapshots, simulated placements, settlement observations, and whether results are ready to evaluate.
 - Successful scanner runs refresh the previous-day reflection automatically, using the current ledger status of paper positions created that day so later settlements, voids, refunds, cancellations, and postponed items remain visible in the same daily record.
 - If paper placements are still awaiting result review, the reflection explicitly blocks strategy promotion based on unresolved exposure.
@@ -189,7 +191,8 @@ An experiment can become a baseline only after:
 
 - It changes exactly one variable.
 - It has replay/backtest evidence.
-- It has enough settled observations.
+- It has at least 100 settled paper observations.
+- It has no open or awaiting paper exposure.
 - It does not increase responsible-gambling risk.
 - It is approved by the operator.
 - It does not enable real-money placement by itself.

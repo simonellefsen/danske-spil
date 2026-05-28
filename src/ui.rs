@@ -292,6 +292,15 @@ pub fn render_index(base_path: &str) -> String {
                         }
                     }
                     section {
+                        h2 { title: "Hermes promotion gates for active strategy experiments. A row must clear every blocker before operator promotion review is allowed.", "Hermes promotion gates" }
+                        table {
+                            thead { tr {
+                                th { "Experiment" } th { "Eligible" } th { "Policy evidence" } th { "Blockers" } th { "Recommendation" }
+                            } }
+                            tbody { id: "hermes-promotion-gates" }
+                        }
+                    }
+                    section {
                         h2 { "Hermes view" }
                         pre { id: "hermes", "No reflections yet." }
                     }
@@ -1152,10 +1161,33 @@ function renderAuditEvents(events) {
     $("audit-events").innerHTML = `<tr><td colspan="3" class="muted">No audit events yet.</td></tr>`;
   }
 }
-function renderStrategy(strategy) {
+function renderPromotionGates(gates) {
+  $("hermes-promotion-gates").innerHTML = (gates || []).map((gate) => {
+    const policy = gate.policy || {};
+    const blockers = gate.blockers || [];
+    return `
+      <tr>
+        <td>${esc(gate.title || gate.experiment_id || "-")}<br><span class="label">${esc(gate.variable_name || "")}</span></td>
+        <td><span class="pill ${gate.eligible_for_promotion ? "ok" : "danger"}">${gate.eligible_for_promotion ? "yes" : "no"}</span></td>
+        <td>
+          settled ${esc(policy.settled_paper_positions ?? 0)} / ${esc(policy.min_settled_paper_positions ?? "-")}<br>
+          <span class="label">open ${esc(policy.open_or_awaiting_paper_positions ?? 0)}, replay ${policy.replay_evidence_present ? "yes" : "no"}</span>
+        </td>
+        <td>${blockers.length ? blockers.map(esc).join("<br>") : "<span class=\"ok\">clear</span>"}</td>
+        <td>${esc(gate.recommendation || "")}</td>
+      </tr>
+    `;
+  }).join("");
+  if (!(gates || []).length) {
+    $("hermes-promotion-gates").innerHTML = `<tr><td colspan="5" class="muted">No active experiments require promotion gating.</td></tr>`;
+  }
+}
+function renderStrategy(strategy, gates) {
   const experiments = strategy.experiments || [];
+  const gateByExperiment = new Map((gates || []).map((gate) => [gate.experiment_id, gate]));
   $("experiments").innerHTML = experiments.map((item) => {
     const evidence = item.evidence || {};
+    const gate = gateByExperiment.get(item.id);
     const change = `${JSON.stringify(item.baseline_value)} -> ${JSON.stringify(item.proposed_value)}`;
     const evidenceParts = [];
     if (evidence.long_price_candidate_count !== undefined) {
@@ -1180,7 +1212,7 @@ function renderStrategy(strategy) {
     const canApprove = item.status === "proposed";
     const canReplay = ["proposed", "approved_for_replay", "active_simulation"].includes(item.status);
     const canActivate = item.status === "approved_for_replay" && !!replay;
-    const canPromote = item.status === "active_simulation" && !!replay;
+    const canPromote = item.status === "active_simulation" && !!replay && !!gate && !!gate.eligible_for_promotion;
     return `
       <tr>
         <td>${esc(item.status)}</td>
@@ -1193,7 +1225,7 @@ function renderStrategy(strategy) {
             <button data-exp="${item.id}" data-action="reject" ${!canApprove ? "disabled" : ""}>Reject</button>
             <button data-exp="${item.id}" data-action="replay" ${!canReplay ? "disabled" : ""}>Replay</button>
             <button data-exp="${item.id}" data-action="activate" ${!canActivate ? "disabled" : ""}>Activate</button>
-            <button data-exp="${item.id}" data-action="promote" ${!canPromote ? "disabled" : ""}>Promote</button>
+            <button data-exp="${item.id}" data-action="promote" title="${esc(gate && gate.recommendation ? gate.recommendation : "Promotion requires Hermes gate clearance.")}" ${!canPromote ? "disabled" : ""}>Promote</button>
           </div>
         </td>
       </tr>
@@ -1286,7 +1318,8 @@ async function load() {
   const auditEvents = await json(api("/api/audit/events"));
   renderAuditEvents(auditEvents);
   const hermes = await json(api("/api/hermes"));
-  renderStrategy(hermes.strategy || {});
+  renderStrategy(hermes.strategy || {}, hermes.promotion_gates || []);
+  renderPromotionGates(hermes.promotion_gates || []);
   $("hermes").textContent = JSON.stringify(hermes, null, 2);
 }
 $("scan").addEventListener("click", async () => {

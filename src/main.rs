@@ -298,29 +298,8 @@ async fn get_handler(State(state): State<Arc<AppState>>, uri: OriginalUri) -> Re
             Ok(events) => Json(events).into_response(),
             Err(error) => error_response(StatusCode::INTERNAL_SERVER_ERROR, error),
         },
-        "/api/hermes" => match state.service.store().hermes_reflections(25).await {
-            Ok(reflections) => match state.service.store().strategy_state().await {
-                Ok(strategy) => Json(json!({
-                    "mode": "sanitized_reflection_and_one_variable_proposals",
-                    "summary": "Hermes is integrated as a safe loop participant: it refreshes paper-only reflections, reads one-variable experiment proposals, and cannot control browsers, credentials, or real-money placement.",
-                    "loop": {
-                        "enabled": state.settings.hermes_agent_enabled,
-                        "reflection_interval_seconds": state.settings.hermes_reflection_interval_seconds,
-                        "manual_trigger": "/api/hermes/run",
-                        "kubernetes_component": "hermes-agent"
-                    },
-                    "safety": {
-                        "browser_control": false,
-                        "credential_access": false,
-                        "real_money_placement": false,
-                        "strategy_changes_require_operator_review": true
-                    },
-                    "reflections": reflections,
-                    "strategy": strategy
-                }))
-                .into_response(),
-                Err(error) => error_response(StatusCode::INTERNAL_SERVER_ERROR, error),
-            },
+        "/api/hermes" => match state.service.hermes_state().await {
+            Ok(hermes) => Json(hermes).into_response(),
             Err(error) => error_response(StatusCode::INTERNAL_SERVER_ERROR, error),
         },
         "/api/strategy" => match state.service.store().strategy_state().await {
@@ -726,6 +705,34 @@ async fn post_handler(
                 .get("notes")
                 .and_then(Value::as_str)
                 .unwrap_or_default();
+            if action == "promote" {
+                match state.service.hermes_state().await {
+                    Ok(hermes) => {
+                        let eligible = hermes
+                            .get("promotion_gates")
+                            .and_then(Value::as_array)
+                            .into_iter()
+                            .flatten()
+                            .find(|gate| {
+                                gate.get("experiment_id").and_then(Value::as_str)
+                                    == Some(experiment_id)
+                            })
+                            .and_then(|gate| {
+                                gate.get("eligible_for_promotion").and_then(Value::as_bool)
+                            })
+                            .unwrap_or(false);
+                        if !eligible {
+                            return error_response(
+                                StatusCode::BAD_REQUEST,
+                                anyhow::anyhow!(
+                                    "Hermes promotion gate has not cleared for experiment {experiment_id}"
+                                ),
+                            );
+                        }
+                    }
+                    Err(error) => return error_response(StatusCode::BAD_REQUEST, error),
+                }
+            }
             match state
                 .service
                 .store()

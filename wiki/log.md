@@ -164,6 +164,9 @@ Append-only timeline for project wiki maintenance. Use headings with the format 
 - Converted the `hermes-agent` Kubernetes deployment from a passive API view into a loop participant by running `/gambler hermes-agent`.
 - Added a scheduled Hermes-safe cycle that refreshes the paper-only daily reflection, summarizes active strategy/proposal state, and records a `hermes_cycle_completed` audit event.
 - Added `POST /api/hermes/run` and a web UI button for manually triggering one Hermes-safe cycle without browser control, credential access, or real-money placement.
+- Added Hermes promotion gates for active experiments, including replay evidence, one-variable status, minimum settled sample size, unresolved exposure, and paper-only safety blockers.
+- The web UI now renders promotion gates and disables experiment promotion until the Hermes gate marks the experiment eligible.
+- The strategy review API now rejects promotion attempts when the Hermes promotion gate has not cleared.
 
 ## [2026-05-25] implementation | Candidate ranking and paper settlement POC
 

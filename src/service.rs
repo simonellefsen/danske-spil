@@ -1,6 +1,6 @@
 use crate::config::Settings;
 use crate::danske_spil::scan_sports;
-use crate::models::CandidateBet;
+use crate::models::{CandidateBet, LedgerSummary};
 use crate::store::{new_id, Store};
 use chrono::{DateTime, Duration, Utc};
 use reqwest::header::{HeaderMap, HeaderValue, ACCEPT, ACCEPT_LANGUAGE};
@@ -28,6 +28,8 @@ const PRIMARY_MARKET_KINDS: &[&str] = &[
     "goal",
     "outright",
 ];
+
+const HERMES_MIN_SETTLED_FOR_PROMOTION: usize = 100;
 
 #[derive(Clone)]
 pub struct GamblerService {
@@ -154,6 +156,7 @@ impl GamblerService {
             json!({"error": error.to_string()})
         });
         let ledger_summary = self.store.ledger_summary().await.ok();
+        let promotion_gates = hermes_promotion_gates(&strategy, ledger_summary.as_ref());
         let proposed_experiment_count = strategy
             .get("experiments")
             .and_then(Value::as_array)
@@ -177,7 +180,8 @@ impl GamblerService {
                     .and_then(Value::as_array)
                     .map(|items| items.len())
                     .unwrap_or_default(),
-                "proposed_experiment_count": proposed_experiment_count
+                "proposed_experiment_count": proposed_experiment_count,
+                "promotion_gates": promotion_gates
             },
             "ledger_summary": ledger_summary,
             "safety": {
@@ -192,6 +196,40 @@ impl GamblerService {
             .await
             .ok();
         summary
+    }
+
+    pub async fn hermes_state(&self) -> anyhow::Result<Value> {
+        let reflections = self.store.hermes_reflections(25).await?;
+        let strategy = self.store.strategy_state().await?;
+        let ledger_summary = self.store.ledger_summary().await.ok();
+        let promotion_gates = hermes_promotion_gates(&strategy, ledger_summary.as_ref());
+        Ok(json!({
+            "mode": "sanitized_reflection_and_one_variable_proposals",
+            "summary": "Hermes is integrated as a safe loop participant: it refreshes paper-only reflections, reads one-variable experiment proposals, and cannot control browsers, credentials, or real-money placement.",
+            "loop": {
+                "enabled": self.settings.hermes_agent_enabled,
+                "reflection_interval_seconds": self.settings.hermes_reflection_interval_seconds,
+                "manual_trigger": "/api/hermes/run",
+                "kubernetes_component": "hermes-agent"
+            },
+            "safety": {
+                "browser_control": false,
+                "credential_access": false,
+                "real_money_placement": false,
+                "strategy_changes_require_operator_review": true
+            },
+            "promotion_policy": {
+                "min_settled_paper_positions": HERMES_MIN_SETTLED_FOR_PROMOTION,
+                "requires_replay_evidence": true,
+                "requires_no_open_or_awaiting_exposure": true,
+                "requires_operator_reviewed_state": true,
+                "paper_only": true
+            },
+            "reflections": reflections,
+            "strategy": strategy,
+            "ledger_summary": ledger_summary,
+            "promotion_gates": promotion_gates
+        }))
     }
 
     pub async fn scan(&self, include_live: bool) -> anyhow::Result<Value> {
@@ -2097,9 +2135,167 @@ fn boolish(value: Option<&Value>) -> bool {
     value.and_then(Value::as_bool).unwrap_or(false)
 }
 
+fn hermes_promotion_gates(strategy: &Value, ledger_summary: Option<&LedgerSummary>) -> Vec<Value> {
+    let settled_count = ledger_summary
+        .map(|summary| summary.settled_count)
+        .unwrap_or_default();
+    let open_count = ledger_summary
+        .map(|summary| summary.open_count)
+        .unwrap_or_default();
+    let Some(experiments) = strategy.get("experiments").and_then(Value::as_array) else {
+        return Vec::new();
+    };
+
+    experiments
+        .iter()
+        .filter(|experiment| {
+            !matches!(
+                experiment.get("status").and_then(Value::as_str),
+                Some("promoted" | "rejected" | "rolled_back")
+            )
+        })
+        .map(|experiment| {
+            let status = experiment
+                .get("status")
+                .and_then(Value::as_str)
+                .unwrap_or_default();
+            let variable_name = experiment
+                .get("variable_name")
+                .and_then(Value::as_str)
+                .unwrap_or_default();
+            let replay_evidence_present = experiment
+                .get("decision_payload")
+                .and_then(|payload| payload.get("replay_evidence"))
+                .map(|value| !value.is_null())
+                .unwrap_or(false);
+            let paper_only = experiment
+                .get("evidence")
+                .and_then(|evidence| evidence.get("safety"))
+                .and_then(|safety| safety.get("paper_only"))
+                .and_then(Value::as_bool)
+                .unwrap_or(false);
+            let one_variable = !variable_name.is_empty()
+                && experiment
+                    .get("baseline_value")
+                    .zip(experiment.get("proposed_value"))
+                    .map(|(baseline, proposed)| baseline != proposed)
+                    .unwrap_or(false);
+
+            let mut blockers = Vec::new();
+            if status != "active_simulation" {
+                blockers.push("experiment_not_active_simulation");
+            }
+            if !one_variable {
+                blockers.push("not_one_variable_change");
+            }
+            if !replay_evidence_present {
+                blockers.push("missing_replay_evidence");
+            }
+            if settled_count < HERMES_MIN_SETTLED_FOR_PROMOTION {
+                blockers.push("insufficient_settled_paper_positions");
+            }
+            if open_count > 0 {
+                blockers.push("open_or_awaiting_paper_exposure");
+            }
+            if !paper_only {
+                blockers.push("paper_only_safety_not_confirmed");
+            }
+
+            let eligible_for_promotion = blockers.is_empty();
+            let recommendation = if eligible_for_promotion {
+                "Eligible for operator promotion review; still paper-only and never enables real-money placement."
+            } else {
+                "Keep observing or replaying. Do not promote until all blockers are cleared."
+            };
+            json!({
+                "experiment_id": experiment.get("id").cloned().unwrap_or(Value::Null),
+                "title": experiment.get("title").cloned().unwrap_or(Value::Null),
+                "status": status,
+                "variable_name": variable_name,
+                "eligible_for_promotion": eligible_for_promotion,
+                "blockers": blockers,
+                "policy": {
+                    "min_settled_paper_positions": HERMES_MIN_SETTLED_FOR_PROMOTION,
+                    "settled_paper_positions": settled_count,
+                    "open_or_awaiting_paper_positions": open_count,
+                    "replay_evidence_present": replay_evidence_present,
+                    "one_variable_change": one_variable,
+                    "paper_only": paper_only,
+                    "requires_status": "active_simulation"
+                },
+                "recommendation": recommendation
+            })
+        })
+        .collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::collections::BTreeMap;
+
+    fn test_ledger_summary(settled_count: usize, open_count: usize) -> LedgerSummary {
+        LedgerSummary {
+            count: settled_count + open_count,
+            open_count,
+            settled_count,
+            turnover: 0.0,
+            open_exposure: 0.0,
+            simulated_return: 0.0,
+            profit_loss: 0.0,
+            hit_rate: None,
+            average_odds: None,
+            by_status: BTreeMap::new(),
+        }
+    }
+
+    #[test]
+    fn hermes_promotion_gate_blocks_insufficient_sample_and_open_exposure() {
+        let strategy = json!({
+            "experiments": [{
+                "id": "experiment-1",
+                "title": "Example",
+                "status": "active_simulation",
+                "variable_name": "excluded_risk_flags",
+                "baseline_value": [],
+                "proposed_value": ["large_odds_movement"],
+                "evidence": {"safety": {"paper_only": true}},
+                "decision_payload": {"replay_evidence": {"paper_only": true}}
+            }]
+        });
+        let ledger = test_ledger_summary(27, 3);
+
+        let gates = hermes_promotion_gates(&strategy, Some(&ledger));
+
+        assert_eq!(gates.len(), 1);
+        assert_eq!(gates[0]["eligible_for_promotion"], json!(false));
+        let blockers = gates[0]["blockers"].as_array().unwrap();
+        assert!(blockers.contains(&json!("insufficient_settled_paper_positions")));
+        assert!(blockers.contains(&json!("open_or_awaiting_paper_exposure")));
+    }
+
+    #[test]
+    fn hermes_promotion_gate_allows_clear_active_simulation() {
+        let strategy = json!({
+            "experiments": [{
+                "id": "experiment-1",
+                "title": "Example",
+                "status": "active_simulation",
+                "variable_name": "max_decimal_odds",
+                "baseline_value": 8.0,
+                "proposed_value": 6.0,
+                "evidence": {"safety": {"paper_only": true}},
+                "decision_payload": {"replay_evidence": {"paper_only": true}}
+            }]
+        });
+        let ledger = test_ledger_summary(100, 0);
+
+        let gates = hermes_promotion_gates(&strategy, Some(&ledger));
+
+        assert_eq!(gates.len(), 1);
+        assert_eq!(gates[0]["eligible_for_promotion"], json!(true));
+        assert!(gates[0]["blockers"].as_array().unwrap().is_empty());
+    }
 
     #[test]
     fn flashscore_variants_expand_localized_and_known_names() {
