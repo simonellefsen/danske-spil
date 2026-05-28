@@ -44,17 +44,30 @@ post only compact settlement facts to the API.
 
 ## Local Public-Source Agent
 
-For known public result URLs, run:
+The local runner consumes the queue and has two paths:
+
+- Configured result links are probed directly or through browser automation.
+- Missing links are first resolved through Flashscore participant search and
+  event feeds for supported sports, then the discovered result link and compact
+  final-score evidence are posted back to the API.
+
+Run it with:
 
 ```text
 rtk kubectl --context docker-desktop -n danske-spil port-forward svc/gambler-api 18083:8080
-rtk python3 scripts/result_agent.py --api http://127.0.0.1:18083 --browser-only --dry-run
+rtk python3 scripts/result_agent.py --api http://127.0.0.1:18083 --dry-run
 ```
 
 Remove `--dry-run` after reviewing the extracted payload. Add `--settle` only
-when deterministic paper settlement is intended. Direct HTTP result links are
-already attempted by the worker; `--browser-only` focuses the local browser
-agent on sources such as Sofascore that block direct fetches.
+when deterministic paper settlement is intended. `--browser-only` focuses the
+runner on links that require browser automation and skips direct HTTP links.
+`--no-discover` disables automated Flashscore discovery and restores the older
+"only configured links" behavior.
+
+Flashscore discovery currently covers football, tennis, and basketball where a
+participant feed exposes the event row and final score. If a row still returns
+`flashscore_discovery_no_match`, the next step is to add another source adapter
+or a sport-specific pagination path, not an operator prompt.
 
 ## Evidence Contract
 
@@ -71,7 +84,11 @@ pages, or hidden model reasoning.
 
 ## Current Boundary
 
-The current implementation creates the queue and local public-source agent.
-The next implementation step is a local read-only Danske Spil account-history
-agent that uses an authenticated browser session to read settled coupon history
-and submit the same sanitized evidence payload.
+The current implementation creates the queue, supports configured public result
+links, and automatically discovers Flashscore result links for common stale
+football, basketball, and tennis rows. Winner and over/under markets can be
+graded from external final-score evidence. The next implementation step is a
+local read-only Danske Spil account-history agent that uses an authenticated
+browser session to read settled coupon history and submit the same sanitized
+evidence payload, especially for cancellations, refunds, and markets that
+cannot be graded from a plain final score.

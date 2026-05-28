@@ -3151,7 +3151,7 @@ impl Store {
                 skipped.push(json!({"bet_id": bet_id, "event_name": event_name, "reason": "missing_outcome_name"}));
                 continue;
             };
-            if !is_auto_settle_winner_market(market_kind.as_deref(), market_name.as_deref()) {
+            if !is_auto_settle_external_market(market_kind.as_deref(), market_name.as_deref()) {
                 skipped.push(json!({
                     "bet_id": bet_id,
                     "event_name": event_name,
@@ -3219,7 +3219,13 @@ impl Store {
                 "expected_event_finish_at": expected_result_check_after,
                 "score": {"home": evidence.home_score, "away": evidence.away_score}
             }));
-            let Some(result) = grade_winner_outcome(&outcome_name, &link, &evidence) else {
+            let Some(result) = grade_external_outcome(
+                &outcome_name,
+                market_kind.as_deref(),
+                market_name.as_deref(),
+                &link,
+                &evidence,
+            ) else {
                 skipped.push(json!({
                     "bet_id": bet_id,
                     "event_name": event_name,
@@ -3493,7 +3499,7 @@ impl Store {
                 }));
                 continue;
             };
-            if !is_auto_settle_winner_market(market_kind.as_deref(), market_name.as_deref()) {
+            if !is_auto_settle_external_market(market_kind.as_deref(), market_name.as_deref()) {
                 skipped.push(json!({
                     "bet_id": bet_id,
                     "event_name": row_event_name,
@@ -3503,7 +3509,13 @@ impl Store {
                 }));
                 continue;
             }
-            let Some(result) = grade_winner_outcome(&outcome_name, &link, &evidence) else {
+            let Some(result) = grade_external_outcome(
+                &outcome_name,
+                market_kind.as_deref(),
+                market_name.as_deref(),
+                &link,
+                &evidence,
+            ) else {
                 skipped.push(json!({
                     "bet_id": bet_id,
                     "event_name": row_event_name,
@@ -7714,6 +7726,34 @@ fn is_auto_settle_winner_market(market_kind: Option<&str>, market_name: Option<&
         || name.contains("winner")
 }
 
+fn is_auto_settle_over_under_market(market_kind: Option<&str>, market_name: Option<&str>) -> bool {
+    let kind = market_kind.unwrap_or_default().to_ascii_lowercase();
+    let name = market_name.unwrap_or_default().to_ascii_lowercase();
+    kind == "over_under"
+        || kind == "total"
+        || name.contains("o/u")
+        || name.contains("over/under")
+        || name.contains("over under")
+}
+
+fn is_auto_settle_external_market(market_kind: Option<&str>, market_name: Option<&str>) -> bool {
+    is_auto_settle_winner_market(market_kind, market_name)
+        || is_auto_settle_over_under_market(market_kind, market_name)
+}
+
+fn grade_external_outcome(
+    outcome_name: &str,
+    market_kind: Option<&str>,
+    market_name: Option<&str>,
+    link: &ExternalResultLink,
+    evidence: &ExternalMatchResult,
+) -> Option<&'static str> {
+    if is_auto_settle_over_under_market(market_kind, market_name) {
+        return grade_over_under_outcome(outcome_name, market_name, evidence);
+    }
+    grade_winner_outcome(outcome_name, link, evidence)
+}
+
 fn grade_winner_outcome(
     outcome_name: &str,
     link: &ExternalResultLink,
@@ -7744,6 +7784,44 @@ fn grade_winner_outcome(
         return Some("lost");
     }
     None
+}
+
+fn grade_over_under_outcome(
+    outcome_name: &str,
+    market_name: Option<&str>,
+    evidence: &ExternalMatchResult,
+) -> Option<&'static str> {
+    let outcome = normalize_match_name(outcome_name);
+    let wants_over = outcome.contains("over");
+    let wants_under = outcome.contains("under");
+    if !wants_over && !wants_under {
+        return None;
+    }
+    let line = parse_over_under_line(market_name.unwrap_or_default())
+        .or_else(|| parse_over_under_line(outcome_name))?;
+    let total = f64::from(evidence.home_score + evidence.away_score);
+    if (total - line).abs() < f64::EPSILON {
+        return Some("pushed");
+    }
+    if wants_over {
+        Some(if total > line { "won" } else { "lost" })
+    } else {
+        Some(if total < line { "won" } else { "lost" })
+    }
+}
+
+fn parse_over_under_line(value: &str) -> Option<f64> {
+    value
+        .replace(',', ".")
+        .split(|ch: char| !(ch.is_ascii_digit() || ch == '.'))
+        .find_map(|part| {
+            let part = part.trim_matches('.');
+            if part.is_empty() {
+                None
+            } else {
+                part.parse::<f64>().ok()
+            }
+        })
 }
 
 fn parse_score_title(title: &str) -> Option<(String, String, i32, i32)> {
@@ -8057,6 +8135,48 @@ mod tests {
         assert_eq!(
             grade_winner_outcome("Notts County", &link, &evidence),
             Some("lost")
+        );
+    }
+
+    #[test]
+    fn grades_over_under_totals() {
+        let link = ExternalResultLink {
+            source_key: "flashscore_results".to_string(),
+            url: "https://example.test/match".to_string(),
+            home_aliases: vec!["Team FOG Naestved".to_string()],
+            away_aliases: vec!["Bakken Bears".to_string()],
+            requires_browser_automation: false,
+        };
+        let evidence = ExternalMatchResult {
+            source_key: link.source_key.clone(),
+            url: link.url.clone(),
+            title: "Team FOG Naestved - Bakken Bears 81:87".to_string(),
+            home_name: "Team FOG Naestved".to_string(),
+            away_name: "Bakken Bears".to_string(),
+            home_score: 81,
+            away_score: 87,
+            confidence: 0.82,
+        };
+
+        assert_eq!(
+            grade_external_outcome(
+                "Over",
+                Some("over_under"),
+                Some("Antal point O/U 180,5"),
+                &link,
+                &evidence
+            ),
+            Some("lost")
+        );
+        assert_eq!(
+            grade_external_outcome(
+                "Under",
+                Some("over_under"),
+                Some("Antal point O/U 180,5"),
+                &link,
+                &evidence
+            ),
+            Some("won")
         );
     }
 }
