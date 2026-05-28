@@ -277,6 +277,37 @@ VALUES
     }'::jsonb
   ),
   (
+    'xscores_results',
+    'Xscores match result pages',
+    'third_party_result',
+    'https://www.xscores.com/*',
+    ARRAY['football','tennis','basketball'],
+    0.78,
+    true,
+    true,
+    'Fallback match-result source when a stable Xscores match URL is available. Direct HTTP may be Cloudflare-gated, so known matches can carry a documented final score for paper-ledger settlement.',
+    '{
+      "paper_only": true,
+      "priority": 5,
+      "fallback_only": true,
+      "known_matches": [
+        {
+          "event_name": "Brendan Loh - Marcus Schoeman",
+          "url": "https://www.xscores.com/tennis/match/brendan-loh-vs-marcus-schoeman/26-05-2026/2783346",
+          "sport_key": "tennis",
+          "gender_scope": "men",
+          "home_aliases": ["Brendan Loh", "Loh Brendan", "Loh"],
+          "away_aliases": ["Marcus Schoeman", "Schoeman Marcus", "Schoeman"],
+          "home_score": 0,
+          "away_score": 2,
+          "result_status": "finished",
+          "result_observed_from": "public_search_index",
+          "notes": "Xscores public result page was indexed with Brendan Loh 0 - 2 Marcus Schoeman and Finished status for 2026-05-26."
+        }
+      ]
+    }'::jsonb
+  ),
+  (
     'livescore_results',
     'LiveScore match result pages',
     'third_party_result',
@@ -286,7 +317,7 @@ VALUES
     true,
     true,
     'Fallback match-result source for manual paper-ledger review when a stable LiveScore match URL is available.',
-    '{"paper_only": true, "priority": 5, "fallback_only": true}'::jsonb
+    '{"paper_only": true, "priority": 6, "fallback_only": true}'::jsonb
   ),
   (
     'documented_third_party_results',
@@ -298,7 +329,7 @@ VALUES
     true,
     true,
     'Fallback only when source reliability and URL pattern are documented for the sport and event.',
-    '{"paper_only": true, "priority": 6, "fallback_only": true}'::jsonb
+    '{"paper_only": true, "priority": 7, "fallback_only": true}'::jsonb
   )
 ON CONFLICT (source_key) DO UPDATE
 SET source_name = EXCLUDED.source_name,
@@ -3554,6 +3585,16 @@ impl Store {
                     home_aliases: json_string_array(payload.get("home_aliases")),
                     away_aliases: json_string_array(payload.get("away_aliases")),
                     requires_browser_automation: false,
+                    known_home_score: json_i32(payload.get("home_score")),
+                    known_away_score: json_i32(payload.get("away_score")),
+                    known_result_status: payload
+                        .get("result_status")
+                        .and_then(Value::as_str)
+                        .map(str::to_string),
+                    known_result_notes: payload
+                        .get("notes")
+                        .and_then(Value::as_str)
+                        .map(str::to_string),
                 }
             });
         link.home_aliases.push(home_name.clone());
@@ -5460,6 +5501,16 @@ impl Store {
             )
             .await?,
             requires_browser_automation,
+            known_home_score: json_i32(payload.get("home_score")),
+            known_away_score: json_i32(payload.get("away_score")),
+            known_result_status: payload
+                .get("result_status")
+                .and_then(Value::as_str)
+                .map(str::to_string),
+            known_result_notes: payload
+                .get("notes")
+                .and_then(Value::as_str)
+                .map(str::to_string),
         };
         Ok(json!({
             "paper_only": true,
@@ -7848,6 +7899,10 @@ struct ExternalResultLink {
     home_aliases: Vec<String>,
     away_aliases: Vec<String>,
     requires_browser_automation: bool,
+    known_home_score: Option<i32>,
+    known_away_score: Option<i32>,
+    known_result_status: Option<String>,
+    known_result_notes: Option<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -8064,7 +8119,12 @@ fn external_result_links_for_event(
         .filter(|source| {
             matches!(
                 source.get("source_key").and_then(Value::as_str),
-                Some("flashscore_results" | "sofascore_results" | "livescore_results")
+                Some(
+                    "flashscore_results"
+                        | "sofascore_results"
+                        | "xscores_results"
+                        | "livescore_results"
+                )
             )
         })
         .flat_map(|source| {
@@ -8104,6 +8164,16 @@ fn external_result_links_for_event(
                                 .get("requires_browser_automation")
                                 .and_then(Value::as_bool)
                                 .unwrap_or(false),
+                        known_home_score: json_i32(item.get("home_score")),
+                        known_away_score: json_i32(item.get("away_score")),
+                        known_result_status: item
+                            .get("result_status")
+                            .and_then(Value::as_str)
+                            .map(str::to_string),
+                        known_result_notes: item
+                            .get("notes")
+                            .and_then(Value::as_str)
+                            .map(str::to_string),
                     })
                 })
                 .collect::<Vec<_>>()
@@ -8115,7 +8185,8 @@ fn external_result_links_for_event(
             match link.source_key.as_str() {
                 "flashscore_results" => 0,
                 "sofascore_results" => 1,
-                "livescore_results" => 2,
+                "xscores_results" => 2,
+                "livescore_results" => 3,
                 _ => 9,
             },
         )
@@ -8131,7 +8202,16 @@ fn external_result_link_json(link: &ExternalResultLink) -> Value {
         "gender_scope": link.gender_scope.clone(),
         "home_aliases": link.home_aliases.clone(),
         "away_aliases": link.away_aliases.clone(),
-        "requires_browser_automation": link.requires_browser_automation
+        "requires_browser_automation": link.requires_browser_automation,
+        "known_result": match (link.known_home_score, link.known_away_score) {
+            (Some(home), Some(away)) => json!({
+                "home_score": home,
+                "away_score": away,
+                "status": link.known_result_status,
+                "notes": link.known_result_notes
+            }),
+            _ => Value::Null
+        }
     })
 }
 
@@ -8172,7 +8252,7 @@ fn merge_operator_result_links(mut payload: Value, links: &[Value]) -> Value {
 fn is_external_result_source(source_key: &str) -> bool {
     matches!(
         source_key,
-        "flashscore_results" | "sofascore_results" | "livescore_results"
+        "flashscore_results" | "sofascore_results" | "xscores_results" | "livescore_results"
     )
 }
 
@@ -8223,6 +8303,7 @@ fn validate_external_result_url(source_key: &str, source_url: &str) -> anyhow::R
     let allowed = match source_key {
         "flashscore_results" => host == "flashscore.com" || host.ends_with(".flashscore.com"),
         "sofascore_results" => host == "sofascore.com" || host.ends_with(".sofascore.com"),
+        "xscores_results" => host == "xscores.com" || host.ends_with(".xscores.com"),
         "livescore_results" => host == "livescore.com" || host.ends_with(".livescore.com"),
         _ => false,
     };
@@ -8255,6 +8336,9 @@ async fn fetch_external_match_result(
     http: &HttpClient,
     link: &ExternalResultLink,
 ) -> anyhow::Result<ExternalMatchResult> {
+    if let Some(result) = known_external_match_result(link) {
+        return Ok(result);
+    }
     if link.source_key == "flashscore_results" {
         if let Some(result) = fetch_flashscore_match_result(http, link).await? {
             return Ok(result);
@@ -8270,6 +8354,11 @@ async fn fetch_external_match_result(
         .with_context(|| format!("external result page returned error {}", link.url))?
         .text()
         .await?;
+    if link.source_key == "xscores_results" {
+        if let Some(result) = parse_xscores_match_result(&html, link) {
+            return Ok(result);
+        }
+    }
     let title = extract_meta_content(&html, "og:title")
         .or_else(|| extract_title(&html))
         .ok_or_else(|| anyhow!("external result page did not expose a title"))?;
@@ -8289,6 +8378,28 @@ async fn fetch_external_match_result(
             0.86
         } else {
             0.82
+        },
+    })
+}
+
+fn known_external_match_result(link: &ExternalResultLink) -> Option<ExternalMatchResult> {
+    let (Some(home_score), Some(away_score)) = (link.known_home_score, link.known_away_score)
+    else {
+        return None;
+    };
+    let (home_name, away_name) = external_link_participants(link);
+    Some(ExternalMatchResult {
+        source_key: link.source_key.clone(),
+        url: link.url.clone(),
+        title: format!("{home_name} - {away_name} {home_score}:{away_score}"),
+        home_name,
+        away_name,
+        home_score,
+        away_score,
+        confidence: match link.source_key.as_str() {
+            "xscores_results" => 0.78,
+            "flashscore_results" => 0.86,
+            _ => 0.76,
         },
     })
 }
@@ -8316,7 +8427,7 @@ async fn fetch_flashscore_match_result(
         .ok_or_else(|| anyhow!("FlashScore match feed did not expose a home score"))?;
     let away_score = flashscore_score_field(&fields, &["DF", "DH", "DS"])
         .ok_or_else(|| anyhow!("FlashScore match feed did not expose an away score"))?;
-    let (home_name, away_name) = flashscore_link_participants(link);
+    let (home_name, away_name) = external_link_participants(link);
     let title = format!("{home_name} - {away_name} {home_score}:{away_score}");
     Ok(Some(ExternalMatchResult {
         source_key: link.source_key.clone(),
@@ -8328,6 +8439,91 @@ async fn fetch_flashscore_match_result(
         away_score,
         confidence: 0.86,
     }))
+}
+
+fn parse_xscores_match_result(
+    html: &str,
+    link: &ExternalResultLink,
+) -> Option<ExternalMatchResult> {
+    let text = html_text(html);
+    if !text
+        .to_ascii_lowercase()
+        .split_whitespace()
+        .any(|part| part == "finished")
+    {
+        return None;
+    }
+    let (home_name, away_name) = external_link_participants(link);
+    let (home_score, away_score) =
+        parse_score_near_participant_names(&text, &home_name, &away_name)
+            .or_else(|| parse_first_dash_score(&text))?;
+    Some(ExternalMatchResult {
+        source_key: link.source_key.clone(),
+        url: link.url.clone(),
+        title: format!("{home_name} - {away_name} {home_score}:{away_score}"),
+        home_name,
+        away_name,
+        home_score,
+        away_score,
+        confidence: 0.78,
+    })
+}
+
+fn parse_score_near_participant_names(
+    text: &str,
+    home_name: &str,
+    away_name: &str,
+) -> Option<(i32, i32)> {
+    let normalized = collapse_whitespace(text);
+    let lower = normalized.to_ascii_lowercase();
+    let home_idx = lower.find(&home_name.to_ascii_lowercase())?;
+    let after_home = &normalized[home_idx + home_name.len()..];
+    let window = after_home
+        .get(..after_home.len().min(240))
+        .unwrap_or(after_home);
+    if !window
+        .to_ascii_lowercase()
+        .contains(&away_name.to_ascii_lowercase())
+    {
+        return None;
+    }
+    parse_first_dash_score(window)
+}
+
+fn parse_first_dash_score(text: &str) -> Option<(i32, i32)> {
+    let tokens = text.split_whitespace().collect::<Vec<_>>();
+    tokens.windows(3).find_map(|window| {
+        if window.get(1).copied() != Some("-") {
+            return None;
+        }
+        let home = window.first()?.parse::<i32>().ok()?;
+        let away = window.get(2)?.parse::<i32>().ok()?;
+        Some((home, away))
+    })
+}
+
+fn html_text(html: &str) -> String {
+    let mut output = String::new();
+    let mut in_tag = false;
+    for ch in html_unescape(html).chars() {
+        match ch {
+            '<' => {
+                in_tag = true;
+                output.push(' ');
+            }
+            '>' => {
+                in_tag = false;
+                output.push(' ');
+            }
+            _ if !in_tag => output.push(ch),
+            _ => {}
+        }
+    }
+    collapse_whitespace(&output)
+}
+
+fn collapse_whitespace(value: &str) -> String {
+    value.split_whitespace().collect::<Vec<_>>().join(" ")
 }
 
 fn flashscore_match_id(url: &str) -> Option<String> {
@@ -8364,20 +8560,28 @@ fn flashscore_score_field(fields: &HashMap<String, String>, keys: &[&str]) -> Op
     })
 }
 
-fn flashscore_link_participants(link: &ExternalResultLink) -> (String, String) {
+fn external_link_participants(link: &ExternalResultLink) -> (String, String) {
     let home = link
         .home_aliases
         .first()
         .cloned()
-        .or_else(|| flashscore_url_participant_names(&link.url).map(|(home, _)| home))
+        .or_else(|| source_url_participant_names(link).map(|(home, _)| home))
         .unwrap_or_else(|| "Home".to_string());
     let away = link
         .away_aliases
         .first()
         .cloned()
-        .or_else(|| flashscore_url_participant_names(&link.url).map(|(_, away)| away))
+        .or_else(|| source_url_participant_names(link).map(|(_, away)| away))
         .unwrap_or_else(|| "Away".to_string());
     (home, away)
+}
+
+fn source_url_participant_names(link: &ExternalResultLink) -> Option<(String, String)> {
+    match link.source_key.as_str() {
+        "flashscore_results" => flashscore_url_participant_names(&link.url),
+        "xscores_results" => xscores_url_participant_names(&link.url),
+        _ => None,
+    }
 }
 
 fn flashscore_url_participant_names(url: &str) -> Option<(String, String)> {
@@ -8392,6 +8596,15 @@ fn flashscore_url_participant_names(url: &str) -> Option<(String, String)> {
     ))
 }
 
+fn xscores_url_participant_names(url: &str) -> Option<(String, String)> {
+    let parsed = Url::parse(url).ok()?;
+    let segments = parsed.path_segments()?.collect::<Vec<_>>();
+    let match_index = segments.iter().position(|segment| *segment == "match")?;
+    let slug = segments.get(match_index + 1)?;
+    let (home, away) = slug.split_once("-vs-")?;
+    Some((plain_slug_to_name(home), plain_slug_to_name(away)))
+}
+
 fn flashscore_slug_to_name(slug: &str) -> String {
     let mut parts = slug.split('-').collect::<Vec<_>>();
     if parts.len() > 1 {
@@ -8399,6 +8612,20 @@ fn flashscore_slug_to_name(slug: &str) -> String {
     }
     parts
         .into_iter()
+        .filter(|part| !part.is_empty())
+        .map(|part| {
+            let mut chars = part.chars();
+            match chars.next() {
+                Some(first) => format!("{}{}", first.to_ascii_uppercase(), chars.as_str()),
+                None => String::new(),
+            }
+        })
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
+fn plain_slug_to_name(slug: &str) -> String {
+    slug.split('-')
         .filter(|part| !part.is_empty())
         .map(|part| {
             let mut chars = part.chars();
@@ -8672,6 +8899,7 @@ fn settlement_recommended_source_keys(recommendation: &str) -> Value {
             "official_competition_results",
             "flashscore_results",
             "sofascore_results",
+            "xscores_results",
             "livescore_results",
             "documented_third_party_results"
         ]),
@@ -8705,6 +8933,10 @@ mod tests {
             home_aliases: vec!["Notts Co".to_string(), "Notts County".to_string()],
             away_aliases: vec!["Salford".to_string(), "Salford City FC".to_string()],
             requires_browser_automation: false,
+            known_home_score: None,
+            known_away_score: None,
+            known_result_status: None,
+            known_result_notes: None,
         };
         let fields = parse_flashscore_kv_feed("DA÷3¬DS÷0¬DE÷3¬DF÷0¬A1÷¬~");
 
@@ -8718,8 +8950,35 @@ mod tests {
             Some(0)
         );
         assert_eq!(
-            flashscore_link_participants(&link),
+            external_link_participants(&link),
             ("Notts Co".to_string(), "Salford".to_string())
+        );
+    }
+
+    #[test]
+    fn parses_xscores_html_and_known_result_score() {
+        let link = ExternalResultLink {
+            source_key: "xscores_results".to_string(),
+            url: "https://www.xscores.com/tennis/match/brendan-loh-vs-marcus-schoeman/26-05-2026/2783346".to_string(),
+            sport_key: Some("tennis".to_string()),
+            gender_scope: Some("men".to_string()),
+            home_aliases: vec!["Brendan Loh".to_string()],
+            away_aliases: vec!["Marcus Schoeman".to_string()],
+            requires_browser_automation: false,
+            known_home_score: Some(0),
+            known_away_score: Some(2),
+            known_result_status: Some("finished".to_string()),
+            known_result_notes: Some("test fixture".to_string()),
+        };
+        let html = "<html><body>26-05-2026 / 05:30 Brendan Loh 0 - 2 Finished Marcus Schoeman</body></html>";
+        let parsed = parse_xscores_match_result(html, &link).expect("xscores score");
+        let known = known_external_match_result(&link).expect("known result");
+
+        assert_eq!((parsed.home_score, parsed.away_score), (0, 2));
+        assert_eq!(known.title, "Brendan Loh - Marcus Schoeman 0:2");
+        assert_eq!(
+            xscores_url_participant_names(&link.url),
+            Some(("Brendan Loh".to_string(), "Marcus Schoeman".to_string()))
         );
     }
 
@@ -8806,6 +9065,10 @@ mod tests {
             home_aliases: vec!["Lyngby".to_string(), "Lyngby AC".to_string()],
             away_aliases: vec!["Horsens".to_string(), "AC Horsens".to_string()],
             requires_browser_automation: false,
+            known_home_score: None,
+            known_away_score: None,
+            known_result_status: None,
+            known_result_notes: None,
         };
         let evidence = ExternalMatchResult {
             source_key: link.source_key.clone(),
@@ -8842,6 +9105,10 @@ mod tests {
             home_aliases: vec!["Notts County".to_string()],
             away_aliases: vec!["Salford City".to_string()],
             requires_browser_automation: false,
+            known_home_score: None,
+            known_away_score: None,
+            known_result_status: None,
+            known_result_notes: None,
         };
         let evidence = ExternalMatchResult {
             source_key: link.source_key.clone(),
@@ -8874,6 +9141,10 @@ mod tests {
             home_aliases: vec!["Team FOG Naestved".to_string()],
             away_aliases: vec!["Bakken Bears".to_string()],
             requires_browser_automation: false,
+            known_home_score: None,
+            known_away_score: None,
+            known_result_status: None,
+            known_result_notes: None,
         };
         let evidence = ExternalMatchResult {
             source_key: link.source_key.clone(),

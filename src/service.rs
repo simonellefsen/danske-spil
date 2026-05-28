@@ -422,6 +422,7 @@ impl GamblerService {
                 "official_competition_results",
                 "flashscore_results",
                 "sofascore_results",
+                "xscores_results",
                 "livescore_results"
             ],
             "instructions": [
@@ -755,6 +756,7 @@ fn result_agent_task(item: &Value, account_agent: &Value) -> Option<Value> {
             "official_competition_results",
             "flashscore_results",
             "sofascore_results",
+            "xscores_results",
             "livescore_results"
         ],
         "evidence_endpoint": "/api/settlement/external-evidence",
