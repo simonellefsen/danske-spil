@@ -3,7 +3,16 @@ use crate::danske_spil::scan_sports;
 use crate::models::CandidateBet;
 use crate::store::{new_id, Store};
 use chrono::{DateTime, Duration, Utc};
+use reqwest::header::{HeaderMap, HeaderValue, ACCEPT, ACCEPT_LANGUAGE};
+use reqwest::{Client as HttpClient, Url};
 use serde_json::{json, Value};
+use std::collections::HashSet;
+use std::time::Duration as StdDuration;
+
+const FLASHSCORE_SEARCH_URL: &str = "https://s.flashscore.com/search/";
+const FLASHSCORE_BASE_URL: &str = "https://www.flashscore.com";
+const FLASHSCORE_SOURCE_KEY: &str = "flashscore_results";
+const FLASHSCORE_FINISHED_STAGES: &[&str] = &["3", "10", "11"];
 
 const PRIMARY_MARKET_KINDS: &[&str] = &[
     "winner",
@@ -85,7 +94,9 @@ impl GamblerService {
                 "enabled": self.settings.settlement_queue_enabled,
                 "awaiting_grace_minutes": self.settings.settlement_awaiting_grace_minutes,
                 "limit": self.settings.settlement_queue_limit,
-                "lookup_cooldown_minutes": self.settings.settlement_lookup_cooldown_minutes
+                "lookup_cooldown_minutes": self.settings.settlement_lookup_cooldown_minutes,
+                "result_agent_enabled": self.settings.result_agent_enabled,
+                "result_agent_per_cycle_limit": self.settings.result_agent_per_cycle_limit
             },
             "runtime": "rust-dioxus",
             "sports_scope": ["football", "tennis", "basketball", "formula1", "golf", "cycling"]
@@ -417,6 +428,152 @@ impl GamblerService {
                 "Keep settlement paper-only; never submit a real bet."
             ]
         })
+    }
+
+    pub async fn run_result_agent_once(&self) -> Value {
+        if !self.settings.result_agent_enabled {
+            return json!({
+                "enabled": false,
+                "reason": "GAMBLER_RESULT_AGENT_ENABLED=false",
+                "attempted_count": 0,
+                "settled_count": 0,
+                "results": [],
+                "skipped": []
+            });
+        }
+
+        let queue = self.result_agent_queue().await;
+        let tasks = queue
+            .get("items")
+            .and_then(Value::as_array)
+            .cloned()
+            .unwrap_or_default();
+        let limit = self.settings.result_agent_per_cycle_limit.min(tasks.len());
+        let http = match flashscore_http_client() {
+            Ok(client) => client,
+            Err(error) => {
+                return json!({
+                    "enabled": true,
+                    "attempted_count": 0,
+                    "settled_count": 0,
+                    "error": error.to_string(),
+                    "results": [],
+                    "skipped": []
+                });
+            }
+        };
+        let mut results = Vec::new();
+        let mut skipped = Vec::new();
+        let mut settled_count = 0usize;
+
+        for task in tasks.into_iter().take(limit) {
+            let task_kind = text(&task, "task_kind").unwrap_or_default();
+            if task_kind != "public_result_source_discovery" {
+                skipped.push(json!({
+                    "task_kind": task_kind,
+                    "reason": "handled_by_account_agent_or_configured_link_worker",
+                    "selection": task.get("selection").cloned().unwrap_or(Value::Null)
+                }));
+                continue;
+            }
+
+            match flashscore_discover(&http, &task).await {
+                Ok(Some(evidence)) => {
+                    let source_link_payload = evidence.source_link_payload();
+                    let source_link_result = match self
+                        .store
+                        .add_external_result_link(&source_link_payload)
+                        .await
+                    {
+                        Ok(result) => result,
+                        Err(error) => {
+                            skipped.push(json!({
+                                "task_kind": task_kind,
+                                "reason": "source_link_persist_failed",
+                                "event_name": evidence.event_name,
+                                "source_url": evidence.source_url,
+                                "error": error.to_string()
+                            }));
+                            continue;
+                        }
+                    };
+
+                    let evidence_result = if evidence.finished {
+                        match self
+                            .store
+                            .ingest_external_result_evidence(&evidence.evidence_payload(true))
+                            .await
+                        {
+                            Ok(result) => {
+                                settled_count += result
+                                    .get("settled_count")
+                                    .and_then(Value::as_u64)
+                                    .unwrap_or_default()
+                                    as usize;
+                                result
+                            }
+                            Err(error) => json!({
+                                "posted": false,
+                                "error": error.to_string()
+                            }),
+                        }
+                    } else {
+                        json!({
+                            "posted": false,
+                            "reason": "flashscore_event_not_finished",
+                            "stage": evidence.stage
+                        })
+                    };
+
+                    let result = json!({
+                        "source_key": FLASHSCORE_SOURCE_KEY,
+                        "source_url": evidence.source_url,
+                        "event_name": evidence.event_name,
+                        "sport_key": evidence.sport_key,
+                        "gender_scope": evidence.gender_scope,
+                        "score": {"home": evidence.home_score, "away": evidence.away_score},
+                        "finished": evidence.finished,
+                        "match_score": evidence.match_score,
+                        "source_link": source_link_result,
+                        "evidence_result": evidence_result,
+                        "paper_only": true
+                    });
+                    self.store
+                        .record_audit("result_agent_flashscore_discovery", result.clone())
+                        .await
+                        .ok();
+                    results.push(result);
+                }
+                Ok(None) => skipped.push(json!({
+                    "task_kind": task_kind,
+                    "reason": "flashscore_discovery_no_match",
+                    "selection": task.get("selection").cloned().unwrap_or(Value::Null)
+                })),
+                Err(error) => skipped.push(json!({
+                    "task_kind": task_kind,
+                    "reason": "flashscore_discovery_failed",
+                    "selection": task.get("selection").cloned().unwrap_or(Value::Null),
+                    "error": error.to_string()
+                })),
+            }
+        }
+
+        let summary = json!({
+            "enabled": true,
+            "paper_only": true,
+            "agent": "rust_flashscore_result_agent",
+            "cycle_limit": self.settings.result_agent_per_cycle_limit,
+            "attempted_count": results.len(),
+            "settled_count": settled_count,
+            "skipped_count": skipped.len(),
+            "results": results,
+            "skipped": skipped
+        });
+        self.store
+            .record_audit("result_agent_cycle_completed", summary.clone())
+            .await
+            .ok();
+        summary
     }
 
     pub async fn performance_report(&self) -> Value {
@@ -918,6 +1075,558 @@ fn score_candidate(decimal_odds: f64, features: &Value) -> Value {
         "score": score,
         "risk_flags": risk_flags
     })
+}
+
+#[derive(Clone, Debug)]
+struct FlashscoreParticipant {
+    id: String,
+    title: String,
+    url: String,
+}
+
+#[derive(Clone, Debug)]
+struct FlashscoreEvidence {
+    source_url: String,
+    sport_key: String,
+    gender_scope: Option<String>,
+    event_name: String,
+    home_name: String,
+    away_name: String,
+    home_score: i32,
+    away_score: i32,
+    event_id: String,
+    stage: String,
+    finished: bool,
+    match_score: f64,
+    home_aliases: Vec<String>,
+    away_aliases: Vec<String>,
+    raw_text_excerpt: String,
+}
+
+impl FlashscoreEvidence {
+    fn source_link_payload(&self) -> Value {
+        json!({
+            "source_key": FLASHSCORE_SOURCE_KEY,
+            "source_url": self.source_url,
+            "sport_key": self.sport_key,
+            "gender_scope": self.gender_scope,
+            "event_name": self.event_name,
+            "home_aliases": self.home_aliases,
+            "away_aliases": self.away_aliases,
+            "requires_browser_automation": false,
+            "notes": {
+                "agent_discovered": true,
+                "agent": "rust_flashscore_result_agent",
+                "method": "flashscore_participant_feed",
+                "event_id": self.event_id,
+                "stage": self.stage,
+                "paper_only": true
+            }
+        })
+    }
+
+    fn evidence_payload(&self, settle: bool) -> Value {
+        json!({
+            "source_key": FLASHSCORE_SOURCE_KEY,
+            "source_url": self.source_url,
+            "source_title": format!("{} - {} {}:{}", self.home_name, self.away_name, self.home_score, self.away_score),
+            "event_name": self.event_name,
+            "sport_key": self.sport_key,
+            "gender_scope": self.gender_scope,
+            "home_name": self.home_name,
+            "away_name": self.away_name,
+            "home_aliases": self.home_aliases,
+            "away_aliases": self.away_aliases,
+            "home_score": self.home_score,
+            "away_score": self.away_score,
+            "confidence": 0.82,
+            "settle": settle,
+            "browser_automation": {
+                "tool": "rust_reqwest",
+                "source": "flashscore_participant_feed",
+                "event_id": self.event_id
+            },
+            "raw_text_excerpt": self.raw_text_excerpt,
+            "paper_only": true
+        })
+    }
+}
+
+fn flashscore_http_client() -> anyhow::Result<HttpClient> {
+    let mut headers = HeaderMap::new();
+    headers.insert(
+        ACCEPT,
+        HeaderValue::from_static(
+            "text/html,application/xhtml+xml,application/xml;q=0.9,application/json;q=0.8,*/*;q=0.7",
+        ),
+    );
+    headers.insert(
+        ACCEPT_LANGUAGE,
+        HeaderValue::from_static("da-DK,da;q=0.9,en-US;q=0.8,en;q=0.7"),
+    );
+    Ok(HttpClient::builder()
+        .user_agent("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36")
+        .default_headers(headers)
+        .timeout(StdDuration::from_secs(20))
+        .build()?)
+}
+
+async fn flashscore_discover(
+    http: &HttpClient,
+    task: &Value,
+) -> anyhow::Result<Option<FlashscoreEvidence>> {
+    let selection = task.get("selection").unwrap_or(&Value::Null);
+    let sport_key = text(selection, "sport_key")
+        .unwrap_or_default()
+        .to_lowercase();
+    if flashscore_sport_id(&sport_key).is_none() {
+        return Ok(None);
+    }
+    let Some(event_name) = text(selection, "event_name").map(str::trim) else {
+        return Ok(None);
+    };
+    let Some((home_name, away_name)) = split_event_name(event_name) else {
+        return Ok(None);
+    };
+    let gender_scope = infer_selection_gender_scope(selection);
+    let Some(home) = best_flashscore_participant(http, &home_name, &sport_key).await? else {
+        return Ok(None);
+    };
+    let Some(away) = best_flashscore_participant(http, &away_name, &sport_key).await? else {
+        return Ok(None);
+    };
+    let Some(feed_sign) = fetch_flashscore_feed_sign(http, &home, &sport_key).await? else {
+        return Ok(None);
+    };
+    let feed_name = format!("pe_2_2_{}_x", home.id);
+    let feed_url = format!("{FLASHSCORE_BASE_URL}/x/feed/{feed_name}");
+    let feed = http
+        .get(feed_url)
+        .header("x-fsign", feed_sign)
+        .send()
+        .await?
+        .error_for_status()?
+        .text()
+        .await?;
+    let rows = parse_flashscore_feed_rows(&feed);
+    let expected_check_after = text(task, "expected_result_check_after")
+        .and_then(|value| DateTime::parse_from_rfc3339(value).ok())
+        .map(|value| value.with_timezone(&Utc));
+
+    let mut best: Option<(f64, bool, Value)> = None;
+    for row in rows {
+        let (score, reversed_side) = score_flashscore_row(
+            &row,
+            &home_name,
+            &away_name,
+            &home.id,
+            &away.id,
+            expected_check_after,
+        );
+        if score >= 90.0
+            && best
+                .as_ref()
+                .map(|(current, _, _)| score > *current)
+                .unwrap_or(true)
+        {
+            best = Some((score, reversed_side, row));
+        }
+    }
+    let Some((match_score, reversed_side, row)) = best else {
+        return Ok(None);
+    };
+    let mut feed_home = row_text(&row, "AE")
+        .or_else(|| row_text(&row, "FH"))
+        .or_else(|| row_text(&row, "WM"))
+        .unwrap_or_else(|| home_name.clone());
+    let mut feed_away = row_text(&row, "AF")
+        .or_else(|| row_text(&row, "FK"))
+        .or_else(|| row_text(&row, "WN"))
+        .unwrap_or_else(|| away_name.clone());
+    if unresolved_flashscore_name(&feed_home) {
+        feed_home = strip_country_suffix(&home.title);
+    }
+    if unresolved_flashscore_name(&feed_away) {
+        feed_away = strip_country_suffix(&away.title);
+    }
+    let mut home_score = row_text(&row, "AG")
+        .and_then(|value| value.parse::<i32>().ok())
+        .unwrap_or_default();
+    let mut away_score = row_text(&row, "AH")
+        .and_then(|value| value.parse::<i32>().ok())
+        .unwrap_or_default();
+    if reversed_side {
+        std::mem::swap(&mut feed_home, &mut feed_away);
+        std::mem::swap(&mut home_score, &mut away_score);
+    }
+    let event_id = row_text(&row, "AA").unwrap_or_default();
+    let stage = row_text(&row, "AC").unwrap_or_default();
+    let source_url = flashscore_match_url(&sport_key, &event_id, &home, &away);
+    Ok(Some(FlashscoreEvidence {
+        source_url,
+        sport_key,
+        gender_scope,
+        event_name: event_name.to_string(),
+        home_name: feed_home.clone(),
+        away_name: feed_away.clone(),
+        home_score,
+        away_score,
+        event_id: event_id.clone(),
+        stage: stage.clone(),
+        finished: FLASHSCORE_FINISHED_STAGES.contains(&stage.as_str()),
+        match_score,
+        home_aliases: dedup_texts(vec![home_name, feed_home, strip_country_suffix(&home.title)]),
+        away_aliases: dedup_texts(vec![away_name, feed_away, strip_country_suffix(&away.title)]),
+        raw_text_excerpt: format!(
+            "Flashscore feed {feed_name} matched {event_id}; stage={stage}; score={home_score}:{away_score}"
+        ),
+    }))
+}
+
+async fn best_flashscore_participant(
+    http: &HttpClient,
+    name: &str,
+    sport_key: &str,
+) -> anyhow::Result<Option<FlashscoreParticipant>> {
+    let mut participants = flashscore_search_participants(http, name, sport_key).await?;
+    participants.sort_by(|left, right| {
+        token_score(name, &right.title)
+            .partial_cmp(&token_score(name, &left.title))
+            .unwrap_or(std::cmp::Ordering::Equal)
+    });
+    Ok(participants
+        .into_iter()
+        .find(|item| token_score(name, &item.title) >= 0.5))
+}
+
+async fn flashscore_search_participants(
+    http: &HttpClient,
+    name: &str,
+    sport_key: &str,
+) -> anyhow::Result<Vec<FlashscoreParticipant>> {
+    let Some(sport_id) = flashscore_sport_id(sport_key) else {
+        return Ok(Vec::new());
+    };
+    let url = Url::parse_with_params(
+        FLASHSCORE_SEARCH_URL,
+        &[
+            ("q", name),
+            ("l", "1"),
+            ("s", &sport_id.to_string()),
+            ("f", "1;1;1"),
+            ("pid", "2"),
+            ("sid", "1"),
+        ],
+    )?;
+    let response = http
+        .get(url)
+        .send()
+        .await?
+        .error_for_status()?
+        .text()
+        .await?;
+    let data = parse_jsonp(&response)?;
+    let items = data
+        .get("results")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter(|item| text(item, "type") == Some("participants"))
+        .filter(|item| json_i64(item.get("sport_id")) == Some(sport_id))
+        .filter_map(|item| {
+            Some(FlashscoreParticipant {
+                id: text(item, "id")?.to_string(),
+                title: text(item, "title")?.to_string(),
+                url: text(item, "url")?.to_string(),
+            })
+        })
+        .collect();
+    Ok(items)
+}
+
+async fn fetch_flashscore_feed_sign(
+    http: &HttpClient,
+    participant: &FlashscoreParticipant,
+    sport_key: &str,
+) -> anyhow::Result<Option<String>> {
+    let prefix = if sport_key == "tennis" {
+        "player"
+    } else {
+        "team"
+    };
+    let url = format!(
+        "{FLASHSCORE_BASE_URL}/{prefix}/{}/{}/",
+        participant.url, participant.id
+    );
+    let page = http
+        .get(url)
+        .send()
+        .await?
+        .error_for_status()?
+        .text()
+        .await?;
+    Ok(extract_between(&page, r#""feed_sign":""#, r#"""#).map(str::to_string))
+}
+
+fn parse_jsonp(value: &str) -> anyhow::Result<Value> {
+    let start = value
+        .find('{')
+        .ok_or_else(|| anyhow::anyhow!("Flashscore search response had no JSON body"))?;
+    let end = value
+        .rfind('}')
+        .ok_or_else(|| anyhow::anyhow!("Flashscore search response had no JSON body"))?;
+    Ok(serde_json::from_str(&value[start..=end])?)
+}
+
+fn parse_flashscore_feed_rows(feed: &str) -> Vec<Value> {
+    feed.split('~')
+        .filter_map(|raw_row| {
+            let mut object = serde_json::Map::new();
+            for cell in raw_row.split('¬') {
+                let Some((key, value)) = cell.split_once('÷') else {
+                    continue;
+                };
+                if key.is_empty() {
+                    continue;
+                }
+                object.insert(key.to_string(), Value::String(htmlish_unescape(value)));
+            }
+            if object.is_empty() {
+                None
+            } else {
+                Some(Value::Object(object))
+            }
+        })
+        .collect()
+}
+
+fn score_flashscore_row(
+    row: &Value,
+    home_name: &str,
+    away_name: &str,
+    home_id: &str,
+    away_id: &str,
+    expected_check_after: Option<DateTime<Utc>>,
+) -> (f64, bool) {
+    if row_text(row, "AA").is_none()
+        || row_text(row, "AG").is_none()
+        || row_text(row, "AH").is_none()
+    {
+        return (0.0, false);
+    }
+    let home_ids = participant_ids(row_text(row, "PX").as_deref());
+    let away_ids = participant_ids(row_text(row, "PY").as_deref());
+    let normal = home_ids.contains(home_id) && away_ids.contains(away_id);
+    let reversed_side = home_ids.contains(away_id) && away_ids.contains(home_id);
+    let mut score = if normal || reversed_side { 100.0 } else { 0.0 };
+    let mut feed_home = row_text(row, "AE")
+        .or_else(|| row_text(row, "FH"))
+        .or_else(|| row_text(row, "WM"))
+        .unwrap_or_default();
+    let mut feed_away = row_text(row, "AF")
+        .or_else(|| row_text(row, "FK"))
+        .or_else(|| row_text(row, "WN"))
+        .unwrap_or_default();
+    if reversed_side {
+        std::mem::swap(&mut feed_home, &mut feed_away);
+    }
+    score += 25.0 * token_score(home_name, &feed_home);
+    score += 25.0 * token_score(away_name, &feed_away);
+    if let (Some(expected), Some(start_epoch)) = (
+        expected_check_after,
+        row_text(row, "AD").and_then(|value| value.parse::<i64>().ok()),
+    ) {
+        if let Some(start) = DateTime::<Utc>::from_timestamp(start_epoch, 0) {
+            let hours = (expected - start).num_seconds().unsigned_abs() as f64 / 3600.0;
+            score += 24.0 - hours.min(24.0);
+        }
+    }
+    (score, reversed_side)
+}
+
+fn flashscore_match_url(
+    sport_key: &str,
+    event_id: &str,
+    home: &FlashscoreParticipant,
+    away: &FlashscoreParticipant,
+) -> String {
+    let sport_path = match sport_key {
+        "soccer" => "football",
+        "football" | "tennis" | "basketball" => sport_key,
+        _ => "sport",
+    };
+    format!(
+        "{FLASHSCORE_BASE_URL}/match/{sport_path}/{}-{}/{}-{}/?mid={event_id}",
+        home.url, home.id, away.url, away.id
+    )
+}
+
+fn flashscore_sport_id(sport_key: &str) -> Option<i64> {
+    match sport_key {
+        "football" | "soccer" => Some(1),
+        "tennis" => Some(2),
+        "basketball" => Some(3),
+        _ => None,
+    }
+}
+
+fn split_event_name(event_name: &str) -> Option<(String, String)> {
+    [" - ", " vs ", " v "].iter().find_map(|separator| {
+        event_name
+            .split_once(separator)
+            .map(|(home, away)| (home.trim().to_string(), away.trim().to_string()))
+    })
+}
+
+fn infer_selection_gender_scope(selection: &Value) -> Option<String> {
+    let text = ["competition", "market_name", "event_name", "outcome_name"]
+        .iter()
+        .filter_map(|key| text(selection, key))
+        .collect::<Vec<_>>()
+        .join(" ");
+    let normalized = format!(" {} ", normalize_token_text(&text));
+    let women_markers = [
+        "women",
+        "womens",
+        "female",
+        "dame",
+        "damer",
+        "damesingle",
+        "kvinde",
+        "kvinder",
+        "wta",
+    ];
+    let men_markers = [
+        "men",
+        "mens",
+        "male",
+        "herre",
+        "herrer",
+        "herresingle",
+        "atp",
+    ];
+    if women_markers
+        .iter()
+        .any(|marker| normalized.contains(&format!(" {marker} ")))
+    {
+        return Some("women".to_string());
+    }
+    if men_markers
+        .iter()
+        .any(|marker| normalized.contains(&format!(" {marker} ")))
+    {
+        return Some("men".to_string());
+    }
+    None
+}
+
+fn token_score(query: &str, candidate: &str) -> f64 {
+    let query_tokens = token_set(query);
+    let candidate_tokens = token_set(candidate);
+    if query_tokens.is_empty() || candidate_tokens.is_empty() {
+        return 0.0;
+    }
+    let overlap = query_tokens.intersection(&candidate_tokens).count();
+    overlap as f64 / query_tokens.len().max(1) as f64
+}
+
+fn token_set(value: &str) -> HashSet<String> {
+    let stop = ["a", "ac", "bk", "fc", "if", "kk", "team", "the"];
+    normalize_token_text(value)
+        .split_whitespace()
+        .filter(|token| token.len() > 1 && !stop.contains(token))
+        .map(str::to_string)
+        .collect()
+}
+
+fn normalize_token_text(value: &str) -> String {
+    let mut output = String::new();
+    for ch in value.chars().flat_map(|ch| match ch {
+        'Æ' | 'æ' => "ae".chars().collect::<Vec<_>>(),
+        'Ø' | 'ø' => "o".chars().collect::<Vec<_>>(),
+        'Å' | 'å' | 'Ä' | 'ä' | 'Á' | 'á' | 'À' | 'à' | 'Â' | 'â' => {
+            vec!['a']
+        }
+        'Ö' | 'ö' | 'Ó' | 'ó' | 'Ò' | 'ò' | 'Ô' | 'ô' => vec!['o'],
+        'Ü' | 'ü' | 'Ú' | 'ú' | 'Ù' | 'ù' | 'Û' | 'û' => vec!['u'],
+        'É' | 'é' | 'È' | 'è' | 'Ê' | 'ê' => vec!['e'],
+        'Í' | 'í' | 'Ì' | 'ì' | 'Î' | 'î' => vec!['i'],
+        'Ç' | 'ç' => vec!['c'],
+        'Ñ' | 'ñ' => vec!['n'],
+        other => vec![other],
+    }) {
+        if ch.is_ascii_alphanumeric() {
+            output.push(ch.to_ascii_lowercase());
+        } else {
+            output.push(' ');
+        }
+    }
+    output.split_whitespace().collect::<Vec<_>>().join(" ")
+}
+
+fn participant_ids(value: Option<&str>) -> HashSet<String> {
+    value
+        .unwrap_or_default()
+        .split('/')
+        .filter(|part| !part.is_empty())
+        .map(str::to_string)
+        .collect()
+}
+
+fn row_text(row: &Value, key: &str) -> Option<String> {
+    text(row, key).map(str::to_string)
+}
+
+fn json_i64(value: Option<&Value>) -> Option<i64> {
+    value.and_then(Value::as_i64).or_else(|| {
+        value
+            .and_then(Value::as_str)
+            .and_then(|value| value.parse().ok())
+    })
+}
+
+fn strip_country_suffix(value: &str) -> String {
+    value
+        .rsplit_once(" (")
+        .map(|(prefix, suffix)| {
+            if suffix.ends_with(')') {
+                prefix.trim().to_string()
+            } else {
+                value.trim().to_string()
+            }
+        })
+        .unwrap_or_else(|| value.trim().to_string())
+}
+
+fn unresolved_flashscore_name(value: &str) -> bool {
+    value.is_empty() || value.contains('{') || value.contains('}')
+}
+
+fn extract_between<'a>(value: &'a str, prefix: &str, suffix: &str) -> Option<&'a str> {
+    let start = value.find(prefix)? + prefix.len();
+    let rest = &value[start..];
+    let end = rest.find(suffix)?;
+    Some(&rest[..end])
+}
+
+fn htmlish_unescape(value: &str) -> String {
+    value
+        .replace("&amp;", "&")
+        .replace("&quot;", "\"")
+        .replace("&#039;", "'")
+        .replace("&apos;", "'")
+        .replace("&lt;", "<")
+        .replace("&gt;", ">")
+}
+
+fn dedup_texts(values: Vec<String>) -> Vec<String> {
+    let mut seen = HashSet::new();
+    values
+        .into_iter()
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
+        .filter(|value| seen.insert(value.to_ascii_lowercase()))
+        .collect()
 }
 
 fn text<'a>(value: &'a Value, key: &str) -> Option<&'a str> {

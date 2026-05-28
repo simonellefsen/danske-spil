@@ -20,6 +20,8 @@ pub struct Settings {
     pub settlement_awaiting_grace_minutes: i64,
     pub settlement_queue_limit: usize,
     pub settlement_lookup_cooldown_minutes: i64,
+    pub result_agent_enabled: bool,
+    pub result_agent_per_cycle_limit: usize,
     pub database_url: Option<String>,
 }
 
@@ -91,6 +93,11 @@ impl Settings {
             .ok()
             .and_then(|v| v.parse().ok())
             .unwrap_or(15),
+            result_agent_enabled: bool_env("GAMBLER_RESULT_AGENT_ENABLED", true),
+            result_agent_per_cycle_limit: env::var("GAMBLER_RESULT_AGENT_PER_CYCLE_LIMIT")
+                .ok()
+                .and_then(|v| v.parse().ok())
+                .unwrap_or(10),
             database_url,
         }
     }

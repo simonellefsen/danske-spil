@@ -11,7 +11,7 @@ The initial project goal is to understand the site, maintain a durable LLM wiki,
 - `.env.local` is ignored and must hold credentials locally.
 - The `gambler` agent may observe, model, and prepare candidate coupons.
 - `gambler` should scan and monitor markets, simulate bet placement, keep a ledger, and reconcile final outcomes.
-- The worker should run about every 15 minutes to find new paper opportunities and check queued bets for verified outcomes.
+- The worker should run about every 15 minutes to find new paper opportunities, check queued bets for verified outcomes, and run read-only public result discovery.
 - Strategies should be able to model singles and provider-supported multi-leg coupons such as doubles, triples, and larger accumulators, subject to sport/category constraints.
 - `gambler` should enrich decisions with sport stats, trends, weather, seasonality, and news stored in Postgres.
 - The proposed `gambler` web UI should show candidate odds, structured reasoning, risk checks, and review state.

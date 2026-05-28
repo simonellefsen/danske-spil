@@ -12,6 +12,7 @@ pub fn render_index(base_path: &str) -> String {
                     button { id: "auto-paper-coupons", title: "Create paper-ledger coupon simulations for selected coupon candidates. This never places real bets.", "Auto paper coupons" }
                     button { id: "queue-settlement", title: "Move open paper bets/coupons whose expected result-check time has passed into awaiting-result review.", "Queue settlement" }
                     button { id: "review-settlement", title: "Refresh result evidence, stale lookup state, source recommendations, and result-agent tasks for awaiting paper positions.", "Review results" }
+                    button { id: "run-result-agent", title: "Run the read-only result agent now. It discovers public result links and posts sanitized paper-settlement evidence without placing bets.", "Run result agent" }
                     button { id: "commit-settlements", title: "Apply the settlement outcomes you selected in Settlement review. Disabled until at least one row is selected.", disabled: true, "Commit selected settlements" }
                     button { id: "reflect-yesterday", title: "Record or refresh the Hermes-safe previous-day paper-performance reflection.", "Reflect yesterday" }
                     button { id: "refresh", title: "Reload dashboard data without triggering a market scan.", "Refresh" }
@@ -1310,6 +1311,11 @@ $("review-settlement").addEventListener("click", async () => {
   $("review-settlement").disabled = true;
   try { await json(api("/api/settlement/review"), { method: "POST", body: "{}" }); await load(); }
   finally { $("review-settlement").disabled = false; }
+});
+$("run-result-agent").addEventListener("click", async () => {
+  $("run-result-agent").disabled = true;
+  try { await json(api("/api/result-agent/run"), { method: "POST", body: "{}" }); await load(); }
+  finally { $("run-result-agent").disabled = false; }
 });
 $("commit-settlements").addEventListener("click", async () => {
   const pending = Array.from(pendingSettlementReviews.values());

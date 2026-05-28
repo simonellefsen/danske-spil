@@ -149,6 +149,12 @@ Append-only timeline for project wiki maintenance. Use headings with the format 
 - Documented the read-only Danske Spil account-history result-agent boundary: use an operator browser session, prefer account/coupon history when available, and post only sanitized settlement facts.
 - Added hover tooltips to the main dashboard actions and settlement/result-agent panels so the paper-settlement workflow is discoverable in the UI.
 
+## [2026-05-28] implementation | scheduled Rust result agent
+
+- Added a Rust-native Flashscore result-agent cycle to the worker so missing public result links can be discovered inside the scratch container without the Python runner.
+- Added `POST /api/result-agent/run` and a web UI action to trigger the same read-only discovery pass manually.
+- The worker now attempts result-agent discovery on the normal 15-minute scan cadence, stores discovered Flashscore links, records aliases with sport/gender scope when known, and posts sanitized paper-settlement evidence for finished events.
+
 ## [2026-05-25] implementation | Candidate ranking and paper settlement POC
 
 - Added `poc_ranker_v1` candidate scoring fields: implied probability, model probability, expected value, confidence, score, risk flags, and feature snapshot.

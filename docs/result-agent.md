@@ -70,9 +70,26 @@ bookmaker's own settlement, cancellation, push, refund, or postponed state.
 That agent must run locally with an operator-controlled browser session and
 post only compact settlement facts to the API.
 
-## Local Public-Source Agent
+## Built-In Public-Source Agent
 
-The local runner consumes the queue and has two paths:
+The Rust worker runs a read-only public-source result-agent pass on the same
+cadence as market scans. It consumes `GET /api/result-agent/queue`, discovers
+missing Flashscore result links for supported sports, stores the durable source
+link, and posts sanitized final-score evidence when the event is finished. The
+same cycle can be triggered manually from the web UI or API:
+
+```text
+POST /api/result-agent/run
+```
+
+Kubernetes enables this by default with
+`GAMBLER_RESULT_AGENT_ENABLED=true` and limits each worker cycle with
+`GAMBLER_RESULT_AGENT_PER_CYCLE_LIMIT`.
+
+## Local Browser Public-Source Agent
+
+The optional local Python runner remains useful for browser-only public pages
+or diagnostics. It consumes the queue and has two paths:
 
 - Configured result links are probed directly or through browser automation.
 - Missing links are first resolved through Flashscore participant search and
@@ -92,8 +109,8 @@ runner on links that require browser automation and skips direct HTTP links.
 `--no-discover` disables automated Flashscore discovery and restores the older
 "only configured links" behavior.
 
-Flashscore discovery currently covers football, tennis, and basketball where a
-participant feed exposes the event row and final score. If a row still returns
+Built-in Flashscore discovery currently covers football, tennis, and basketball
+where a participant feed exposes the event row and final score. If a row still returns
 `flashscore_discovery_no_match`, the next step is to add another source adapter
 or a sport-specific pagination path, not an operator prompt.
 
@@ -114,9 +131,9 @@ pages, or hidden model reasoning.
 
 The current implementation creates the queue, supports configured public result
 links, and automatically discovers Flashscore result links for common stale
-football, basketball, and tennis rows. Winner and over/under markets can be
-graded from external final-score evidence. The next implementation step is a
-local read-only Danske Spil account-history agent that uses an authenticated
-browser session to read settled coupon history and submit the same sanitized
-evidence payload, especially for cancellations, refunds, and markets that
-cannot be graded from a plain final score.
+football, basketball, and tennis rows from the scheduled Rust worker. Winner and
+over/under markets can be graded from external final-score evidence. The next
+implementation step is a local read-only Danske Spil account-history agent that
+uses an authenticated browser session to read settled coupon history and submit
+the same sanitized evidence payload, especially for cancellations, refunds, and
+markets that cannot be graded from a plain final score.

@@ -95,6 +95,18 @@ async fn run_worker(settings: Settings, service: GamblerService) -> anyhow::Resu
                 .unwrap_or_default(),
             "settlement_review_refreshed"
         );
+        let result_agent_summary = service.run_result_agent_once().await;
+        tracing::info!(
+            attempted_count = result_agent_summary
+                .get("attempted_count")
+                .and_then(|value| value.as_u64())
+                .unwrap_or_default(),
+            settled_count = result_agent_summary
+                .get("settled_count")
+                .and_then(|value| value.as_u64())
+                .unwrap_or_default(),
+            "result_agent_cycle_completed"
+        );
         tokio::time::sleep(Duration::from_secs(settings.scan_interval_seconds)).await;
     }
 }
@@ -151,6 +163,7 @@ async fn get_handler(State(state): State<Arc<AppState>>, uri: OriginalUri) -> Re
             Json(state.service.refresh_settlement_review_queue().await).into_response()
         },
         "/api/result-agent/queue" => Json(state.service.result_agent_queue().await).into_response(),
+        "/api/result-agent/run" => Json(state.service.run_result_agent_once().await).into_response(),
         "/api/settlement/sources" => match state.service.store().settlement_sources().await {
             Ok(sources) => Json(sources).into_response(),
             Err(error) => error_response(StatusCode::INTERNAL_SERVER_ERROR, error),
@@ -532,6 +545,9 @@ async fn post_handler(
         "/api/ledger/queue" => Json(state.service.advance_settlement_queue().await).into_response(),
         "/api/settlement/review" => {
             Json(state.service.refresh_settlement_review_queue().await).into_response()
+        }
+        "/api/result-agent/run" => {
+            Json(state.service.run_result_agent_once().await).into_response()
         }
         "/api/settlement/external-evidence" => match state
             .service
