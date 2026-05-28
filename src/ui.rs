@@ -374,7 +374,9 @@ const renderExternalResultLink = (link) => {
 const renderExternalResultLinks = (item) => {
   const links = item.item_type === "coupon"
     ? (Array.isArray(item.external_result_links) ? item.external_result_links : [])
-    : (item.external_result_link ? [item.external_result_link] : []);
+    : (Array.isArray(item.external_result_links) && item.external_result_links.length
+      ? item.external_result_links
+      : (item.external_result_link ? [item.external_result_link] : []));
   const rendered = links.map(renderExternalResultLink).filter(Boolean);
   if (!rendered.length) return "";
   return `<div class="source-links">${rendered.join("")}</div>`;

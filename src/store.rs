@@ -2894,11 +2894,13 @@ impl Store {
                 let overdue_minutes = settlement_overdue_minutes(expected_result_check_after);
                 let recommended_source_key = settlement_recommended_source_key(recommendation);
                 let recommended_source_keys = settlement_recommended_source_keys(recommendation);
-                let external_result_link = event_name
+                let external_result_links: Vec<Value> = event_name
                     .as_deref()
-                    .and_then(|name| external_result_link_for_event(&settlement_source_policy, name))
-                    .map(|link| external_result_link_json(&link))
-                    .unwrap_or(Value::Null);
+                    .map(|name| external_result_links_for_event(&settlement_source_policy, name))
+                    .unwrap_or_default()
+                    .iter()
+                    .map(external_result_link_json)
+                    .collect();
                 json!({
                     "item_type": "single",
                     "bet_id": row.get::<_, String>("id"),
@@ -2933,7 +2935,8 @@ impl Store {
                     "recommendation": recommendation,
                     "recommended_source_key": recommended_source_key,
                     "recommended_source_keys": recommended_source_keys,
-                    "external_result_link": external_result_link
+                    "external_result_link": external_result_links.first().cloned().unwrap_or(Value::Null),
+                    "external_result_links": external_result_links
                 })
             })
             .collect();
@@ -2956,7 +2959,7 @@ impl Store {
                 .unwrap_or_default()
                 .iter()
                 .filter_map(|leg| leg.get("event_name").and_then(Value::as_str))
-                .filter_map(|name| external_result_link_for_event(&settlement_source_policy, name))
+                .flat_map(|name| external_result_links_for_event(&settlement_source_policy, name))
                 .map(|link| external_result_link_json(&link))
                 .collect();
             json!({
@@ -3141,7 +3144,8 @@ impl Store {
                 }));
                 continue;
             }
-            let Some(link) = external_result_link_for_event(&source_policy, &event_name) else {
+            let links = external_result_links_for_event(&source_policy, &event_name);
+            if links.is_empty() {
                 skipped.push(json!({
                     "bet_id": bet_id,
                     "event_name": event_name,
@@ -3149,34 +3153,43 @@ impl Store {
                 }));
                 continue;
             };
-            if link.requires_browser_automation {
+            let mut link_attempts = Vec::new();
+            let mut evidence_pair = None;
+            for link in links {
+                if link.requires_browser_automation {
+                    link_attempts.push(json!({
+                        "source_key": link.source_key,
+                        "source_url": link.url,
+                        "reason": "browser_automation_required_for_source",
+                        "direct_http_fetch": "blocked_in_local_testing",
+                        "manual_browser_verification": "agent-browser can access the page"
+                    }));
+                    continue;
+                }
+                match fetch_external_match_result(&http, &link).await {
+                    Ok(evidence) => {
+                        evidence_pair = Some((link, evidence));
+                        break;
+                    }
+                    Err(error) => link_attempts.push(json!({
+                        "source_key": link.source_key,
+                        "source_url": link.url,
+                        "reason": "external_fetch_or_parse_failed",
+                        "error": error.to_string()
+                    })),
+                }
+            }
+            let Some((link, evidence)) = evidence_pair else {
                 skipped.push(json!({
                     "bet_id": bet_id,
                     "event_name": event_name,
-                    "source_key": link.source_key,
-                    "source_url": link.url,
-                    "reason": "browser_automation_required_for_source",
-                    "direct_http_fetch": "blocked_in_local_testing",
-                    "manual_browser_verification": "agent-browser can access the page",
+                    "reason": "no_direct_external_result_evidence",
+                    "attempts": link_attempts,
                     "event_start_time": event_start_time,
                     "expected_event_finish_at": expected_result_check_after,
                     "overdue_minutes": overdue_minutes
                 }));
                 continue;
-            }
-            let evidence = match fetch_external_match_result(&http, &link).await {
-                Ok(evidence) => evidence,
-                Err(error) => {
-                    skipped.push(json!({
-                        "bet_id": bet_id,
-                        "event_name": event_name,
-                        "source_key": link.source_key,
-                        "source_url": link.url,
-                        "reason": "external_fetch_or_parse_failed",
-                        "error": error.to_string()
-                    }));
-                    continue;
-                }
             };
             checked.push(json!({
                 "bet_id": bet_id,
@@ -3184,6 +3197,7 @@ impl Store {
                 "source_key": evidence.source_key,
                 "source_url": evidence.url,
                 "source_title": evidence.title,
+                "attempts": link_attempts,
                 "event_start_time": event_start_time,
                 "expected_event_finish_at": expected_result_check_after,
                 "score": {"home": evidence.home_score, "away": evidence.away_score}
@@ -7280,8 +7294,17 @@ fn external_result_link_for_event(
     source_policy: &Value,
     event_name: &str,
 ) -> Option<ExternalResultLink> {
+    external_result_links_for_event(source_policy, event_name)
+        .into_iter()
+        .next()
+}
+
+fn external_result_links_for_event(
+    source_policy: &Value,
+    event_name: &str,
+) -> Vec<ExternalResultLink> {
     let event_key = normalize_match_name(event_name);
-    source_policy
+    let mut links: Vec<ExternalResultLink> = source_policy
         .get("items")
         .and_then(Value::as_array)
         .into_iter()
@@ -7292,15 +7315,22 @@ fn external_result_link_for_event(
                 Some("flashscore_results" | "sofascore_results" | "livescore_results")
             )
         })
-        .find_map(|source| {
-            let source_key = source.get("source_key").and_then(Value::as_str)?;
+        .flat_map(|source| {
+            let Some(source_key) = source.get("source_key").and_then(Value::as_str) else {
+                return Vec::new();
+            };
+            let requires_browser_automation = source
+                .get("payload")
+                .and_then(|payload| payload.get("requires_browser_automation"))
+                .and_then(Value::as_bool)
+                .unwrap_or(false);
             source
                 .get("payload")
                 .and_then(|payload| payload.get("known_matches"))
                 .and_then(Value::as_array)
                 .into_iter()
                 .flatten()
-                .find_map(|item| {
+                .filter_map(|item| {
                     let known_event = item.get("event_name").and_then(Value::as_str)?;
                     if normalize_match_name(known_event) != event_key {
                         return None;
@@ -7310,18 +7340,28 @@ fn external_result_link_for_event(
                         url: item.get("url").and_then(Value::as_str)?.to_string(),
                         home_aliases: json_string_array(item.get("home_aliases")),
                         away_aliases: json_string_array(item.get("away_aliases")),
-                        requires_browser_automation: source
-                            .get("payload")
-                            .and_then(|payload| payload.get("requires_browser_automation"))
-                            .and_then(Value::as_bool)
-                            .unwrap_or(false)
+                        requires_browser_automation: requires_browser_automation
                             || item
                                 .get("requires_browser_automation")
                                 .and_then(Value::as_bool)
                                 .unwrap_or(false),
                     })
                 })
+                .collect::<Vec<_>>()
         })
+        .collect();
+    links.sort_by_key(|link| {
+        (
+            link.requires_browser_automation,
+            match link.source_key.as_str() {
+                "flashscore_results" => 0,
+                "sofascore_results" => 1,
+                "livescore_results" => 2,
+                _ => 9,
+            },
+        )
+    });
+    links
 }
 
 fn external_result_link_json(link: &ExternalResultLink) -> Value {
@@ -7600,6 +7640,48 @@ mod tests {
             external_result_check_after_for_sport("football", start, 120),
             parse_rfc3339_utc("2026-05-25T22:10:00Z")
         );
+    }
+
+    #[test]
+    fn external_result_links_include_all_known_sources() {
+        let policy = json!({
+            "items": [
+                {
+                    "source_key": "flashscore_results",
+                    "payload": {
+                        "known_matches": [
+                            {
+                                "event_name": "Notts County - Salford City FC",
+                                "url": "https://www.flashscore.com/match/example",
+                                "home_aliases": ["Notts Co"],
+                                "away_aliases": ["Salford"]
+                            }
+                        ]
+                    }
+                },
+                {
+                    "source_key": "sofascore_results",
+                    "payload": {
+                        "requires_browser_automation": true,
+                        "known_matches": [
+                            {
+                                "event_name": "Notts County - Salford City FC",
+                                "url": "https://www.sofascore.com/example",
+                                "home_aliases": ["Notts County"],
+                                "away_aliases": ["Salford City FC"]
+                            }
+                        ]
+                    }
+                }
+            ]
+        });
+
+        let links = external_result_links_for_event(&policy, "Notts County - Salford City FC");
+        assert_eq!(links.len(), 2);
+        assert_eq!(links[0].source_key, "flashscore_results");
+        assert!(!links[0].requires_browser_automation);
+        assert_eq!(links[1].source_key, "sofascore_results");
+        assert!(links[1].requires_browser_automation);
     }
 
     #[test]
