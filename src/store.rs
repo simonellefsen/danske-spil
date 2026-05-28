@@ -3277,9 +3277,28 @@ impl Store {
                 }));
                 continue;
             };
+            let evidence_id = match self
+                .record_external_result_evidence_from_link(&event_name, &link, &evidence)
+                .await
+            {
+                Ok(evidence_id) => evidence_id,
+                Err(error) => {
+                    skipped.push(json!({
+                        "bet_id": bet_id,
+                        "event_name": event_name,
+                        "source_key": evidence.source_key,
+                        "source_url": evidence.url,
+                        "source_title": evidence.title,
+                        "reason": "external_result_evidence_persist_failed",
+                        "error": error.to_string()
+                    }));
+                    continue;
+                }
+            };
             checked.push(json!({
                 "bet_id": bet_id,
                 "event_name": event_name,
+                "external_result_evidence_id": evidence_id,
                 "source_key": evidence.source_key,
                 "source_url": evidence.url,
                 "source_title": evidence.title,
@@ -3311,6 +3330,7 @@ impl Store {
             };
             let notes = json!({
                 "mode": "auto_external_result_settlement",
+                "external_result_evidence_id": evidence_id,
                 "source_key": evidence.source_key,
                 "source_url": evidence.url,
                 "source_title": evidence.title,
@@ -3338,6 +3358,7 @@ impl Store {
             {
                 Ok(item) => {
                     let audit = json!({
+                        "external_result_evidence_id": evidence_id,
                         "bet_id": item.id,
                         "event_name": event_name,
                         "outcome_name": outcome_name,
@@ -3354,6 +3375,9 @@ impl Store {
                         "paper_only": true
                     });
                     self.record_audit("paper_bet_auto_settled_external", audit.clone())
+                        .await
+                        .ok();
+                    self.mark_external_result_evidence_used(&evidence_id)
                         .await
                         .ok();
                     settled.push(audit);
@@ -3381,6 +3405,87 @@ impl Store {
             "settled": settled,
             "skipped": skipped
         }))
+    }
+
+    async fn record_external_result_evidence_from_link(
+        &self,
+        event_name: &str,
+        link: &ExternalResultLink,
+        evidence: &ExternalMatchResult,
+    ) -> anyhow::Result<String> {
+        let evidence_id = new_id();
+        let payload = json!({
+            "source_key": evidence.source_key,
+            "source_url": evidence.url,
+            "source_title": evidence.title,
+            "event_name": event_name,
+            "home_name": evidence.home_name,
+            "away_name": evidence.away_name,
+            "home_aliases": link.home_aliases,
+            "away_aliases": link.away_aliases,
+            "home_score": evidence.home_score,
+            "away_score": evidence.away_score,
+            "confidence": evidence.confidence,
+            "sport_key": link.sport_key,
+            "gender_scope": link.gender_scope,
+            "known_result": match (link.known_home_score, link.known_away_score) {
+                (Some(home), Some(away)) => json!({
+                    "home_score": home,
+                    "away_score": away,
+                    "status": link.known_result_status,
+                    "notes": link.known_result_notes
+                }),
+                _ => Value::Null
+            },
+            "browser_automation": {
+                "tool": "rust_reqwest",
+                "source": evidence.source_key,
+                "direct_http_or_known_result": true
+            },
+            "raw_text_excerpt": format!(
+                "{} - {} {}:{}",
+                evidence.home_name, evidence.away_name, evidence.home_score, evidence.away_score
+            ),
+            "mode": "auto_external_result_settlement",
+            "paper_only": true
+        });
+        let source_url = Some(evidence.url.clone());
+        let client = self.connect().await?;
+        client
+            .execute(
+                r#"
+                INSERT INTO external_result_evidence (
+                  id, source_key, source_url, event_name, home_name, away_name,
+                  home_score, away_score, confidence, payload
+                )
+                VALUES ($1,$2,$3,$4,$5,$6,$7,$8,($9::float8)::numeric,$10)
+                "#,
+                &[
+                    &evidence_id,
+                    &evidence.source_key,
+                    &source_url,
+                    &event_name,
+                    &evidence.home_name,
+                    &evidence.away_name,
+                    &evidence.home_score,
+                    &evidence.away_score,
+                    &evidence.confidence,
+                    &payload,
+                ],
+            )
+            .await?;
+        Ok(evidence_id)
+    }
+
+    async fn mark_external_result_evidence_used(&self, evidence_id: &str) -> anyhow::Result<()> {
+        let client = self.connect().await?;
+        client
+            .execute(
+                "UPDATE external_result_evidence SET used_for_settlement = true WHERE id = $1",
+                &[&evidence_id],
+            )
+            .await?;
+        Ok(())
     }
 
     pub async fn ingest_external_result_evidence(&self, payload: &Value) -> anyhow::Result<Value> {
