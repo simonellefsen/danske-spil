@@ -79,11 +79,18 @@ records, not credentials or browser sessions.
 Browser-only sources can submit structured result evidence through:
 
 ```text
+GET  /api/result-agent/queue
 POST /api/settlement/external-evidence
 GET  /api/settlement/external-evidence
 POST /api/settlement/source-link
 GET  /api/settlement/source-links
 ```
+
+`GET /api/result-agent/queue` is the normal automation entry point for stale
+paper positions. It converts due settlement-review rows into read-only result
+tasks with event context, expected finish timing, source links, deterministic
+search terms, and the recommended next agent action. It does not expose
+credential values, cookies, account payloads, or browser storage.
 
 The POST endpoint stores source URL, match names, final score, confidence, and a short browser text excerpt in `external_result_evidence`. When `settle` is true, it settles only matching open single-leg winner markets whose selected outcome maps deterministically to home, away, or draw.
 
@@ -115,6 +122,17 @@ scripts/external_result_evidence_probe.py \
 
 The probe defaults to `settle=false`; add `--settle` only when the extracted
 payload has been reviewed and deterministic settlement is intended.
+
+For configured public result URLs, the local result agent can consume the queue
+and run browser evidence collection without prompting for URLs:
+
+```text
+rtk python3 scripts/result_agent.py --api http://127.0.0.1:18083 --browser-only --dry-run
+```
+
+The Danske Spil account-history path should be implemented as the same kind of
+local read-only browser agent: use an authenticated operator session, inspect
+settled coupon/account history, and post only sanitized settlement evidence.
 
 Every settlement observation should record:
 

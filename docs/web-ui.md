@@ -24,7 +24,7 @@ The UI is not a marketing site. It is an operational dashboard for repeated revi
 - Recent paper plays, including both singles and multi-leg coupons with strategy, stake, observed odds, status, score, and confidence.
 - Browser-backed external result evidence, including source, event, score, confidence, and whether the evidence has driven a paper settlement.
 - All known external result links on settlement-review rows, with browser-evidence markers for sources such as Sofascore that block direct HTTP lookups.
-- Operator controls for attaching a public Flashscore, Sofascore, or LiveScore result URL to a stale settlement-review row.
+- Result-agent queue tasks for stale settlement rows, including source readiness, expected action, and whether public browser evidence or account-history evidence is needed.
 - Operator-managed result links, including source, URL host, event aliases, and whether browser evidence is required.
 - Recent audit events for scan, paper-placement, settlement, reflection, and strategy-review actions.
 - Active local limits and whether real-money placement is disabled.

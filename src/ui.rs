@@ -35,6 +35,7 @@ pub fn render_index(base_path: &str) -> String {
                     div { class: "metric", div { class: "label", "Awaiting result" } div { class: "value", id: "awaiting-result", "-" } }
                     div { class: "metric", div { class: "label", "Due review" } div { class: "value", id: "due-review", "-" } }
                     div { class: "metric", div { class: "label", "Lookup due" } div { class: "value", id: "lookup-due", "-" } }
+                    div { class: "metric", div { class: "label", "Result agent" } div { class: "value", id: "result-agent-tasks", "-" } }
                     div { class: "metric", div { class: "label", "Open exposure" } div { class: "value", id: "exposure", "-" } }
                     div { class: "metric", div { class: "label", "Paper P/L" } div { class: "value", id: "profit", "-" } }
                     div { class: "metric", div { class: "label", "Real-money placement" } div { class: "value danger", id: "placement", "disabled" } }
@@ -96,6 +97,15 @@ pub fn render_index(base_path: &str) -> String {
                                 th { "Selection" } th { "Expected finish" } th { "Event state" } th { "Recommendation" }
                             } }
                             tbody { id: "settlement-review" }
+                        }
+                    }
+                    section {
+                        h2 { "Result agent queue" }
+                        table {
+                            thead { tr {
+                                th { "Task" } th { "Selection" } th { "Sources" } th { "Agent action" }
+                            } }
+                            tbody { id: "result-agent-queue" }
                         }
                     }
                     section {
@@ -406,16 +416,6 @@ const settlementButtons = (attribute, id, disabled) => settlementActions.map(([r
 const reviewSettlementButtons = (attribute, id, disabled, sourceKey) => settlementActions.map(([result, label]) =>
   `<button ${attribute}="${esc(id || "")}" data-result="${result}" data-source-key="${esc(sourceKey || "")}" ${disabled || !id ? "disabled" : ""}>${label}</button>`
 ).join("");
-const externalSourceLinkButtons = (item, disabled) => {
-  if (item.item_type === "coupon" || !item.event_name) return "";
-  return [
-    ["flashscore_results", "Add Flashscore"],
-    ["sofascore_results", "Add Sofascore"],
-    ["livescore_results", "Add LiveScore"]
-  ].map(([sourceKey, label]) =>
-    `<button data-add-source-link="${esc(item.bet_id || "")}" data-event-name="${esc(item.event_name)}" data-source-key="${sourceKey}" ${disabled ? "disabled" : ""}>${label}</button>`
-  ).join("");
-};
 let currentSettlementSourceKey = "danskespil_account_history";
 const pendingSettlementReviews = new Map();
 const pendingSettlementKey = (type, id) => `${type}:${id}`;
@@ -667,7 +667,6 @@ function renderSettlementReview(summary) {
           <span class="pill">${esc(item.recommendation || "await_more_evidence")}</span>
           <br><span class="muted">source: ${esc(sourceOptions)}</span>
           ${renderExternalResultLinks(item)}
-          <div class="actions">${externalSourceLinkButtons(item, false)}</div>
           <div class="actions">${reviewSettlementButtons(actionAttribute, actionId, !canSettle, sourceLabel)}</div>
           ${pending ? `<span class="label">selected: ${esc(pending.result)} via ${esc(pending.source)}</span>` : ""}
         </td>
@@ -711,27 +710,38 @@ function renderSettlementReview(summary) {
       updatePendingSettlementUi();
     });
   });
-  document.querySelectorAll("[data-add-source-link]").forEach((button) => {
-    button.addEventListener("click", async () => {
-      const url = window.prompt(`Result URL for ${button.dataset.eventName || "event"}`);
-      if (!url) return;
-      button.disabled = true;
-      try {
-        await json(api("/api/settlement/source-link"), {
-          method: "POST",
-          body: JSON.stringify({
-            event_name: button.dataset.eventName,
-            source_key: button.dataset.sourceKey,
-            source_url: url
-          })
-        });
-        await load();
-      } finally {
-        button.disabled = false;
-      }
-    });
-  });
   updatePendingSettlementUi();
+}
+function renderResultAgentQueue(queue) {
+  const items = queue.items || [];
+  $("result-agent-tasks").textContent = `${queue.task_count ?? items.length}`;
+  $("result-agent-tasks").className = Number(queue.task_count || items.length || 0) > 0 ? "value danger" : "value ok";
+  $("result-agent-queue").innerHTML = items.map((item) => {
+    const selection = item.selection || {};
+    const ids = item.ids || {};
+    const links = item.source_links || [];
+    const linkText = links.length
+      ? links.map(renderExternalResultLink).join("")
+      : `<span class="muted">no configured result link</span>`;
+    const terms = (item.search_terms || []).slice(0, 4).map(esc).join("<br>");
+    const eventNames = (selection.event_names || []).length
+      ? selection.event_names.map(esc).join("<br>")
+      : selection.event_name || ids.bet_id || ids.coupon_simulation_id || "-";
+    const overdueText = item.overdue_minutes === null || item.overdue_minutes === undefined
+      ? ""
+      : `<br><span class="danger">${esc(durationMins(item.overdue_minutes))} overdue</span>`;
+    return `
+      <tr>
+        <td><span class="pill">${esc(item.task_kind || "result_task")}</span><br><span class="label">${esc(item.automation_status || "")}</span>${overdueText}</td>
+        <td>${Array.isArray(selection.event_names) && selection.event_names.length ? eventNames : esc(eventNames)}<br><span class="label">${esc([selection.sport_key, selection.competition, selection.market_name, selection.outcome_name].filter(Boolean).join(" / "))}</span></td>
+        <td>${linkText}${terms ? `<br><span class="label">terms</span><br><span class="muted">${terms}</span>` : ""}</td>
+        <td>${esc(item.agent_action || "")}<br><span class="label">evidence: ${esc(item.evidence_endpoint || "")}</span></td>
+      </tr>
+    `;
+  }).join("");
+  if (!items.length) {
+    $("result-agent-queue").innerHTML = `<tr><td colspan="4" class="muted">No result-agent tasks are due.</td></tr>`;
+  }
 }
 function renderSettlementSources(sources) {
   const items = sources.items || [];
@@ -1213,6 +1223,8 @@ async function load() {
   renderLedger(ledger.items || []);
   const settlementReview = await json(api("/api/settlement/review"));
   renderSettlementReview(settlementReview);
+  const resultAgentQueue = await json(api("/api/result-agent/queue"));
+  renderResultAgentQueue(resultAgentQueue);
   const settlementObservations = await json(api("/api/settlement/observations"));
   renderSettlementObservations(settlementObservations);
   const externalResultEvidence = await json(api("/api/settlement/external-evidence"));

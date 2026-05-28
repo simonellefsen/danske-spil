@@ -372,6 +372,53 @@ impl GamblerService {
         }
     }
 
+    pub async fn result_agent_queue(&self) -> Value {
+        if !self.settings.settlement_queue_enabled {
+            return json!({"enabled": false, "task_count": 0, "items": []});
+        }
+
+        let review = self.refresh_settlement_review_queue().await;
+        let items = review
+            .get("items")
+            .and_then(Value::as_array)
+            .cloned()
+            .unwrap_or_default();
+        let account_agent = danskespil_account_agent_status();
+        let tasks: Vec<Value> = items
+            .iter()
+            .filter_map(|item| result_agent_task(item, &account_agent))
+            .collect();
+
+        json!({
+            "enabled": true,
+            "paper_only": true,
+            "agent": {
+                "name": "result_agent",
+                "mode": "read_only_result_discovery",
+                "settles_real_bets": false,
+                "stores_credentials": false,
+                "credential_values_exposed": false
+            },
+            "danskespil_account_agent": account_agent,
+            "review_count": items.len(),
+            "task_count": tasks.len(),
+            "items": tasks,
+            "source_precedence": [
+                "danskespil_account_history",
+                "official_competition_results",
+                "flashscore_results",
+                "sofascore_results",
+                "livescore_results"
+            ],
+            "instructions": [
+                "Use account/coupon history first when a local authenticated browser session is available.",
+                "Post only sanitized result evidence to /api/settlement/external-evidence.",
+                "Do not store cookies, credentials, browser storage, or full account pages in Postgres.",
+                "Keep settlement paper-only; never submit a real bet."
+            ]
+        })
+    }
+
     pub async fn performance_report(&self) -> Value {
         match self
             .store
@@ -406,6 +453,197 @@ impl GamblerService {
             }
         }
     }
+}
+
+fn result_agent_task(item: &Value, account_agent: &Value) -> Option<Value> {
+    let recommendation = item
+        .get("recommendation")
+        .and_then(Value::as_str)
+        .unwrap_or("await_more_evidence");
+    if !matches!(
+        recommendation,
+        "external_result_required"
+            | "expected_finish_passed_recheck"
+            | "manual_grade_ready"
+            | "manual_void_or_refund_review"
+    ) {
+        return None;
+    }
+
+    let item_type = item
+        .get("item_type")
+        .and_then(Value::as_str)
+        .unwrap_or("single");
+    let source_links = result_agent_source_links(item);
+    let account_available = account_agent
+        .get("available")
+        .and_then(Value::as_bool)
+        .unwrap_or(false);
+    let has_links = !source_links.is_empty();
+    let task_kind = match (item_type, recommendation, account_available, has_links) {
+        (_, "manual_void_or_refund_review", true, _) => "account_history_void_or_refund_check",
+        (_, "manual_void_or_refund_review", false, _) => "public_source_void_or_refund_check",
+        ("coupon", _, true, _) => "account_history_coupon_result_check",
+        ("coupon", _, false, true) => "public_coupon_leg_result_check",
+        ("coupon", _, false, false) => "public_coupon_leg_source_discovery",
+        (_, _, true, _) => "account_history_result_check",
+        (_, _, false, true) => "public_result_evidence_check",
+        _ => "public_result_source_discovery",
+    };
+    let automation_status = match (account_available, has_links) {
+        (true, _) => "account_browser_ready",
+        (false, true) => "public_browser_or_direct_source_ready",
+        (false, false) => "needs_automated_source_discovery",
+    };
+    let agent_action = match task_kind {
+        "account_history_result_check" | "account_history_coupon_result_check" => {
+            "open read-only Danske Spil account/coupon history and extract sanitized settlement truth"
+        }
+        "account_history_void_or_refund_check" => {
+            "open read-only Danske Spil account history and check cancellation/refund outcome"
+        }
+        "public_result_evidence_check" | "public_coupon_leg_result_check" => {
+            "collect final-score evidence from configured public result links"
+        }
+        "public_source_void_or_refund_check" => {
+            "check official/public result sources for cancellation, postponement, void, or refund truth"
+        }
+        _ => "discover a stable official or public match-result page without operator prompts",
+    };
+
+    let event_names = result_agent_event_names(item);
+    let search_terms = result_agent_search_terms(item, &event_names);
+    let legs = if item_type == "coupon" {
+        item.get("legs").cloned().unwrap_or_else(|| json!([]))
+    } else {
+        json!([])
+    };
+
+    Some(json!({
+        "item_type": item_type,
+        "task_kind": task_kind,
+        "automation_status": automation_status,
+        "agent_action": agent_action,
+        "recommendation": recommendation,
+        "overdue_minutes": item.get("overdue_minutes").cloned().unwrap_or(Value::Null),
+        "expected_result_check_after": item.get("expected_result_check_after").cloned().unwrap_or(Value::Null),
+        "last_lookup_at": item.get("last_lookup_at").cloned().unwrap_or(Value::Null),
+        "lookup_stale": item.get("lookup_stale").cloned().unwrap_or(Value::Bool(true)),
+        "ids": {
+            "bet_id": item.get("bet_id").cloned().unwrap_or(Value::Null),
+            "coupon_simulation_id": item.get("coupon_simulation_id").cloned().unwrap_or(Value::Null),
+            "candidate_id": item.get("candidate_id").cloned().unwrap_or(Value::Null),
+            "event_id": item.get("event_id").cloned().unwrap_or(Value::Null)
+        },
+        "selection": {
+            "event_name": item.get("event_name").cloned().unwrap_or(Value::Null),
+            "event_names": event_names,
+            "sport_key": item.get("sport_key").cloned().unwrap_or(Value::Null),
+            "competition": item.get("competition").cloned().unwrap_or(Value::Null),
+            "market_name": item.get("market_name").cloned().unwrap_or(Value::Null),
+            "market_kind": item.get("market_kind").cloned().unwrap_or(Value::Null),
+            "outcome_name": item.get("outcome_name").cloned().unwrap_or(Value::Null),
+            "legs": legs
+        },
+        "event_state": {
+            "event_status": item.get("event_status").cloned().unwrap_or(Value::Null),
+            "event_resulted": item.get("event_resulted").cloned().unwrap_or(Value::Null),
+            "event_settled": item.get("event_settled").cloned().unwrap_or(Value::Null)
+        },
+        "source_links": source_links,
+        "search_terms": search_terms,
+        "candidate_sources": [
+            "danskespil_account_history",
+            "official_competition_results",
+            "flashscore_results",
+            "sofascore_results",
+            "livescore_results"
+        ],
+        "evidence_endpoint": "/api/settlement/external-evidence",
+        "source_link_endpoint": "/api/settlement/source-link"
+    }))
+}
+
+fn danskespil_account_agent_status() -> Value {
+    let username_present = env_present("DANSKESPIL_USERNAME") || env_present("DANSKESPIL_EMAIL");
+    let password_present = env_present("DANSKESPIL_PASSWORD");
+    let login_url_present = env_present("DANSKESPIL_LOGIN_URL");
+    json!({
+        "available": username_present && password_present,
+        "username_or_email_present": username_present,
+        "password_present": password_present,
+        "login_url_present": login_url_present,
+        "session_mode": "local_operator_browser",
+        "credential_values_exposed": false,
+        "safe_use": "read_only_account_history_result_evidence"
+    })
+}
+
+fn env_present(name: &str) -> bool {
+    std::env::var(name)
+        .map(|value| !value.trim().is_empty())
+        .unwrap_or(false)
+}
+
+fn result_agent_source_links(item: &Value) -> Vec<Value> {
+    item.get("external_result_links")
+        .and_then(Value::as_array)
+        .cloned()
+        .unwrap_or_default()
+        .into_iter()
+        .filter(|link| {
+            link.get("source_url")
+                .and_then(Value::as_str)
+                .is_some_and(|url| !url.trim().is_empty())
+        })
+        .collect()
+}
+
+fn result_agent_event_names(item: &Value) -> Vec<String> {
+    if item.get("item_type").and_then(Value::as_str) == Some("coupon") {
+        return item
+            .get("legs")
+            .and_then(Value::as_array)
+            .into_iter()
+            .flatten()
+            .filter_map(|leg| leg.get("event_name").and_then(Value::as_str))
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .map(ToOwned::to_owned)
+            .collect();
+    }
+    item.get("event_name")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(|value| vec![value.to_owned()])
+        .unwrap_or_default()
+}
+
+fn result_agent_search_terms(item: &Value, event_names: &[String]) -> Vec<String> {
+    let sport = item
+        .get("sport_key")
+        .and_then(Value::as_str)
+        .unwrap_or_default();
+    let competition = item
+        .get("competition")
+        .and_then(Value::as_str)
+        .unwrap_or_default();
+    let mut terms = Vec::new();
+    for event_name in event_names {
+        terms.push(event_name.to_string());
+        if !competition.is_empty() {
+            terms.push(format!("{event_name} {competition}"));
+            terms.push(format!("{competition} {event_name} final result"));
+        }
+        if !sport.is_empty() {
+            terms.push(format!("{event_name} {sport} result"));
+        }
+        terms.push(format!("{event_name} final score"));
+    }
+    terms.sort();
+    terms.dedup();
+    terms
 }
 
 pub fn build_candidates(snapshot: &Value, max_candidates: usize) -> Vec<CandidateBet> {

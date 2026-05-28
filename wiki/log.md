@@ -141,6 +141,13 @@ Append-only timeline for project wiki maintenance. Use headings with the format 
 - Added persistent operator-managed external result links, host validation, a `POST /api/settlement/source-link` endpoint, and settlement-review UI controls for attaching public result URLs.
 - Added `GET /api/settlement/source-links` and an operator result-links UI table so persisted result URLs are directly auditable.
 
+## [2026-05-28] implementation | result agent queue
+
+- Added `GET /api/result-agent/queue`, which turns due settlement-review rows into read-only result-agent tasks with expected finish timing, source links, search terms, source precedence, and sanitized account-agent availability flags.
+- Added a result-agent queue table to the web UI and removed the normal settlement-review prompt flow for manually pasting public result URLs.
+- Added `scripts/result_agent.py`, a local agent runner that consumes the queue and automates browser-backed public result evidence collection for configured match links.
+- Documented the read-only Danske Spil account-history result-agent boundary: use an operator browser session, prefer account/coupon history when available, and post only sanitized settlement facts.
+
 ## [2026-05-25] implementation | Candidate ranking and paper settlement POC
 
 - Added `poc_ranker_v1` candidate scoring fields: implied probability, model probability, expected value, confidence, score, risk flags, and feature snapshot.

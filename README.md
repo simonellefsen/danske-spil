@@ -28,6 +28,7 @@ These topics are the durable map for the project:
 - [Gambler web UI](docs/web-ui.md) - Operator dashboard requirements for observed odds, candidate reasoning, coupon review, Hermes state, audit events, and safety gates.
 - [Sports data intelligence](docs/data-intelligence.md) - Data-ingestion plan for football/soccer, tennis, basketball, Formula 1, golf, and cycling using stats, trends, weather, seasonality, and news.
 - [Simulation ledger](docs/simulation-ledger.md) - Paper-betting model for simulated placements, immutable entry odds, settlement lookup, and simulated performance metrics.
+- [Result agent](docs/result-agent.md) - Automated read-only result discovery queue, source precedence, public browser evidence agent, and account-history boundary.
 - [POC implementation notes](docs/poc-implementation.md) - Current Rust/Dioxus service shape, scanner behavior, storage model, API endpoints, and implementation boundaries.
 - [POC deployment](docs/poc-deployment.md) - Local Docker Desktop Kubernetes deployment steps for the gambler API, worker, Hermes POC, and CloudNativePG database.
 - [ngrok path routing](docs/ngrok-path-routing.md) - `/danske-spil` route expectations and shared gateway ownership.
