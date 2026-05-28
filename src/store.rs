@@ -76,6 +76,7 @@ CREATE TABLE IF NOT EXISTS entity_aliases (
   id text PRIMARY KEY,
   entity_kind text NOT NULL,
   sport_key text,
+  gender_scope text,
   canonical_name text NOT NULL,
   canonical_key text NOT NULL,
   alias_name text NOT NULL,
@@ -88,18 +89,23 @@ CREATE TABLE IF NOT EXISTS entity_aliases (
   last_seen_at timestamptz NOT NULL DEFAULT now()
 );
 
+ALTER TABLE entity_aliases ADD COLUMN IF NOT EXISTS gender_scope text;
+
+DROP INDEX IF EXISTS idx_entity_aliases_unique;
 CREATE UNIQUE INDEX IF NOT EXISTS idx_entity_aliases_unique
 ON entity_aliases (
   entity_kind,
   COALESCE(sport_key, ''),
+  COALESCE(gender_scope, ''),
   canonical_key,
   alias_key,
   COALESCE(source_key, ''),
   COALESCE(external_id, '')
 );
 
+DROP INDEX IF EXISTS idx_entity_aliases_alias_key;
 CREATE INDEX IF NOT EXISTS idx_entity_aliases_alias_key
-ON entity_aliases (entity_kind, COALESCE(sport_key, ''), alias_key);
+ON entity_aliases (entity_kind, COALESCE(sport_key, ''), COALESCE(gender_scope, ''), alias_key);
 
 CREATE TABLE IF NOT EXISTS market_observations (
   id text PRIMARY KEY,
@@ -3433,6 +3439,8 @@ impl Store {
             "home_score": home_score,
             "away_score": away_score,
             "confidence": confidence,
+            "sport_key": payload.get("sport_key").cloned().unwrap_or(Value::Null),
+            "gender_scope": payload.get("gender_scope").or_else(|| payload.get("gender")).cloned().unwrap_or(Value::Null),
             "browser_automation": payload.get("browser_automation").cloned().unwrap_or(Value::Null),
             "browser_session": payload.get("browser_session").cloned().unwrap_or(Value::Null),
             "raw_text_excerpt": payload.get("raw_text_excerpt").cloned().unwrap_or(Value::Null),
@@ -3467,6 +3475,7 @@ impl Store {
             .and_then(Value::as_str)
             .map(str::trim)
             .filter(|value| !value.is_empty());
+        let gender_scope = payload_gender_scope(payload)?;
         let alias_notes = json!({
             "event_name": event_name,
             "source_url": source_url,
@@ -3478,6 +3487,7 @@ impl Store {
             &client,
             "participant",
             sport_key,
+            gender_scope.as_deref(),
             &home_name,
             json_string_array(payload.get("home_aliases"))
                 .into_iter()
@@ -3493,6 +3503,7 @@ impl Store {
             &client,
             "participant",
             sport_key,
+            gender_scope.as_deref(),
             &away_name,
             json_string_array(payload.get("away_aliases"))
                 .into_iter()
@@ -3535,6 +3546,8 @@ impl Store {
                 ExternalResultLink {
                     source_key: source_key.to_string(),
                     url: source_url.clone().unwrap_or_default(),
+                    sport_key: sport_key.map(str::to_string),
+                    gender_scope: gender_scope.clone(),
                     home_aliases: json_string_array(payload.get("home_aliases")),
                     away_aliases: json_string_array(payload.get("away_aliases")),
                     requires_browser_automation: false,
@@ -3543,10 +3556,22 @@ impl Store {
         link.home_aliases.push(home_name.clone());
         link.away_aliases.push(away_name.clone());
         let alias_client = self.connect().await?;
-        link.home_aliases =
-            expand_aliases_from_registry(&alias_client, "participant", link.home_aliases).await?;
-        link.away_aliases =
-            expand_aliases_from_registry(&alias_client, "participant", link.away_aliases).await?;
+        link.home_aliases = expand_aliases_from_registry(
+            &alias_client,
+            "participant",
+            link.sport_key.as_deref(),
+            link.gender_scope.as_deref(),
+            link.home_aliases,
+        )
+        .await?;
+        link.away_aliases = expand_aliases_from_registry(
+            &alias_client,
+            "participant",
+            link.sport_key.as_deref(),
+            link.gender_scope.as_deref(),
+            link.away_aliases,
+        )
+        .await?;
         let evidence = ExternalMatchResult {
             source_key: source_key.to_string(),
             url: source_url.clone().unwrap_or_default(),
@@ -5051,6 +5076,7 @@ impl Store {
                   id,
                   entity_kind,
                   sport_key,
+                  gender_scope,
                   canonical_name,
                   canonical_key,
                   alias_name,
@@ -5076,6 +5102,7 @@ impl Store {
                     "id": row.get::<_, String>("id"),
                     "entity_kind": row.get::<_, String>("entity_kind"),
                     "sport_key": row.get::<_, Option<String>>("sport_key"),
+                    "gender_scope": row.get::<_, Option<String>>("gender_scope"),
                     "canonical_name": row.get::<_, String>("canonical_name"),
                     "canonical_key": row.get::<_, String>("canonical_key"),
                     "alias_name": row.get::<_, String>("alias_name"),
@@ -5106,6 +5133,7 @@ impl Store {
             .map(str::trim)
             .filter(|value| !value.is_empty())
             .map(str::to_string);
+        let gender_scope = payload_gender_scope(payload)?;
         let canonical_name = payload
             .get("canonical_name")
             .or_else(|| payload.get("name"))
@@ -5147,6 +5175,7 @@ impl Store {
             EntityAliasInput {
                 entity_kind,
                 sport_key: sport_key.as_deref(),
+                gender_scope: gender_scope.as_deref(),
                 canonical_name,
                 alias_name,
                 source_key: source_key.as_deref(),
@@ -5206,15 +5235,27 @@ impl Store {
         let mut links_by_source: HashMap<String, Vec<Value>> = HashMap::new();
         for row in link_rows {
             let updated_at: DateTime<Utc> = row.get("updated_at");
+            let payload = row.get::<_, Value>("payload");
+            let sport_scope = payload
+                .get("sport_key")
+                .and_then(Value::as_str)
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+                .map(str::to_string);
+            let gender_scope = payload_gender_scope(&payload).ok().flatten();
             let home_aliases = expand_aliases_from_registry(
                 &client,
                 "participant",
+                sport_scope.as_deref(),
+                gender_scope.as_deref(),
                 row.get::<_, Vec<String>>("home_aliases"),
             )
             .await?;
             let away_aliases = expand_aliases_from_registry(
                 &client,
                 "participant",
+                sport_scope.as_deref(),
+                gender_scope.as_deref(),
                 row.get::<_, Vec<String>>("away_aliases"),
             )
             .await?;
@@ -5226,10 +5267,12 @@ impl Store {
                     "url": row.get::<_, String>("source_url"),
                     "home_aliases": home_aliases,
                     "away_aliases": away_aliases,
+                    "sport_key": sport_scope,
+                    "gender_scope": gender_scope,
                     "requires_browser_automation": row.get::<_, bool>("requires_browser_automation"),
                     "operator_configured": true,
                     "updated_at": updated_at,
-                    "payload": row.get::<_, Value>("payload")
+                    "payload": payload
                 }));
         }
         Ok(json!({
@@ -5301,6 +5344,7 @@ impl Store {
             .and_then(Value::as_str)
             .map(str::trim)
             .filter(|value| !value.is_empty());
+        let gender_scope = payload_gender_scope(payload)?;
         let source_requires_browser = source_record
             .get("payload")
             .and_then(|payload| payload.get("requires_browser_automation"))
@@ -5313,6 +5357,8 @@ impl Store {
         let link_payload = json!({
             "paper_only": true,
             "operator_configured": true,
+            "sport_key": sport_key,
+            "gender_scope": gender_scope.as_deref(),
             "source_record": source_record,
             "notes": payload.get("notes").cloned().unwrap_or(Value::Null)
         });
@@ -5367,6 +5413,7 @@ impl Store {
             &client,
             "participant",
             sport_key,
+            gender_scope.as_deref(),
             &home_canonical,
             home_aliases.clone(),
             Some(source_key),
@@ -5379,6 +5426,7 @@ impl Store {
             &client,
             "participant",
             sport_key,
+            gender_scope.as_deref(),
             &away_canonical,
             away_aliases.clone(),
             Some(source_key),
@@ -5390,8 +5438,24 @@ impl Store {
         let link = ExternalResultLink {
             source_key: source_key.to_string(),
             url: source_url.to_string(),
-            home_aliases: expand_aliases_from_registry(&client, "participant", home_aliases).await?,
-            away_aliases: expand_aliases_from_registry(&client, "participant", away_aliases).await?,
+            sport_key: sport_key.map(str::to_string),
+            gender_scope: gender_scope.clone(),
+            home_aliases: expand_aliases_from_registry(
+                &client,
+                "participant",
+                sport_key,
+                gender_scope.as_deref(),
+                home_aliases,
+            )
+            .await?,
+            away_aliases: expand_aliases_from_registry(
+                &client,
+                "participant",
+                sport_key,
+                gender_scope.as_deref(),
+                away_aliases,
+            )
+            .await?,
             requires_browser_automation,
         };
         Ok(json!({
@@ -5437,15 +5501,27 @@ impl Store {
         for row in rows {
             let created_at: DateTime<Utc> = row.get("created_at");
             let updated_at: DateTime<Utc> = row.get("updated_at");
+            let payload = row.get::<_, Value>("payload");
+            let sport_scope = payload
+                .get("sport_key")
+                .and_then(Value::as_str)
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+                .map(str::to_string);
+            let gender_scope = payload_gender_scope(&payload).ok().flatten();
             let home_aliases = expand_aliases_from_registry(
                 &client,
                 "participant",
+                sport_scope.as_deref(),
+                gender_scope.as_deref(),
                 row.get::<_, Vec<String>>("home_aliases"),
             )
             .await?;
             let away_aliases = expand_aliases_from_registry(
                 &client,
                 "participant",
+                sport_scope.as_deref(),
+                gender_scope.as_deref(),
                 row.get::<_, Vec<String>>("away_aliases"),
             )
             .await?;
@@ -5455,12 +5531,14 @@ impl Store {
                 "source_name": row.get::<_, String>("source_name"),
                 "event_name": row.get::<_, String>("event_name"),
                 "source_url": row.get::<_, String>("source_url"),
+                "sport_key": sport_scope,
+                "gender_scope": gender_scope,
                 "home_aliases": home_aliases,
                 "away_aliases": away_aliases,
                 "requires_browser_automation": row.get::<_, bool>("requires_browser_automation"),
                 "created_at": created_at,
                 "updated_at": updated_at,
-                "payload": row.get::<_, Value>("payload")
+                "payload": payload
             }));
         }
         Ok(json!({
@@ -7762,6 +7840,8 @@ fn combinations<'a>(items: &[&'a CandidateBet], leg_count: usize) -> Vec<Vec<&'a
 struct ExternalResultLink {
     source_key: String,
     url: String,
+    sport_key: Option<String>,
+    gender_scope: Option<String>,
     home_aliases: Vec<String>,
     away_aliases: Vec<String>,
     requires_browser_automation: bool,
@@ -7782,6 +7862,7 @@ struct ExternalMatchResult {
 struct EntityAliasInput<'a> {
     entity_kind: &'a str,
     sport_key: Option<&'a str>,
+    gender_scope: Option<&'a str>,
     canonical_name: &'a str,
     alias_name: &'a str,
     source_key: Option<&'a str>,
@@ -7790,7 +7871,10 @@ struct EntityAliasInput<'a> {
     payload: Value,
 }
 
-async fn upsert_entity_alias(client: &Client, input: EntityAliasInput<'_>) -> anyhow::Result<Value> {
+async fn upsert_entity_alias(
+    client: &Client,
+    input: EntityAliasInput<'_>,
+) -> anyhow::Result<Value> {
     validate_entity_kind(input.entity_kind)?;
     let canonical_key = normalize_match_name(input.canonical_name);
     let alias_key = normalize_match_name(input.alias_name);
@@ -7801,13 +7885,14 @@ async fn upsert_entity_alias(client: &Client, input: EntityAliasInput<'_>) -> an
         .query_one(
             r#"
             INSERT INTO entity_aliases (
-              id, entity_kind, sport_key, canonical_name, canonical_key, alias_name,
+              id, entity_kind, sport_key, gender_scope, canonical_name, canonical_key, alias_name,
               alias_key, source_key, external_id, confidence, payload
             )
-            VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,($10::float8)::numeric,$11)
+            VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,($11::float8)::numeric,$12)
             ON CONFLICT (
               entity_kind,
               COALESCE(sport_key, ''),
+              COALESCE(gender_scope, ''),
               canonical_key,
               alias_key,
               COALESCE(source_key, ''),
@@ -7823,6 +7908,7 @@ async fn upsert_entity_alias(client: &Client, input: EntityAliasInput<'_>) -> an
               id,
               entity_kind,
               sport_key,
+              gender_scope,
               canonical_name,
               canonical_key,
               alias_name,
@@ -7838,6 +7924,7 @@ async fn upsert_entity_alias(client: &Client, input: EntityAliasInput<'_>) -> an
                 &new_id(),
                 &input.entity_kind,
                 &input.sport_key,
+                &input.gender_scope,
                 &input.canonical_name,
                 &canonical_key,
                 &input.alias_name,
@@ -7855,6 +7942,7 @@ async fn upsert_entity_alias(client: &Client, input: EntityAliasInput<'_>) -> an
         "id": row.get::<_, String>("id"),
         "entity_kind": row.get::<_, String>("entity_kind"),
         "sport_key": row.get::<_, Option<String>>("sport_key"),
+        "gender_scope": row.get::<_, Option<String>>("gender_scope"),
         "canonical_name": row.get::<_, String>("canonical_name"),
         "canonical_key": row.get::<_, String>("canonical_key"),
         "alias_name": row.get::<_, String>("alias_name"),
@@ -7873,6 +7961,7 @@ async fn record_entity_aliases(
     client: &Client,
     entity_kind: &str,
     sport_key: Option<&str>,
+    gender_scope: Option<&str>,
     canonical_name: &str,
     aliases: Vec<String>,
     source_key: Option<&str>,
@@ -7893,6 +7982,7 @@ async fn record_entity_aliases(
                 EntityAliasInput {
                     entity_kind,
                     sport_key,
+                    gender_scope,
                     canonical_name,
                     alias_name: &alias_name,
                     source_key,
@@ -7913,6 +8003,8 @@ async fn record_entity_aliases(
 async fn expand_aliases_from_registry(
     client: &Client,
     entity_kind: &str,
+    sport_key: Option<&str>,
+    gender_scope: Option<&str>,
     aliases: Vec<String>,
 ) -> anyhow::Result<Vec<String>> {
     let mut expanded = dedup_strings(aliases);
@@ -7934,8 +8026,10 @@ async fn expand_aliases_from_registry(
             FROM entity_aliases
             WHERE entity_kind = $1
               AND (canonical_key = ANY($2) OR alias_key = ANY($2))
+              AND ($3::text IS NULL OR sport_key IS NULL OR sport_key = $3)
+              AND ($4::text IS NULL OR gender_scope IS NULL OR gender_scope = $4)
             "#,
-            &[&entity_kind, &keys],
+            &[&entity_kind, &keys, &sport_key, &gender_scope],
         )
         .await?;
     for row in rows {
@@ -7993,6 +8087,13 @@ fn external_result_links_for_event(
                     Some(ExternalResultLink {
                         source_key: source_key.to_string(),
                         url: item.get("url").and_then(Value::as_str)?.to_string(),
+                        sport_key: item
+                            .get("sport_key")
+                            .and_then(Value::as_str)
+                            .map(str::trim)
+                            .filter(|value| !value.is_empty())
+                            .map(str::to_string),
+                        gender_scope: payload_gender_scope(item).ok().flatten(),
                         home_aliases: json_string_array(item.get("home_aliases")),
                         away_aliases: json_string_array(item.get("away_aliases")),
                         requires_browser_automation: requires_browser_automation
@@ -8023,6 +8124,8 @@ fn external_result_link_json(link: &ExternalResultLink) -> Value {
     json!({
         "source_key": link.source_key.clone(),
         "source_url": link.url.clone(),
+        "sport_key": link.sport_key.clone(),
+        "gender_scope": link.gender_scope.clone(),
         "home_aliases": link.home_aliases.clone(),
         "away_aliases": link.away_aliases.clone(),
         "requires_browser_automation": link.requires_browser_automation
@@ -8075,6 +8178,32 @@ fn validate_entity_kind(entity_kind: &str) -> anyhow::Result<()> {
         "participant" | "team" | "player" | "league" | "competition" | "driver" | "golfer"
         | "rider" => Ok(()),
         _ => Err(anyhow!("unsupported alias entity_kind: {entity_kind}")),
+    }
+}
+
+fn payload_gender_scope(payload: &Value) -> anyhow::Result<Option<String>> {
+    let Some(raw) = payload
+        .get("gender_scope")
+        .or_else(|| payload.get("gender"))
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+    else {
+        return Ok(None);
+    };
+    normalize_gender_scope(raw)
+        .map(|value| Some(value.to_string()))
+        .ok_or_else(|| anyhow!("unsupported gender_scope: {raw}"))
+}
+
+fn normalize_gender_scope(value: &str) -> Option<&'static str> {
+    match value.trim().to_ascii_lowercase().as_str() {
+        "men" | "mens" | "men's" | "male" | "m" | "herre" | "herrer" | "herresingle" => Some("men"),
+        "women" | "womens" | "women's" | "female" | "f" | "dame" | "damer" | "damesingle"
+        | "kvinde" | "kvinder" => Some("women"),
+        "mixed" | "mix" | "mixed doubles" => Some("mixed"),
+        "unknown" | "any" | "all" => None,
+        _ => None,
     }
 }
 
@@ -8517,6 +8646,8 @@ mod tests {
         let link = ExternalResultLink {
             source_key: "flashscore_results".to_string(),
             url: "https://example.test/match".to_string(),
+            sport_key: Some("football".to_string()),
+            gender_scope: None,
             home_aliases: vec!["Lyngby".to_string(), "Lyngby AC".to_string()],
             away_aliases: vec!["Horsens".to_string(), "AC Horsens".to_string()],
             requires_browser_automation: false,
@@ -8551,6 +8682,8 @@ mod tests {
         let link = ExternalResultLink {
             source_key: "flashscore_results".to_string(),
             url: "https://example.test/match".to_string(),
+            sport_key: Some("football".to_string()),
+            gender_scope: None,
             home_aliases: vec!["Notts County".to_string()],
             away_aliases: vec!["Salford City".to_string()],
             requires_browser_automation: false,
@@ -8581,6 +8714,8 @@ mod tests {
         let link = ExternalResultLink {
             source_key: "flashscore_results".to_string(),
             url: "https://example.test/match".to_string(),
+            sport_key: Some("basketball".to_string()),
+            gender_scope: None,
             home_aliases: vec!["Team FOG Naestved".to_string()],
             away_aliases: vec!["Bakken Bears".to_string()],
             requires_browser_automation: false,

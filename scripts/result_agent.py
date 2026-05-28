@@ -41,6 +41,28 @@ FLASHSCORE_SPORT_PATHS = {
     "basketball": "basketball",
 }
 FINISHED_STAGES = {"3", "10", "11"}
+WOMEN_MARKERS = (
+    "women",
+    "women's",
+    "womens",
+    "female",
+    "dame",
+    "damer",
+    "damesingle",
+    "kvinde",
+    "kvinder",
+    "wta",
+)
+MEN_MARKERS = (
+    "men",
+    "men's",
+    "mens",
+    "male",
+    "herre",
+    "herrer",
+    "herresingle",
+    "atp",
+)
 
 
 def fetch_json(url: str) -> dict:
@@ -81,6 +103,19 @@ def normalize(value: str | None) -> str:
 def tokens(value: str | None) -> set[str]:
     stop = {"a", "ac", "bk", "fc", "if", "kk", "team", "the"}
     return {token for token in normalize(value).split() if len(token) > 1 and token not in stop}
+
+
+def infer_gender_scope(selection: dict) -> str | None:
+    text = " ".join(
+        str(selection.get(key) or "")
+        for key in ("competition", "market_name", "event_name", "outcome_name")
+    )
+    normalized = f" {normalize(text)} "
+    if any(re.search(rf"\b{re.escape(normalize(marker))}\b", normalized) for marker in WOMEN_MARKERS):
+        return "women"
+    if any(re.search(rf"\b{re.escape(normalize(marker))}\b", normalized) for marker in MEN_MARKERS):
+        return "men"
+    return None
 
 
 def token_score(query: str, candidate: str) -> float:
@@ -245,6 +280,7 @@ def flashscore_match_url_from_participants(
 def flashscore_discover(task: dict) -> dict | None:
     selection = task.get("selection") or {}
     sport_key = str(selection.get("sport_key") or "").lower()
+    gender_scope = infer_gender_scope(selection)
     event_name = str(selection.get("event_name") or "")
     sides = split_event_name(event_name)
     if not sides or sport_key not in FLASHSCORE_SPORT_IDS:
@@ -291,6 +327,7 @@ def flashscore_discover(task: dict) -> dict | None:
         "source_key": FLASHSCORE_SOURCE_KEY,
         "source_url": source_url,
         "sport_key": sport_key,
+        "gender_scope": gender_scope,
         "event_name": event_name,
         "home_name": feed_home,
         "away_name": feed_away,
@@ -315,6 +352,7 @@ def persist_flashscore_discovery(args: argparse.Namespace, evidence: dict) -> di
         "source_key": evidence["source_key"],
         "source_url": evidence["source_url"],
         "sport_key": evidence["sport_key"],
+        "gender_scope": evidence.get("gender_scope"),
         "event_name": evidence["event_name"],
         "home_aliases": evidence["home_aliases"],
         "away_aliases": evidence["away_aliases"],
@@ -336,6 +374,7 @@ def persist_flashscore_discovery(args: argparse.Namespace, evidence: dict) -> di
         ),
         "event_name": evidence["event_name"],
         "sport_key": evidence["sport_key"],
+        "gender_scope": evidence.get("gender_scope"),
         "home_name": evidence["home_name"],
         "away_name": evidence["away_name"],
         "home_aliases": evidence["home_aliases"],

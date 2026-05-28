@@ -31,8 +31,10 @@ account payloads.
 Aliases are stored centrally in `entity_aliases`, not only on individual result
 links. The registry supports teams, players, leagues, competitions, drivers,
 golfers, riders, and generic participants. Each row stores the canonical name,
-alias, normalized keys, optional sport, optional source/external id, confidence,
-and a small paper-only payload.
+alias, normalized keys, optional sport, optional gender scope, optional
+source/external id, confidence, and a small paper-only payload. Gender scope is
+used to distinguish men, women, and mixed competitions when the same club,
+league, or participant name appears across multiple competition contexts.
 
 The API surface is:
 
@@ -41,9 +43,10 @@ GET  /api/aliases
 POST /api/aliases
 ```
 
-`POST /api/aliases` accepts `entity_kind`, optional `sport_key`,
-`canonical_name`, `alias_name`, optional `source_key`, optional `external_id`,
-optional `confidence`, and optional `notes`.
+`POST /api/aliases` accepts `entity_kind`, optional `sport_key`, optional
+`gender_scope` (`men`, `women`, or `mixed`), `canonical_name`, `alias_name`,
+optional `source_key`, optional `external_id`, optional `confidence`, and
+optional `notes`.
 
 Result-source automation records aliases automatically when it adds a public
 result link or ingests external result evidence. Settlement matching expands

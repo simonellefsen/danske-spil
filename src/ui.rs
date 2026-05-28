@@ -800,7 +800,7 @@ function renderEntityAliases(aliases) {
   $("entity-aliases").innerHTML = items.map((item) => `
     <tr>
       <td>${esc(item.last_seen_at || "-")}<br><span class="label">${esc(item.first_seen_at || "")}</span></td>
-      <td><span class="pill">${esc(item.entity_kind || "-")}</span> ${esc(item.canonical_name || "-")}<br><span class="label">${esc(item.sport_key || "all sports")}</span></td>
+      <td><span class="pill">${esc(item.entity_kind || "-")}</span> ${esc(item.canonical_name || "-")}<br><span class="label">${esc([item.sport_key || "all sports", item.gender_scope || "any gender"].join(" / "))}</span></td>
       <td>${esc(item.alias_name || "-")}<br><span class="muted">${esc(item.alias_key || "")}</span></td>
       <td>${esc(item.source_key || "-")}<br><span class="muted">${esc(item.external_id || "")}</span></td>
       <td>${num(item.confidence)}</td>
