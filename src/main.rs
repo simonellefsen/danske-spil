@@ -56,6 +56,7 @@ async fn main() -> anyhow::Result<()> {
     match std::env::args().nth(1).as_deref() {
         Some("worker") => run_worker(settings, service).await,
         Some("result-agent") => run_result_agent(settings, service).await,
+        Some("hermes") | Some("hermes-agent") => run_hermes_agent(settings, service).await,
         _ => run_http(settings, service).await,
     }
 }
@@ -126,6 +127,32 @@ async fn run_result_agent(settings: Settings, service: GamblerService) -> anyhow
                     .and_then(|value| value.as_u64())
                     .unwrap_or_default(),
                 "result_agent_cycle_completed"
+            );
+            tokio::time::sleep(Duration::from_secs(interval_seconds)).await;
+        }
+    });
+
+    run_http(settings, service).await
+}
+
+async fn run_hermes_agent(settings: Settings, service: GamblerService) -> anyhow::Result<()> {
+    let loop_service = service.clone();
+    let interval_seconds = settings.hermes_reflection_interval_seconds.max(60);
+    tokio::spawn(async move {
+        loop {
+            let hermes_summary = loop_service.run_hermes_cycle_once("scheduled_loop").await;
+            tracing::info!(
+                reflection_id = hermes_summary
+                    .get("reflection")
+                    .and_then(|value| value.get("id"))
+                    .and_then(|value| value.as_str())
+                    .unwrap_or_default(),
+                proposed_experiment_count = hermes_summary
+                    .get("strategy")
+                    .and_then(|value| value.get("proposed_experiment_count"))
+                    .and_then(|value| value.as_u64())
+                    .unwrap_or_default(),
+                "hermes_cycle_completed"
             );
             tokio::time::sleep(Duration::from_secs(interval_seconds)).await;
         }
@@ -274,8 +301,20 @@ async fn get_handler(State(state): State<Arc<AppState>>, uri: OriginalUri) -> Re
         "/api/hermes" => match state.service.store().hermes_reflections(25).await {
             Ok(reflections) => match state.service.store().strategy_state().await {
                 Ok(strategy) => Json(json!({
-                    "mode": "poc_view",
-                    "summary": "Hermes integration is read-only in this POC. Reflections and one-variable experiment proposals are loaded from Postgres.",
+                    "mode": "sanitized_reflection_and_one_variable_proposals",
+                    "summary": "Hermes is integrated as a safe loop participant: it refreshes paper-only reflections, reads one-variable experiment proposals, and cannot control browsers, credentials, or real-money placement.",
+                    "loop": {
+                        "enabled": state.settings.hermes_agent_enabled,
+                        "reflection_interval_seconds": state.settings.hermes_reflection_interval_seconds,
+                        "manual_trigger": "/api/hermes/run",
+                        "kubernetes_component": "hermes-agent"
+                    },
+                    "safety": {
+                        "browser_control": false,
+                        "credential_access": false,
+                        "real_money_placement": false,
+                        "strategy_changes_require_operator_review": true
+                    },
                     "reflections": reflections,
                     "strategy": strategy
                 }))
@@ -670,6 +709,9 @@ async fn post_handler(
                 }
                 Err(error) => error_response(StatusCode::BAD_REQUEST, error),
             }
+        }
+        "/api/hermes/run" => {
+            Json(state.service.run_hermes_cycle_once("manual_api").await).into_response()
         }
         "/api/strategy/experiment/review" => {
             let experiment_id = payload

@@ -159,6 +159,12 @@ Append-only timeline for project wiki maintenance. Use headings with the format 
 - Split the result-agent build path into a separate `danske-spil-result-agent` binary and scratch image built with `--no-default-features`, avoiding Dioxus compilation for result-agent-only image builds.
 - Routed web/API result-agent queue and run endpoints through the dedicated `gambler-result-agent` ClusterIP service via `GAMBLER_RESULT_AGENT_URL`, keeping local execution as a development fallback.
 
+## [2026-05-28] implementation | Hermes loop service
+
+- Converted the `hermes-agent` Kubernetes deployment from a passive API view into a loop participant by running `/gambler hermes-agent`.
+- Added a scheduled Hermes-safe cycle that refreshes the paper-only daily reflection, summarizes active strategy/proposal state, and records a `hermes_cycle_completed` audit event.
+- Added `POST /api/hermes/run` and a web UI button for manually triggering one Hermes-safe cycle without browser control, credential access, or real-money placement.
+
 ## [2026-05-25] implementation | Candidate ranking and paper settlement POC
 
 - Added `poc_ranker_v1` candidate scoring fields: implied probability, model probability, expected value, confidence, score, risk flags, and feature snapshot.

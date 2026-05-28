@@ -17,7 +17,7 @@ binary and CA bundle into `scratch`.
 - `gambler-api`: API and web UI. Result-agent API calls are proxied to the `gambler-result-agent` ClusterIP service through `GAMBLER_RESULT_AGENT_URL`.
 - `gambler-worker`: scheduled observe-only scanner, paper-placement loop, and settlement-review queue refresher. The default Kubernetes cadence is `GAMBLER_SCAN_INTERVAL_SECONDS=900`, or roughly every 15 minutes.
 - `gambler-result-agent`: scheduled paper-only result reconciliation service backed by the separate `danske-spil-result-agent` image. It runs `POST /api/result-agent/run` logic on `GAMBLER_RESULT_AGENT_INTERVAL_SECONDS=900` and exposes the result-agent API routes internally through the `gambler-result-agent` ClusterIP service.
-- `hermes-agent`: POC read-only Hermes view backed by the same API image. It does not receive browser control or credentials.
+- `hermes-agent`: POC read-only Hermes loop backed by the same API image. It runs `/gambler hermes-agent`, serves the Hermes API, refreshes paper-only reflections on `HERMES_REFLECTION_INTERVAL_SECONDS`, and does not receive browser control or credentials.
 
 ## Deploy
 

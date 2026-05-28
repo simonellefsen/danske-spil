@@ -24,6 +24,8 @@ pub struct Settings {
     pub result_agent_per_cycle_limit: usize,
     pub result_agent_interval_seconds: u64,
     pub result_agent_url: Option<String>,
+    pub hermes_agent_enabled: bool,
+    pub hermes_reflection_interval_seconds: u64,
     pub database_url: Option<String>,
 }
 
@@ -108,6 +110,11 @@ impl Settings {
                 .ok()
                 .map(|value| value.trim_end_matches('/').to_string())
                 .filter(|value| !value.is_empty()),
+            hermes_agent_enabled: bool_env("HERMES_AGENT_ENABLED", true),
+            hermes_reflection_interval_seconds: env::var("HERMES_REFLECTION_INTERVAL_SECONDS")
+                .ok()
+                .and_then(|v| v.parse().ok())
+                .unwrap_or(900),
             database_url,
         }
     }

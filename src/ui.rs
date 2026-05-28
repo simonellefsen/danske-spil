@@ -15,6 +15,7 @@ pub fn render_index(base_path: &str) -> String {
                     button { id: "run-result-agent", title: "Run the read-only result agent now. It discovers public result links and posts sanitized paper-settlement evidence without placing bets.", "Run result agent" }
                     button { id: "commit-settlements", title: "Apply the settlement outcomes you selected in Settlement review. Disabled until at least one row is selected.", disabled: true, "Commit selected settlements" }
                     button { id: "reflect-yesterday", title: "Record or refresh the Hermes-safe previous-day paper-performance reflection.", "Reflect yesterday" }
+                    button { id: "run-hermes", title: "Run one Hermes-safe loop cycle now: refresh the daily paper reflection and summarize current one-variable strategy proposals. This cannot control the browser or place bets.", "Run Hermes" }
                     button { id: "refresh", title: "Reload dashboard data without triggering a market scan.", "Refresh" }
                 }
             }
@@ -37,6 +38,7 @@ pub fn render_index(base_path: &str) -> String {
                     div { class: "metric", div { class: "label", "Due review" } div { class: "value", id: "due-review", "-" } }
                     div { class: "metric", div { class: "label", "Lookup due" } div { class: "value", id: "lookup-due", "-" } }
                     div { class: "metric", div { class: "label", "Result agent" } div { class: "value", id: "result-agent-tasks", "-" } }
+                    div { class: "metric", div { class: "label", "Hermes loop" } div { class: "value", id: "hermes-loop", "-" } }
                     div { class: "metric", div { class: "label", "Open exposure" } div { class: "value", id: "exposure", "-" } }
                     div { class: "metric", div { class: "label", "Paper P/L" } div { class: "value", id: "profit", "-" } }
                     div { class: "metric", div { class: "label", "Real-money placement" } div { class: "value danger", id: "placement", "disabled" } }
@@ -1231,6 +1233,11 @@ async function load() {
   $("auto-paper-state").textContent = autoPaper.enabled
     ? `${autoPaper.per_scan_limit || 0} x ${money(autoPaper.default_stake || 0)}`
     : "off";
+  const hermesStatus = status.hermes || {};
+  $("hermes-loop").textContent = hermesStatus.enabled
+    ? `${mins(hermesStatus.reflection_interval_seconds || 0)}`
+    : "off";
+  $("hermes-loop").className = hermesStatus.enabled ? "value ok" : "value muted";
   const summary = await json(api("/api/ledger/summary"));
   $("awaiting-result").textContent = String((summary.by_status || {}).awaiting_result || 0);
   $("exposure").textContent = money(summary.open_exposure);
@@ -1357,6 +1364,11 @@ $("reflect-yesterday").addEventListener("click", async () => {
   $("reflect-yesterday").disabled = true;
   try { await json(api("/api/hermes/reflect/yesterday"), { method: "POST", body: "{}" }); await load(); }
   finally { $("reflect-yesterday").disabled = false; }
+});
+$("run-hermes").addEventListener("click", async () => {
+  $("run-hermes").disabled = true;
+  try { await json(api("/api/hermes/run"), { method: "POST", body: "{}" }); await load(); }
+  finally { $("run-hermes").disabled = false; }
 });
 $("refresh").addEventListener("click", load);
 load().catch((error) => { $("reasoning").textContent = error.stack || String(error); });

@@ -39,6 +39,8 @@ The Hermes view should show:
 Current POC status:
 
 - `POST /api/hermes/reflect/yesterday` writes an idempotent daily reflection into `hermes_reflections` for the previous Europe/Copenhagen calendar day.
+- `POST /api/hermes/run` executes one safe Hermes loop cycle. The cycle refreshes the same paper-only daily reflection, summarizes active baseline/proposal counts, records a `hermes_cycle_completed` audit event, and returns the sanitized strategy and ledger context used.
+- The Kubernetes `hermes-agent` deployment runs `/gambler hermes-agent`, serves the same read-only Hermes API, and refreshes the daily reflection on `HERMES_REFLECTION_INTERVAL_SECONDS` so Hermes state stays current even when no operator clicks the UI.
 - The daily reflection is paper-only and summarizes scan/performance snapshots, simulated placements, settlement observations, and whether results are ready to evaluate.
 - Successful scanner runs refresh the previous-day reflection automatically, using the current ledger status of paper positions created that day so later settlements, voids, refunds, cancellations, and postponed items remain visible in the same daily record.
 - If paper placements are still awaiting result review, the reflection explicitly blocks strategy promotion based on unresolved exposure.
@@ -128,6 +130,8 @@ API endpoints:
 
 ```text
 GET  /api/strategy
+GET  /api/hermes
+POST /api/hermes/run
 POST /api/strategy/experiment/review
 ```
 

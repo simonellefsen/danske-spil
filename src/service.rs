@@ -60,6 +60,12 @@ impl GamblerService {
         let candidates = self.store.candidates(5).await.unwrap_or_default();
         let ledger = self.store.simulated_bets(5).await.unwrap_or_default();
         let ledger_summary = self.store.ledger_summary().await.ok();
+        let latest_hermes_reflection = self
+            .store
+            .hermes_reflections(1)
+            .await
+            .ok()
+            .and_then(|items| items.into_iter().next());
         json!({
             "component": self.settings.component,
             "mode": self.settings.mode,
@@ -101,9 +107,91 @@ impl GamblerService {
                 "result_agent_interval_seconds": self.settings.result_agent_interval_seconds,
                 "result_agent_remote_url_present": self.settings.result_agent_url.is_some()
             },
+            "hermes": {
+                "enabled": self.settings.hermes_agent_enabled,
+                "mode": "sanitized_reflection_and_one_variable_proposals",
+                "reflection_interval_seconds": self.settings.hermes_reflection_interval_seconds,
+                "latest_reflection": latest_hermes_reflection,
+                "browser_control": false,
+                "credential_access": false,
+                "real_money_placement": false
+            },
             "runtime": "rust-dioxus",
             "sports_scope": ["football", "tennis", "basketball", "formula1", "golf", "cycling"]
         })
+    }
+
+    pub async fn run_hermes_cycle_once(&self, trigger: &str) -> Value {
+        if !self.settings.hermes_agent_enabled {
+            return json!({
+                "enabled": false,
+                "trigger": trigger,
+                "paper_only": true
+            });
+        }
+
+        let reflection = match self.store.record_daily_reflection(None).await {
+            Ok(reflection) => reflection,
+            Err(error) => {
+                tracing::warn!(%error, trigger, "hermes reflection cycle failed");
+                let summary = json!({
+                    "enabled": true,
+                    "trigger": trigger,
+                    "recorded": false,
+                    "error": error.to_string(),
+                    "paper_only": true
+                });
+                self.store
+                    .record_audit("hermes_cycle_failed", summary.clone())
+                    .await
+                    .ok();
+                return summary;
+            }
+        };
+
+        let strategy = self.store.strategy_state().await.unwrap_or_else(|error| {
+            tracing::warn!(%error, trigger, "hermes strategy state lookup failed");
+            json!({"error": error.to_string()})
+        });
+        let ledger_summary = self.store.ledger_summary().await.ok();
+        let proposed_experiment_count = strategy
+            .get("experiments")
+            .and_then(Value::as_array)
+            .map(|items| {
+                items
+                    .iter()
+                    .filter(|item| item.get("status").and_then(Value::as_str) == Some("proposed"))
+                    .count()
+            })
+            .unwrap_or_default();
+        let summary = json!({
+            "enabled": true,
+            "trigger": trigger,
+            "paper_only": true,
+            "mode": "sanitized_reflection_and_one_variable_proposals",
+            "reflection": reflection,
+            "strategy": {
+                "active_baseline": strategy.get("active_baseline").cloned().unwrap_or(Value::Null),
+                "experiment_count": strategy
+                    .get("experiments")
+                    .and_then(Value::as_array)
+                    .map(|items| items.len())
+                    .unwrap_or_default(),
+                "proposed_experiment_count": proposed_experiment_count
+            },
+            "ledger_summary": ledger_summary,
+            "safety": {
+                "browser_control": false,
+                "credential_access": false,
+                "real_money_placement": false,
+                "requires_operator_review_for_strategy_changes": true
+            }
+        });
+        self.store
+            .record_audit("hermes_cycle_completed", summary.clone())
+            .await
+            .ok();
+        summary
     }
 
     pub async fn scan(&self, include_live: bool) -> anyhow::Result<Value> {
