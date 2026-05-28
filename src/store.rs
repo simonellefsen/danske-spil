@@ -11,6 +11,9 @@ use std::time::Duration as StdDuration;
 use tokio_postgres::{Client, NoTls, Row, Transaction};
 use uuid::Uuid;
 
+const FLASHSCORE_BASE_URL: &str = "https://www.flashscore.com";
+const FLASHSCORE_DEFAULT_XFSIGN: &str = "SW9D1eZo";
+
 const SCHEMA_SQL: &str = r#"
 CREATE TABLE IF NOT EXISTS odds_snapshots (
   id text PRIMARY KEY,
@@ -8252,6 +8255,12 @@ async fn fetch_external_match_result(
     http: &HttpClient,
     link: &ExternalResultLink,
 ) -> anyhow::Result<ExternalMatchResult> {
+    if link.source_key == "flashscore_results" {
+        if let Some(result) = fetch_flashscore_match_result(http, link).await? {
+            return Ok(result);
+        }
+    }
+
     let html = http
         .get(&link.url)
         .send()
@@ -8282,6 +8291,124 @@ async fn fetch_external_match_result(
             0.82
         },
     })
+}
+
+async fn fetch_flashscore_match_result(
+    http: &HttpClient,
+    link: &ExternalResultLink,
+) -> anyhow::Result<Option<ExternalMatchResult>> {
+    let Some(event_id) = flashscore_match_id(&link.url) else {
+        return Ok(None);
+    };
+    let feed_url = format!("{FLASHSCORE_BASE_URL}/x/feed/dc_1_{event_id}");
+    let feed = http
+        .get(feed_url)
+        .header("x-fsign", FLASHSCORE_DEFAULT_XFSIGN)
+        .send()
+        .await
+        .with_context(|| format!("fetch FlashScore match feed {}", link.url))?
+        .error_for_status()
+        .with_context(|| format!("FlashScore match feed returned error {}", link.url))?
+        .text()
+        .await?;
+    let fields = parse_flashscore_kv_feed(&feed);
+    let home_score = flashscore_score_field(&fields, &["DE", "DG", "DA"])
+        .ok_or_else(|| anyhow!("FlashScore match feed did not expose a home score"))?;
+    let away_score = flashscore_score_field(&fields, &["DF", "DH", "DS"])
+        .ok_or_else(|| anyhow!("FlashScore match feed did not expose an away score"))?;
+    let (home_name, away_name) = flashscore_link_participants(link);
+    let title = format!("{home_name} - {away_name} {home_score}:{away_score}");
+    Ok(Some(ExternalMatchResult {
+        source_key: link.source_key.clone(),
+        url: link.url.clone(),
+        title,
+        home_name,
+        away_name,
+        home_score,
+        away_score,
+        confidence: 0.86,
+    }))
+}
+
+fn flashscore_match_id(url: &str) -> Option<String> {
+    Url::parse(url)
+        .ok()?
+        .query_pairs()
+        .find_map(|(key, value)| {
+            if key == "mid" && !value.trim().is_empty() {
+                Some(value.to_string())
+            } else {
+                None
+            }
+        })
+}
+
+fn parse_flashscore_kv_feed(feed: &str) -> HashMap<String, String> {
+    feed.split(|ch| ch == '¬' || ch == '~')
+        .filter_map(|cell| {
+            let (key, value) = cell.split_once('÷')?;
+            if key.is_empty() {
+                None
+            } else {
+                Some((key.to_string(), html_unescape(value)))
+            }
+        })
+        .collect()
+}
+
+fn flashscore_score_field(fields: &HashMap<String, String>, keys: &[&str]) -> Option<i32> {
+    keys.iter().find_map(|key| {
+        fields
+            .get(*key)
+            .and_then(|value| value.trim().parse::<i32>().ok())
+    })
+}
+
+fn flashscore_link_participants(link: &ExternalResultLink) -> (String, String) {
+    let home = link
+        .home_aliases
+        .first()
+        .cloned()
+        .or_else(|| flashscore_url_participant_names(&link.url).map(|(home, _)| home))
+        .unwrap_or_else(|| "Home".to_string());
+    let away = link
+        .away_aliases
+        .first()
+        .cloned()
+        .or_else(|| flashscore_url_participant_names(&link.url).map(|(_, away)| away))
+        .unwrap_or_else(|| "Away".to_string());
+    (home, away)
+}
+
+fn flashscore_url_participant_names(url: &str) -> Option<(String, String)> {
+    let parsed = Url::parse(url).ok()?;
+    let segments = parsed.path_segments()?.collect::<Vec<_>>();
+    if segments.len() < 4 || segments.first().copied() != Some("match") {
+        return None;
+    }
+    Some((
+        flashscore_slug_to_name(segments[2]),
+        flashscore_slug_to_name(segments[3]),
+    ))
+}
+
+fn flashscore_slug_to_name(slug: &str) -> String {
+    let mut parts = slug.split('-').collect::<Vec<_>>();
+    if parts.len() > 1 {
+        parts.pop();
+    }
+    parts
+        .into_iter()
+        .filter(|part| !part.is_empty())
+        .map(|part| {
+            let mut chars = part.chars();
+            match chars.next() {
+                Some(first) => format!("{}{}", first.to_ascii_uppercase(), chars.as_str()),
+                None => String::new(),
+            }
+        })
+        .collect::<Vec<_>>()
+        .join(" ")
 }
 
 fn is_auto_settle_winner_market(market_kind: Option<&str>, market_name: Option<&str>) -> bool {
@@ -8565,6 +8692,34 @@ mod tests {
         assert_eq!(
             parsed,
             ("Notts Co".to_string(), "Salford".to_string(), 3, 0)
+        );
+    }
+
+    #[test]
+    fn parses_flashscore_match_id_and_feed_score() {
+        let link = ExternalResultLink {
+            source_key: "flashscore_results".to_string(),
+            url: "https://www.flashscore.com/match/football/notts-county-EwJVdqzn/salford-W4AadhN3/?mid=E3uvsQPP".to_string(),
+            sport_key: Some("football".to_string()),
+            gender_scope: None,
+            home_aliases: vec!["Notts Co".to_string(), "Notts County".to_string()],
+            away_aliases: vec!["Salford".to_string(), "Salford City FC".to_string()],
+            requires_browser_automation: false,
+        };
+        let fields = parse_flashscore_kv_feed("DA÷3¬DS÷0¬DE÷3¬DF÷0¬A1÷¬~");
+
+        assert_eq!(flashscore_match_id(&link.url).as_deref(), Some("E3uvsQPP"));
+        assert_eq!(
+            flashscore_score_field(&fields, &["DE", "DG", "DA"]),
+            Some(3)
+        );
+        assert_eq!(
+            flashscore_score_field(&fields, &["DF", "DH", "DS"]),
+            Some(0)
+        );
+        assert_eq!(
+            flashscore_link_participants(&link),
+            ("Notts Co".to_string(), "Salford".to_string())
         );
     }
 

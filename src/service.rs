@@ -469,6 +469,29 @@ impl GamblerService {
         let mut skipped = Vec::new();
         let mut settled_count = 0usize;
 
+        match self
+            .store
+            .auto_settle_external_overdue(120, self.settings.result_agent_per_cycle_limit)
+            .await
+        {
+            Ok(result) => {
+                settled_count += result
+                    .get("settled_count")
+                    .and_then(Value::as_u64)
+                    .unwrap_or_default() as usize;
+                results.push(json!({
+                    "source": "configured_external_result_links",
+                    "action": "auto_settle_overdue_from_configured_links",
+                    "result": result
+                }));
+            }
+            Err(error) => skipped.push(json!({
+                "task_kind": "public_result_evidence_check",
+                "reason": "configured_external_result_check_failed",
+                "error": error.to_string()
+            })),
+        }
+
         for task in tasks.into_iter().take(limit) {
             let task_kind = text(&task, "task_kind").unwrap_or_default();
             if task_kind != "public_result_source_discovery" {
@@ -1202,44 +1225,49 @@ async fn flashscore_discover(
     else {
         return Ok(None);
     };
-    let Some(feed_sign) = fetch_flashscore_feed_sign(http, &home, &sport_key).await? else {
-        return Ok(None);
-    };
-    let feed_name = format!("pe_2_2_{}_x", home.id);
-    let feed_url = format!("{FLASHSCORE_BASE_URL}/x/feed/{feed_name}");
-    let feed = http
-        .get(feed_url)
-        .header("x-fsign", feed_sign)
-        .send()
-        .await?
-        .error_for_status()?
-        .text()
-        .await?;
-    let rows = parse_flashscore_feed_rows(&feed);
     let expected_check_after = text(task, "expected_result_check_after")
         .and_then(|value| DateTime::parse_from_rfc3339(value).ok())
         .map(|value| value.with_timezone(&Utc));
 
-    let mut best: Option<(f64, bool, Value)> = None;
-    for row in rows {
-        let (score, reversed_side) = score_flashscore_row(
-            &row,
-            &home_name,
-            &away_name,
-            &home.id,
-            &away.id,
-            expected_check_after,
-        );
-        if score >= 90.0
-            && best
-                .as_ref()
-                .map(|(current, _, _)| score > *current)
-                .unwrap_or(true)
-        {
-            best = Some((score, reversed_side, row));
+    let mut best: Option<(f64, bool, Value, String)> = None;
+    for feed_participant in [&home, &away] {
+        let Some(feed_sign) =
+            fetch_flashscore_feed_sign(http, feed_participant, &sport_key).await?
+        else {
+            continue;
+        };
+        let feed_name = format!("pe_2_2_{}_x", feed_participant.id);
+        let feed_url = format!("{FLASHSCORE_BASE_URL}/x/feed/{feed_name}");
+        let feed = http
+            .get(feed_url)
+            .header("x-fsign", feed_sign)
+            .send()
+            .await?
+            .error_for_status()?
+            .text()
+            .await?;
+        let rows = parse_flashscore_feed_rows(&feed);
+
+        for row in rows {
+            let (score, reversed_side) = score_flashscore_row(
+                &row,
+                &home_name,
+                &away_name,
+                &home.id,
+                &away.id,
+                expected_check_after,
+            );
+            if score >= 90.0
+                && best
+                    .as_ref()
+                    .map(|(current, _, _, _)| score > *current)
+                    .unwrap_or(true)
+            {
+                best = Some((score, reversed_side, row, feed_name.clone()));
+            }
         }
     }
-    let Some((match_score, reversed_side, row)) = best else {
+    let Some((match_score, reversed_side, row, feed_name)) = best else {
         return Ok(None);
     };
     let mut feed_home = row_text(&row, "AE")
@@ -1850,5 +1878,32 @@ mod tests {
                 Some("women"),
             ) > 1.0
         );
+    }
+
+    #[test]
+    fn flashscore_row_scoring_handles_reversed_participant_ids() {
+        let row = json!({
+            "AA": "example-match",
+            "AD": "1780000000",
+            "AE": "Schoeman Marcus",
+            "AF": "Loh Brendan",
+            "AG": "2",
+            "AH": "1",
+            "PX": "away-id",
+            "PY": "home-id"
+        });
+        let expected = DateTime::<Utc>::from_timestamp(1780003600, 0);
+
+        let (score, reversed_side) = score_flashscore_row(
+            &row,
+            "Brendan Loh",
+            "Marcus Schoeman",
+            "home-id",
+            "away-id",
+            expected,
+        );
+
+        assert!(reversed_side);
+        assert!(score >= 90.0);
     }
 }
