@@ -7003,6 +7003,57 @@ impl Store {
         Ok(replay_evidence)
     }
 
+    pub async fn refresh_hermes_experiment_replays(&self, limit: i64) -> anyhow::Result<Value> {
+        let client = self.connect().await?;
+        let rows = client
+            .query(
+                r#"
+                SELECT id, title, status, updated_at
+                FROM strategy_experiments
+                WHERE status IN ('proposed', 'approved_for_replay', 'active_simulation')
+                ORDER BY updated_at ASC
+                LIMIT $1
+                "#,
+                &[&limit],
+            )
+            .await?;
+        drop(client);
+
+        let mut refreshed = Vec::new();
+        let mut skipped = Vec::new();
+        for row in rows {
+            let experiment_id: String = row.get("id");
+            let title: String = row.get("title");
+            let status: String = row.get("status");
+            match self.strategy_experiment_replay(&experiment_id).await {
+                Ok(replay_evidence) => refreshed.push(json!({
+                    "experiment_id": experiment_id,
+                    "title": title,
+                    "status": status,
+                    "replay_evidence": replay_evidence
+                })),
+                Err(error) => skipped.push(json!({
+                    "experiment_id": experiment_id,
+                    "title": title,
+                    "status": status,
+                    "reason": "replay_failed",
+                    "error": error.to_string()
+                })),
+            }
+        }
+
+        Ok(json!({
+            "paper_only": true,
+            "does_not_place_paper_bets": true,
+            "does_not_change_experiment_status": true,
+            "requested_limit": limit,
+            "refreshed_count": refreshed.len(),
+            "skipped_count": skipped.len(),
+            "refreshed": refreshed,
+            "skipped": skipped
+        }))
+    }
+
     pub async fn review_strategy_experiment(
         &self,
         experiment_id: &str,

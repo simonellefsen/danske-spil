@@ -151,6 +151,18 @@ impl GamblerService {
             }
         };
 
+        let replay_refresh = match self.store.refresh_hermes_experiment_replays(5).await {
+            Ok(summary) => summary,
+            Err(error) => {
+                tracing::warn!(%error, trigger, "hermes experiment replay refresh failed");
+                json!({
+                    "paper_only": true,
+                    "refreshed_count": 0,
+                    "skipped_count": 0,
+                    "error": error.to_string()
+                })
+            }
+        };
         let strategy = self.store.strategy_state().await.unwrap_or_else(|error| {
             tracing::warn!(%error, trigger, "hermes strategy state lookup failed");
             json!({"error": error.to_string()})
@@ -173,6 +185,7 @@ impl GamblerService {
             "paper_only": true,
             "mode": "sanitized_reflection_and_one_variable_proposals",
             "reflection": reflection,
+            "replay_refresh": replay_refresh,
             "strategy": {
                 "active_baseline": strategy.get("active_baseline").cloned().unwrap_or(Value::Null),
                 "experiment_count": strategy

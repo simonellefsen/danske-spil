@@ -152,6 +152,11 @@ async fn run_hermes_agent(settings: Settings, service: GamblerService) -> anyhow
                     .and_then(|value| value.get("proposed_experiment_count"))
                     .and_then(|value| value.as_u64())
                     .unwrap_or_default(),
+                replay_refreshed_count = hermes_summary
+                    .get("replay_refresh")
+                    .and_then(|value| value.get("refreshed_count"))
+                    .and_then(|value| value.as_u64())
+                    .unwrap_or_default(),
                 "hermes_cycle_completed"
             );
             tokio::time::sleep(Duration::from_secs(interval_seconds)).await;
