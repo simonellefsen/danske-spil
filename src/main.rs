@@ -160,6 +160,10 @@ async fn get_handler(State(state): State<Arc<AppState>>, uri: OriginalUri) -> Re
             Ok(links) => Json(links).into_response(),
             Err(error) => error_response(StatusCode::INTERNAL_SERVER_ERROR, error),
         },
+        "/api/aliases" => match state.service.store().entity_aliases(100).await {
+            Ok(aliases) => Json(aliases).into_response(),
+            Err(error) => error_response(StatusCode::INTERNAL_SERVER_ERROR, error),
+        },
         "/api/settlement/observations" => match state
             .service
             .store()
@@ -557,6 +561,18 @@ async fn post_handler(
                     .service
                     .store()
                     .record_audit("external_result_link_added", summary.clone())
+                    .await
+                    .ok();
+                Json(summary).into_response()
+            }
+            Err(error) => error_response(StatusCode::BAD_REQUEST, error),
+        },
+        "/api/aliases" => match state.service.store().add_entity_alias(&payload).await {
+            Ok(summary) => {
+                state
+                    .service
+                    .store()
+                    .record_audit("entity_alias_added", summary.clone())
                     .await
                     .ok();
                 Json(summary).into_response()

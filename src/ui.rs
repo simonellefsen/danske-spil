@@ -127,6 +127,15 @@ pub fn render_index(base_path: &str) -> String {
                         }
                     }
                     section {
+                        h2 { title: "Reusable names learned across sources for teams, players, leagues, and other participants. Settlement matching expands aliases from this registry.", "Alias registry" }
+                        table {
+                            thead { tr {
+                                th { "Updated" } th { "Entity" } th { "Alias" } th { "Source" } th { "Confidence" }
+                            } }
+                            tbody { id: "entity-aliases" }
+                        }
+                    }
+                    section {
                         h2 { "Settlement observations" }
                         table {
                             thead { tr {
@@ -786,6 +795,21 @@ function renderExternalResultLinksTable(links) {
     $("external-result-links").innerHTML = `<tr><td colspan="5" class="muted">No operator result links have been added.</td></tr>`;
   }
 }
+function renderEntityAliases(aliases) {
+  const items = aliases.items || [];
+  $("entity-aliases").innerHTML = items.map((item) => `
+    <tr>
+      <td>${esc(item.last_seen_at || "-")}<br><span class="label">${esc(item.first_seen_at || "")}</span></td>
+      <td><span class="pill">${esc(item.entity_kind || "-")}</span> ${esc(item.canonical_name || "-")}<br><span class="label">${esc(item.sport_key || "all sports")}</span></td>
+      <td>${esc(item.alias_name || "-")}<br><span class="muted">${esc(item.alias_key || "")}</span></td>
+      <td>${esc(item.source_key || "-")}<br><span class="muted">${esc(item.external_id || "")}</span></td>
+      <td>${num(item.confidence)}</td>
+    </tr>
+  `).join("");
+  if (!items.length) {
+    $("entity-aliases").innerHTML = `<tr><td colspan="5" class="muted">No aliases have been recorded yet.</td></tr>`;
+  }
+}
 function renderSettlementObservations(observations) {
   const items = observations.items || [];
   $("settlement-observations").innerHTML = items.map((item) => {
@@ -1221,6 +1245,8 @@ async function load() {
   renderSettlementSources(settlementSources);
   const externalResultLinks = await json(api("/api/settlement/source-links"));
   renderExternalResultLinksTable(externalResultLinks);
+  const entityAliases = await json(api("/api/aliases"));
+  renderEntityAliases(entityAliases);
   const simulatedCoupons = await json(api("/api/coupons/simulated"));
   renderSimulatedCoupons(simulatedCoupons.items || []);
   const ledger = await json(api("/api/ledger"));

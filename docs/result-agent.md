@@ -26,6 +26,31 @@ grade, or require cancellation/refund review. Each task includes:
 The queue deliberately avoids raw cookies, credentials, browser storage, and
 account payloads.
 
+## Alias Registry
+
+Aliases are stored centrally in `entity_aliases`, not only on individual result
+links. The registry supports teams, players, leagues, competitions, drivers,
+golfers, riders, and generic participants. Each row stores the canonical name,
+alias, normalized keys, optional sport, optional source/external id, confidence,
+and a small paper-only payload.
+
+The API surface is:
+
+```text
+GET  /api/aliases
+POST /api/aliases
+```
+
+`POST /api/aliases` accepts `entity_kind`, optional `sport_key`,
+`canonical_name`, `alias_name`, optional `source_key`, optional `external_id`,
+optional `confidence`, and optional `notes`.
+
+Result-source automation records aliases automatically when it adds a public
+result link or ingests external result evidence. Settlement matching expands
+home/away aliases from this registry before grading, so names learned from one
+source can help later Flashscore, Sofascore, LiveScore, official, or account
+history checks.
+
 ## Source Order
 
 Result evidence should be collected in this order:

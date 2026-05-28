@@ -72,6 +72,35 @@ CREATE TABLE IF NOT EXISTS event_participants (
   UNIQUE (event_id, name, role)
 );
 
+CREATE TABLE IF NOT EXISTS entity_aliases (
+  id text PRIMARY KEY,
+  entity_kind text NOT NULL,
+  sport_key text,
+  canonical_name text NOT NULL,
+  canonical_key text NOT NULL,
+  alias_name text NOT NULL,
+  alias_key text NOT NULL,
+  source_key text,
+  external_id text,
+  confidence numeric NOT NULL DEFAULT 0.75,
+  payload jsonb NOT NULL DEFAULT '{}'::jsonb,
+  first_seen_at timestamptz NOT NULL DEFAULT now(),
+  last_seen_at timestamptz NOT NULL DEFAULT now()
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_entity_aliases_unique
+ON entity_aliases (
+  entity_kind,
+  COALESCE(sport_key, ''),
+  canonical_key,
+  alias_key,
+  COALESCE(source_key, ''),
+  COALESCE(external_id, '')
+);
+
+CREATE INDEX IF NOT EXISTS idx_entity_aliases_alias_key
+ON entity_aliases (entity_kind, COALESCE(sport_key, ''), alias_key);
+
 CREATE TABLE IF NOT EXISTS market_observations (
   id text PRIMARY KEY,
   snapshot_id text NOT NULL REFERENCES odds_snapshots(id) ON DELETE CASCADE,
@@ -3433,6 +3462,48 @@ impl Store {
                 ],
             )
             .await?;
+        let sport_key = payload
+            .get("sport_key")
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|value| !value.is_empty());
+        let alias_notes = json!({
+            "event_name": event_name,
+            "source_url": source_url,
+            "method": "external_result_evidence",
+            "external_result_evidence_id": evidence_id,
+            "paper_only": true
+        });
+        let recorded_home_aliases = record_entity_aliases(
+            &client,
+            "participant",
+            sport_key,
+            &home_name,
+            json_string_array(payload.get("home_aliases"))
+                .into_iter()
+                .chain(std::iter::once(home_name.clone()))
+                .collect(),
+            Some(source_key),
+            None,
+            confidence,
+            alias_notes.clone(),
+        )
+        .await?;
+        let recorded_away_aliases = record_entity_aliases(
+            &client,
+            "participant",
+            sport_key,
+            &away_name,
+            json_string_array(payload.get("away_aliases"))
+                .into_iter()
+                .chain(std::iter::once(away_name.clone()))
+                .collect(),
+            Some(source_key),
+            None,
+            confidence,
+            alias_notes,
+        )
+        .await?;
 
         let rows = client
             .query(
@@ -3471,6 +3542,11 @@ impl Store {
             });
         link.home_aliases.push(home_name.clone());
         link.away_aliases.push(away_name.clone());
+        let alias_client = self.connect().await?;
+        link.home_aliases =
+            expand_aliases_from_registry(&alias_client, "participant", link.home_aliases).await?;
+        link.away_aliases =
+            expand_aliases_from_registry(&alias_client, "participant", link.away_aliases).await?;
         let evidence = ExternalMatchResult {
             source_key: source_key.to_string(),
             url: source_url.clone().unwrap_or_default(),
@@ -3600,7 +3676,11 @@ impl Store {
             "settled_count": settled.len(),
             "skipped_count": skipped.len(),
             "settled": settled,
-            "skipped": skipped
+            "skipped": skipped,
+            "recorded_aliases": {
+                "home": recorded_home_aliases,
+                "away": recorded_away_aliases
+            }
         }))
     }
 
@@ -4962,6 +5042,123 @@ impl Store {
         }))
     }
 
+    pub async fn entity_aliases(&self, limit: i64) -> anyhow::Result<Value> {
+        let client = self.connect().await?;
+        let rows = client
+            .query(
+                r#"
+                SELECT
+                  id,
+                  entity_kind,
+                  sport_key,
+                  canonical_name,
+                  canonical_key,
+                  alias_name,
+                  alias_key,
+                  source_key,
+                  external_id,
+                  confidence::float8 AS confidence,
+                  payload,
+                  first_seen_at,
+                  last_seen_at
+                FROM entity_aliases
+                ORDER BY last_seen_at DESC, entity_kind, canonical_name, alias_name
+                LIMIT $1
+                "#,
+                &[&limit],
+            )
+            .await?;
+        Ok(json!({
+            "items": rows.iter().map(|row| {
+                let first_seen_at: DateTime<Utc> = row.get("first_seen_at");
+                let last_seen_at: DateTime<Utc> = row.get("last_seen_at");
+                json!({
+                    "id": row.get::<_, String>("id"),
+                    "entity_kind": row.get::<_, String>("entity_kind"),
+                    "sport_key": row.get::<_, Option<String>>("sport_key"),
+                    "canonical_name": row.get::<_, String>("canonical_name"),
+                    "canonical_key": row.get::<_, String>("canonical_key"),
+                    "alias_name": row.get::<_, String>("alias_name"),
+                    "alias_key": row.get::<_, String>("alias_key"),
+                    "source_key": row.get::<_, Option<String>>("source_key"),
+                    "external_id": row.get::<_, Option<String>>("external_id"),
+                    "confidence": row.get::<_, f64>("confidence"),
+                    "payload": row.get::<_, Value>("payload"),
+                    "first_seen_at": first_seen_at,
+                    "last_seen_at": last_seen_at
+                })
+            }).collect::<Vec<_>>(),
+            "paper_only": true
+        }))
+    }
+
+    pub async fn add_entity_alias(&self, payload: &Value) -> anyhow::Result<Value> {
+        let entity_kind = payload
+            .get("entity_kind")
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .unwrap_or("participant");
+        validate_entity_kind(entity_kind)?;
+        let sport_key = payload
+            .get("sport_key")
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .map(str::to_string);
+        let canonical_name = payload
+            .get("canonical_name")
+            .or_else(|| payload.get("name"))
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .ok_or_else(|| anyhow!("canonical_name is required"))?;
+        let alias_name = payload
+            .get("alias_name")
+            .or_else(|| payload.get("alias"))
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .ok_or_else(|| anyhow!("alias_name is required"))?;
+        let source_key = payload
+            .get("source_key")
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .map(str::to_string);
+        let external_id = payload
+            .get("external_id")
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .map(str::to_string);
+        let confidence = payload
+            .get("confidence")
+            .and_then(Value::as_f64)
+            .unwrap_or(0.75)
+            .clamp(0.0, 1.0);
+        let alias_payload = json!({
+            "notes": payload.get("notes").cloned().unwrap_or(Value::Null),
+            "paper_only": true
+        });
+        let client = self.connect().await?;
+        let row = upsert_entity_alias(
+            &client,
+            EntityAliasInput {
+                entity_kind,
+                sport_key: sport_key.as_deref(),
+                canonical_name,
+                alias_name,
+                source_key: source_key.as_deref(),
+                external_id: external_id.as_deref(),
+                confidence,
+                payload: alias_payload,
+            },
+        )
+        .await?;
+        Ok(row)
+    }
+
     pub async fn settlement_sources(&self) -> anyhow::Result<Value> {
         let client = self.connect().await?;
         let rows = client
@@ -5009,14 +5206,26 @@ impl Store {
         let mut links_by_source: HashMap<String, Vec<Value>> = HashMap::new();
         for row in link_rows {
             let updated_at: DateTime<Utc> = row.get("updated_at");
+            let home_aliases = expand_aliases_from_registry(
+                &client,
+                "participant",
+                row.get::<_, Vec<String>>("home_aliases"),
+            )
+            .await?;
+            let away_aliases = expand_aliases_from_registry(
+                &client,
+                "participant",
+                row.get::<_, Vec<String>>("away_aliases"),
+            )
+            .await?;
             links_by_source
                 .entry(row.get::<_, String>("source_key"))
                 .or_default()
                 .push(json!({
                     "event_name": row.get::<_, String>("event_name"),
                     "url": row.get::<_, String>("source_url"),
-                    "home_aliases": row.get::<_, Vec<String>>("home_aliases"),
-                    "away_aliases": row.get::<_, Vec<String>>("away_aliases"),
+                    "home_aliases": home_aliases,
+                    "away_aliases": away_aliases,
                     "requires_browser_automation": row.get::<_, bool>("requires_browser_automation"),
                     "operator_configured": true,
                     "updated_at": updated_at,
@@ -5085,6 +5294,13 @@ impl Store {
             .into_iter()
             .chain(default_away_aliases)
             .collect::<Vec<_>>();
+        let home_aliases = dedup_strings(home_aliases);
+        let away_aliases = dedup_strings(away_aliases);
+        let sport_key = payload
+            .get("sport_key")
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|value| !value.is_empty());
         let source_requires_browser = source_record
             .get("payload")
             .and_then(|payload| payload.get("requires_browser_automation"))
@@ -5122,8 +5338,8 @@ impl Store {
                     &source_key,
                     &event_name,
                     &source_url,
-                    &dedup_strings(home_aliases),
-                    &dedup_strings(away_aliases),
+                    &home_aliases,
+                    &away_aliases,
                     &requires_browser_automation,
                     &link_payload,
                 ],
@@ -5131,21 +5347,51 @@ impl Store {
             .await?;
         let created_at: DateTime<Utc> = row.get("created_at");
         let updated_at: DateTime<Utc> = row.get("updated_at");
+        let home_canonical = home_aliases
+            .first()
+            .cloned()
+            .or_else(|| event_aliases_from_name(event_name).0.into_iter().next())
+            .unwrap_or_else(|| event_name.to_string());
+        let away_canonical = away_aliases
+            .first()
+            .cloned()
+            .or_else(|| event_aliases_from_name(event_name).1.into_iter().next())
+            .unwrap_or_else(|| event_name.to_string());
+        let alias_notes = json!({
+            "event_name": event_name,
+            "source_url": source_url,
+            "method": "external_result_link",
+            "paper_only": true
+        });
+        let recorded_home_aliases = record_entity_aliases(
+            &client,
+            "participant",
+            sport_key,
+            &home_canonical,
+            home_aliases.clone(),
+            Some(source_key),
+            None,
+            0.82,
+            alias_notes.clone(),
+        )
+        .await?;
+        let recorded_away_aliases = record_entity_aliases(
+            &client,
+            "participant",
+            sport_key,
+            &away_canonical,
+            away_aliases.clone(),
+            Some(source_key),
+            None,
+            0.82,
+            alias_notes,
+        )
+        .await?;
         let link = ExternalResultLink {
             source_key: source_key.to_string(),
             url: source_url.to_string(),
-            home_aliases: dedup_strings(
-                json_string_array(payload.get("home_aliases"))
-                    .into_iter()
-                    .chain(event_aliases_from_name(event_name).0)
-                    .collect(),
-            ),
-            away_aliases: dedup_strings(
-                json_string_array(payload.get("away_aliases"))
-                    .into_iter()
-                    .chain(event_aliases_from_name(event_name).1)
-                    .collect(),
-            ),
+            home_aliases: expand_aliases_from_registry(&client, "participant", home_aliases).await?,
+            away_aliases: expand_aliases_from_registry(&client, "participant", away_aliases).await?,
             requires_browser_automation,
         };
         Ok(json!({
@@ -5154,7 +5400,11 @@ impl Store {
             "created_at": created_at,
             "updated_at": updated_at,
             "event_name": event_name,
-            "link": external_result_link_json(&link)
+            "link": external_result_link_json(&link),
+            "recorded_aliases": {
+                "home": recorded_home_aliases,
+                "away": recorded_away_aliases
+            }
         }))
     }
 
@@ -5183,25 +5433,39 @@ impl Store {
                 &[&limit],
             )
             .await?;
+        let mut items = Vec::new();
+        for row in rows {
+            let created_at: DateTime<Utc> = row.get("created_at");
+            let updated_at: DateTime<Utc> = row.get("updated_at");
+            let home_aliases = expand_aliases_from_registry(
+                &client,
+                "participant",
+                row.get::<_, Vec<String>>("home_aliases"),
+            )
+            .await?;
+            let away_aliases = expand_aliases_from_registry(
+                &client,
+                "participant",
+                row.get::<_, Vec<String>>("away_aliases"),
+            )
+            .await?;
+            items.push(json!({
+                "id": row.get::<_, String>("id"),
+                "source_key": row.get::<_, String>("source_key"),
+                "source_name": row.get::<_, String>("source_name"),
+                "event_name": row.get::<_, String>("event_name"),
+                "source_url": row.get::<_, String>("source_url"),
+                "home_aliases": home_aliases,
+                "away_aliases": away_aliases,
+                "requires_browser_automation": row.get::<_, bool>("requires_browser_automation"),
+                "created_at": created_at,
+                "updated_at": updated_at,
+                "payload": row.get::<_, Value>("payload")
+            }));
+        }
         Ok(json!({
             "paper_only": true,
-            "items": rows.iter().map(|row| {
-                let created_at: DateTime<Utc> = row.get("created_at");
-                let updated_at: DateTime<Utc> = row.get("updated_at");
-                json!({
-                    "id": row.get::<_, String>("id"),
-                    "source_key": row.get::<_, String>("source_key"),
-                    "source_name": row.get::<_, String>("source_name"),
-                    "event_name": row.get::<_, String>("event_name"),
-                    "source_url": row.get::<_, String>("source_url"),
-                    "home_aliases": row.get::<_, Vec<String>>("home_aliases"),
-                    "away_aliases": row.get::<_, Vec<String>>("away_aliases"),
-                    "requires_browser_automation": row.get::<_, bool>("requires_browser_automation"),
-                    "created_at": created_at,
-                    "updated_at": updated_at,
-                    "payload": row.get::<_, Value>("payload")
-                })
-            }).collect::<Vec<_>>()
+            "items": items
         }))
     }
 
@@ -7515,6 +7779,172 @@ struct ExternalMatchResult {
     confidence: f64,
 }
 
+struct EntityAliasInput<'a> {
+    entity_kind: &'a str,
+    sport_key: Option<&'a str>,
+    canonical_name: &'a str,
+    alias_name: &'a str,
+    source_key: Option<&'a str>,
+    external_id: Option<&'a str>,
+    confidence: f64,
+    payload: Value,
+}
+
+async fn upsert_entity_alias(client: &Client, input: EntityAliasInput<'_>) -> anyhow::Result<Value> {
+    validate_entity_kind(input.entity_kind)?;
+    let canonical_key = normalize_match_name(input.canonical_name);
+    let alias_key = normalize_match_name(input.alias_name);
+    if canonical_key.is_empty() || alias_key.is_empty() {
+        return Err(anyhow!("alias names must include alphanumeric characters"));
+    }
+    let row = client
+        .query_one(
+            r#"
+            INSERT INTO entity_aliases (
+              id, entity_kind, sport_key, canonical_name, canonical_key, alias_name,
+              alias_key, source_key, external_id, confidence, payload
+            )
+            VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,($10::float8)::numeric,$11)
+            ON CONFLICT (
+              entity_kind,
+              COALESCE(sport_key, ''),
+              canonical_key,
+              alias_key,
+              COALESCE(source_key, ''),
+              COALESCE(external_id, '')
+            )
+            DO UPDATE
+            SET canonical_name = EXCLUDED.canonical_name,
+                alias_name = EXCLUDED.alias_name,
+                confidence = GREATEST(entity_aliases.confidence, EXCLUDED.confidence),
+                payload = entity_aliases.payload || EXCLUDED.payload,
+                last_seen_at = now()
+            RETURNING
+              id,
+              entity_kind,
+              sport_key,
+              canonical_name,
+              canonical_key,
+              alias_name,
+              alias_key,
+              source_key,
+              external_id,
+              confidence::float8 AS confidence,
+              payload,
+              first_seen_at,
+              last_seen_at
+            "#,
+            &[
+                &new_id(),
+                &input.entity_kind,
+                &input.sport_key,
+                &input.canonical_name,
+                &canonical_key,
+                &input.alias_name,
+                &alias_key,
+                &input.source_key,
+                &input.external_id,
+                &input.confidence,
+                &input.payload,
+            ],
+        )
+        .await?;
+    let first_seen_at: DateTime<Utc> = row.get("first_seen_at");
+    let last_seen_at: DateTime<Utc> = row.get("last_seen_at");
+    Ok(json!({
+        "id": row.get::<_, String>("id"),
+        "entity_kind": row.get::<_, String>("entity_kind"),
+        "sport_key": row.get::<_, Option<String>>("sport_key"),
+        "canonical_name": row.get::<_, String>("canonical_name"),
+        "canonical_key": row.get::<_, String>("canonical_key"),
+        "alias_name": row.get::<_, String>("alias_name"),
+        "alias_key": row.get::<_, String>("alias_key"),
+        "source_key": row.get::<_, Option<String>>("source_key"),
+        "external_id": row.get::<_, Option<String>>("external_id"),
+        "confidence": row.get::<_, f64>("confidence"),
+        "payload": row.get::<_, Value>("payload"),
+        "first_seen_at": first_seen_at,
+        "last_seen_at": last_seen_at,
+        "paper_only": true
+    }))
+}
+
+async fn record_entity_aliases(
+    client: &Client,
+    entity_kind: &str,
+    sport_key: Option<&str>,
+    canonical_name: &str,
+    aliases: Vec<String>,
+    source_key: Option<&str>,
+    external_id: Option<&str>,
+    confidence: f64,
+    notes: Value,
+) -> anyhow::Result<Vec<Value>> {
+    let mut rows = Vec::new();
+    for alias_name in dedup_strings(
+        aliases
+            .into_iter()
+            .chain(std::iter::once(canonical_name.to_string()))
+            .collect(),
+    ) {
+        rows.push(
+            upsert_entity_alias(
+                client,
+                EntityAliasInput {
+                    entity_kind,
+                    sport_key,
+                    canonical_name,
+                    alias_name: &alias_name,
+                    source_key,
+                    external_id,
+                    confidence,
+                    payload: json!({
+                        "notes": notes,
+                        "paper_only": true
+                    }),
+                },
+            )
+            .await?,
+        );
+    }
+    Ok(rows)
+}
+
+async fn expand_aliases_from_registry(
+    client: &Client,
+    entity_kind: &str,
+    aliases: Vec<String>,
+) -> anyhow::Result<Vec<String>> {
+    let mut expanded = dedup_strings(aliases);
+    if expanded.is_empty() {
+        return Ok(expanded);
+    }
+    let keys = expanded
+        .iter()
+        .map(|value| normalize_match_name(value))
+        .filter(|value| !value.is_empty())
+        .collect::<Vec<_>>();
+    if keys.is_empty() {
+        return Ok(expanded);
+    }
+    let rows = client
+        .query(
+            r#"
+            SELECT canonical_name, alias_name
+            FROM entity_aliases
+            WHERE entity_kind = $1
+              AND (canonical_key = ANY($2) OR alias_key = ANY($2))
+            "#,
+            &[&entity_kind, &keys],
+        )
+        .await?;
+    for row in rows {
+        expanded.push(row.get::<_, String>("canonical_name"));
+        expanded.push(row.get::<_, String>("alias_name"));
+    }
+    Ok(dedup_strings(expanded))
+}
+
 fn external_result_link_for_event(
     source_policy: &Value,
     event_name: &str,
@@ -7638,6 +8068,14 @@ fn is_external_result_source(source_key: &str) -> bool {
         source_key,
         "flashscore_results" | "sofascore_results" | "livescore_results"
     )
+}
+
+fn validate_entity_kind(entity_kind: &str) -> anyhow::Result<()> {
+    match entity_kind {
+        "participant" | "team" | "player" | "league" | "competition" | "driver" | "golfer"
+        | "rider" => Ok(()),
+        _ => Err(anyhow!("unsupported alias entity_kind: {entity_kind}")),
+    }
 }
 
 fn validate_external_result_url(source_key: &str, source_url: &str) -> anyhow::Result<()> {

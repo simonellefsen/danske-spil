@@ -290,6 +290,7 @@ def flashscore_discover(task: dict) -> dict | None:
     return {
         "source_key": FLASHSCORE_SOURCE_KEY,
         "source_url": source_url,
+        "sport_key": sport_key,
         "event_name": event_name,
         "home_name": feed_home,
         "away_name": feed_away,
@@ -313,6 +314,7 @@ def persist_flashscore_discovery(args: argparse.Namespace, evidence: dict) -> di
     source_link_payload = {
         "source_key": evidence["source_key"],
         "source_url": evidence["source_url"],
+        "sport_key": evidence["sport_key"],
         "event_name": evidence["event_name"],
         "home_aliases": evidence["home_aliases"],
         "away_aliases": evidence["away_aliases"],
@@ -333,8 +335,11 @@ def persist_flashscore_discovery(args: argparse.Namespace, evidence: dict) -> di
             f"{evidence['home_score']}:{evidence['away_score']}"
         ),
         "event_name": evidence["event_name"],
+        "sport_key": evidence["sport_key"],
         "home_name": evidence["home_name"],
         "away_name": evidence["away_name"],
+        "home_aliases": evidence["home_aliases"],
+        "away_aliases": evidence["away_aliases"],
         "home_score": evidence["home_score"],
         "away_score": evidence["away_score"],
         "confidence": evidence["confidence"],
