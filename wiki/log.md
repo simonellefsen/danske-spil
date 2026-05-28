@@ -147,6 +147,7 @@ Append-only timeline for project wiki maintenance. Use headings with the format 
 - Added a result-agent queue table to the web UI and removed the normal settlement-review prompt flow for manually pasting public result URLs.
 - Added `scripts/result_agent.py`, a local agent runner that consumes the queue and automates browser-backed public result evidence collection for configured match links.
 - Documented the read-only Danske Spil account-history result-agent boundary: use an operator browser session, prefer account/coupon history when available, and post only sanitized settlement facts.
+- Added hover tooltips to the main dashboard actions and settlement/result-agent panels so the paper-settlement workflow is discoverable in the UI.
 
 ## [2026-05-25] implementation | Candidate ranking and paper settlement POC
 

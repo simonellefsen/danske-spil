@@ -6,15 +6,15 @@ pub fn render_index(base_path: &str) -> String {
             header {
                 h1 { "Gambler POC" }
                 div { class: "toolbar",
-                    button { class: "primary", id: "scan", "Scan markets" }
-                    button { id: "auto-paper", "Auto paper selected" }
-                    button { id: "generate-coupons", "Generate coupons" }
-                    button { id: "auto-paper-coupons", "Auto paper coupons" }
-                    button { id: "queue-settlement", "Queue settlement" }
-                    button { id: "review-settlement", "Review results" }
-                    button { id: "commit-settlements", disabled: true, "Commit selected settlements" }
-                    button { id: "reflect-yesterday", "Reflect yesterday" }
-                    button { id: "refresh", "Refresh" }
+                    button { class: "primary", id: "scan", title: "Fetch the latest observed markets, update candidates, apply strategy gates, and refresh paper-settlement state.", "Scan markets" }
+                    button { id: "auto-paper", title: "Create paper-ledger entries for currently selected single-bet candidates. This never places real bets.", "Auto paper selected" }
+                    button { id: "generate-coupons", title: "Build provider-compatible paper coupon candidates such as doubles or triples from selected legs.", "Generate coupons" }
+                    button { id: "auto-paper-coupons", title: "Create paper-ledger coupon simulations for selected coupon candidates. This never places real bets.", "Auto paper coupons" }
+                    button { id: "queue-settlement", title: "Move open paper bets/coupons whose expected result-check time has passed into awaiting-result review.", "Queue settlement" }
+                    button { id: "review-settlement", title: "Refresh result evidence, stale lookup state, source recommendations, and result-agent tasks for awaiting paper positions.", "Review results" }
+                    button { id: "commit-settlements", title: "Apply the settlement outcomes you selected in Settlement review. Disabled until at least one row is selected.", disabled: true, "Commit selected settlements" }
+                    button { id: "reflect-yesterday", title: "Record or refresh the Hermes-safe previous-day paper-performance reflection.", "Reflect yesterday" }
+                    button { id: "refresh", title: "Reload dashboard data without triggering a market scan.", "Refresh" }
                 }
             }
             main {
@@ -91,7 +91,7 @@ pub fn render_index(base_path: &str) -> String {
                         }
                     }
                     section {
-                        h2 { "Settlement review" }
+                        h2 { title: "Manual review surface for paper positions. Select an outcome here only after evidence is known, then commit selected settlements.", "Settlement review" }
                         table {
                             thead { tr {
                                 th { "Selection" } th { "Expected finish" } th { "Event state" } th { "Recommendation" }
@@ -100,7 +100,7 @@ pub fn render_index(base_path: &str) -> String {
                         }
                     }
                     section {
-                        h2 { "Result agent queue" }
+                        h2 { title: "Automation backlog for stale paper positions. Rows are not clicked directly: the worker handles direct configured links, and local result-agent/account-history agents should consume this queue and post sanitized evidence.", "Result agent queue" }
                         table {
                             thead { tr {
                                 th { "Task" } th { "Selection" } th { "Sources" } th { "Agent action" }
@@ -109,7 +109,7 @@ pub fn render_index(base_path: &str) -> String {
                         }
                     }
                     section {
-                        h2 { "Settlement sources" }
+                        h2 { title: "Ordered source policy used for settlement evidence. Account history is preferred, then official results, then public result pages.", "Settlement sources" }
                         table {
                             thead { tr {
                                 th { "Priority" } th { "Source" } th { "Scope" } th { "Reliability" } th { "Notes" }
@@ -118,7 +118,7 @@ pub fn render_index(base_path: &str) -> String {
                         }
                     }
                     section {
-                        h2 { "Operator result links" }
+                        h2 { title: "Persisted event-to-result-page links. Direct links can be auto-checked by the worker; browser-only links are consumed by result-agent probes.", "Operator result links" }
                         table {
                             thead { tr {
                                 th { "Updated" } th { "Event" } th { "Source" } th { "Aliases" } th { "Mode" }
@@ -136,7 +136,7 @@ pub fn render_index(base_path: &str) -> String {
                         }
                     }
                     section {
-                        h2 { "External result evidence" }
+                        h2 { title: "Sanitized final-score evidence submitted by public-source or account-history agents. Evidence can drive deterministic paper settlement for supported markets.", "External result evidence" }
                         table {
                             thead { tr {
                                 th { "Observed" } th { "Event" } th { "Score" } th { "Source" } th { "Used" }
@@ -145,7 +145,7 @@ pub fn render_index(base_path: &str) -> String {
                         }
                     }
                     section {
-                        h2 { "Settlement lookup attempts" }
+                        h2 { title: "Audit trail of result-review checks and recommendations. These rows explain what source class was consulted and why a position remains unresolved.", "Settlement lookup attempts" }
                         table {
                             thead { tr {
                                 th { "Checked" } th { "Item" } th { "Recommendation" } th { "Source" } th { "State" }
@@ -730,11 +730,15 @@ function renderResultAgentQueue(queue) {
     const overdueText = item.overdue_minutes === null || item.overdue_minutes === undefined
       ? ""
       : `<br><span class="danger">${esc(durationMins(item.overdue_minutes))} overdue</span>`;
+    const taskTitle = `${item.agent_action || "result-agent task"} Evidence should be posted to ${item.evidence_endpoint || "/api/settlement/external-evidence"}.`;
+    const sourceTitle = links.length
+      ? "Configured result links are ready for direct worker checks or browser-backed result-agent probes."
+      : "No configured result link yet. A source-discovery/account-history agent should find evidence automatically; operators should not need to paste URLs.";
     return `
-      <tr>
+      <tr title="${esc(taskTitle)}">
         <td><span class="pill">${esc(item.task_kind || "result_task")}</span><br><span class="label">${esc(item.automation_status || "")}</span>${overdueText}</td>
         <td>${Array.isArray(selection.event_names) && selection.event_names.length ? eventNames : esc(eventNames)}<br><span class="label">${esc([selection.sport_key, selection.competition, selection.market_name, selection.outcome_name].filter(Boolean).join(" / "))}</span></td>
-        <td>${linkText}${terms ? `<br><span class="label">terms</span><br><span class="muted">${terms}</span>` : ""}</td>
+        <td title="${esc(sourceTitle)}">${linkText}${terms ? `<br><span class="label">terms</span><br><span class="muted">${terms}</span>` : ""}</td>
         <td>${esc(item.agent_action || "")}<br><span class="label">evidence: ${esc(item.evidence_endpoint || "")}</span></td>
       </tr>
     `;
