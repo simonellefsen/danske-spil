@@ -22,6 +22,7 @@ The UI is not a marketing site. It is an operational dashboard for repeated revi
 - Candidate count by product, market, confidence, and status.
 - Open simulated placements, unresolved settlements, and settled paper results.
 - Recent paper plays, including both singles and multi-leg coupons with strategy, stake, observed odds, status, score, and confidence.
+- Browser-backed external result evidence, including source, event, score, confidence, and whether the evidence has driven a paper settlement.
 - Recent audit events for scan, paper-placement, settlement, reflection, and strategy-review actions.
 - Active local limits and whether real-money placement is disabled.
 - Recent warnings, login expiry, maintenance windows, and blocked states.
@@ -113,6 +114,7 @@ Candidate tables:
 - `web_review_events`
 - `audit_events`
 - `settlement_observations`
+- `external_result_evidence`
 - `settlement_sources`
 - `hermes_reflections`
 - `strategy_experiments`

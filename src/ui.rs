@@ -117,6 +117,15 @@ pub fn render_index(base_path: &str) -> String {
                         }
                     }
                     section {
+                        h2 { "External result evidence" }
+                        table {
+                            thead { tr {
+                                th { "Observed" } th { "Event" } th { "Score" } th { "Source" } th { "Used" }
+                            } }
+                            tbody { id: "external-result-evidence" }
+                        }
+                    }
+                    section {
                         h2 { "Settlement lookup attempts" }
                         table {
                             thead { tr {
@@ -352,6 +361,9 @@ const durationMins = (value) => {
 const esc = (value) => String(value ?? "").replace(/[&<>"']/g, (ch) => ({
   "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;"
 }[ch]));
+const hostLabel = (url) => {
+  try { return new URL(url).hostname; } catch (_) { return url || ""; }
+};
 const openSettlementStatuses = ["open", "awaiting_result", "unresolved", "postponed"];
 const settlementActions = [
   ["won", "Won"],
@@ -705,6 +717,30 @@ function renderSettlementObservations(observations) {
   }).join("");
   if (!items.length) {
     $("settlement-observations").innerHTML = `<tr><td colspan="5" class="muted">No settlement observations have been recorded yet.</td></tr>`;
+  }
+}
+function renderExternalResultEvidence(evidence) {
+  const items = evidence.items || [];
+  $("external-result-evidence").innerHTML = items.map((item) => {
+    const payload = item.payload || {};
+    const excerpt = payload.raw_text_excerpt
+      ? String(payload.raw_text_excerpt).slice(0, 180)
+      : "";
+    const sourceUrl = item.source_url
+      ? `<br><a class="muted" href="${esc(item.source_url)}" target="_blank" rel="noreferrer">${esc(hostLabel(item.source_url))}</a>`
+      : "";
+    return `
+      <tr>
+        <td>${esc(item.created_at || "-")}</td>
+        <td>${esc(item.event_name || "-")}<br><span class="label">${esc(item.home_name || "")} vs ${esc(item.away_name || "")}</span>${excerpt ? `<br><span class="muted">${esc(excerpt)}</span>` : ""}</td>
+        <td>${esc(item.home_score)} - ${esc(item.away_score)}<br><span class="muted">${pct(item.confidence)}</span></td>
+        <td>${esc(item.source_key || "-")}${sourceUrl}</td>
+        <td><span class="${item.used_for_settlement ? "ok" : "muted"}">${item.used_for_settlement ? "settlement evidence" : "evidence only"}</span></td>
+      </tr>
+    `;
+  }).join("");
+  if (!items.length) {
+    $("external-result-evidence").innerHTML = `<tr><td colspan="5" class="muted">No external result evidence has been recorded yet.</td></tr>`;
   }
 }
 function renderSettlementLookupAttempts(attempts) {
@@ -1099,6 +1135,8 @@ async function load() {
   renderSettlementReview(settlementReview);
   const settlementObservations = await json(api("/api/settlement/observations"));
   renderSettlementObservations(settlementObservations);
+  const externalResultEvidence = await json(api("/api/settlement/external-evidence"));
+  renderExternalResultEvidence(externalResultEvidence);
   const settlementLookupAttempts = await json(api("/api/settlement/lookup-attempts"));
   renderSettlementLookupAttempts(settlementLookupAttempts);
   const played = await json(api("/api/strategy/played"));
