@@ -156,6 +156,7 @@ Append-only timeline for project wiki maintenance. Use headings with the format 
 - The worker now attempts result-agent discovery on the normal 15-minute scan cadence, stores discovered Flashscore links, records aliases with sport/gender scope when known, and posts sanitized paper-settlement evidence for finished events.
 - Expanded Flashscore participant matching with alias variants, Danish-to-English country names, gender-aware ranking, and a stable `x-fsign` fallback for current Flashscore pages that no longer expose `feed_sign` in page HTML.
 - Split result-agent runtime responsibility into a dedicated `gambler-result-agent` Kubernetes deployment and ClusterIP service. The worker now refreshes settlement review state while the result-agent service owns scheduled paper-only result reconciliation.
+- Split the result-agent build path into a separate `danske-spil-result-agent` binary and scratch image built with `--no-default-features`, avoiding Dioxus compilation for result-agent-only image builds.
 
 ## [2026-05-25] implementation | Candidate ranking and paper settlement POC
 

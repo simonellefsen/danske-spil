@@ -7,17 +7,20 @@ WORKDIR /app
 COPY Cargo.toml Cargo.lock ./
 
 RUN mkdir src \
+    && printf '' > src/lib.rs \
     && printf 'fn main() {}\n' > src/main.rs \
-    && cargo build --release --locked \
+    && cargo build --release --locked --bin danske-spil-gambler \
     && rm -rf src \
         target/release/danske-spil-gambler \
+        target/release/libdanske_spil_gambler* \
         target/release/deps/danske_spil_gambler-* \
+        target/release/deps/libdanske_spil_gambler-* \
         target/release/.fingerprint/danske-spil-gambler-*
 
 FROM deps AS builder
 COPY src ./src
 
-RUN cargo build --release --locked
+RUN cargo build --release --locked --bin danske-spil-gambler
 
 FROM scratch
 

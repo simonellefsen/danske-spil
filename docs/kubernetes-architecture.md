@@ -9,7 +9,7 @@ Target namespace: `danske-spil`.
 - `gambler-api`: future internal API and browser-observation service.
 - `gambler-web`: future operator web UI for candidate odds, reasoning traces, safety gates, and Hermes review.
 - `gambler-worker`: future scheduled scanner, monitor, sports-data ingestion, simulation-placement, and settlement worker.
-- `gambler-result-agent`: paper-only result reconciliation service with its own cadence and internal HTTP API.
+- `gambler-result-agent`: paper-only result reconciliation service with its own cadence, internal HTTP API, and slim no-Dioxus image.
 - `gambler-mcp`: future Hermes-safe MCP adapter.
 - `hermes-agent`: Hermes gateway and reflection engine.
 - `hermes-weekly-reflection`: suspended CronJob until configured.

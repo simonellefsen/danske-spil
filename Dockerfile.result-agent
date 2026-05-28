@@ -1,0 +1,38 @@
+FROM rust:1.87-alpine AS deps
+
+RUN apk add --no-cache musl-dev ca-certificates
+
+WORKDIR /app
+
+COPY Cargo.toml Cargo.lock ./
+
+RUN mkdir -p src/bin \
+    && printf '' > src/lib.rs \
+    && printf 'fn main() {}\n' > src/bin/result_agent.rs \
+    && cargo build --release --locked --no-default-features --bin danske-spil-result-agent \
+    && rm -rf src \
+        target/release/danske-spil-result-agent \
+        target/release/libdanske_spil_gambler* \
+        target/release/deps/danske_spil_result_agent-* \
+        target/release/deps/libdanske_spil_gambler-* \
+        target/release/.fingerprint/danske-spil-gambler-* \
+        target/release/.fingerprint/danske-spil-result-agent-*
+
+FROM deps AS builder
+RUN rm -rf src && mkdir -p src/bin
+COPY src/lib.rs src/config.rs src/danske_spil.rs src/models.rs src/service.rs src/store.rs ./src/
+COPY src/bin/result_agent.rs ./src/bin/result_agent.rs
+
+RUN cargo build --release --locked --no-default-features --bin danske-spil-result-agent
+
+FROM scratch
+
+ENV GAMBLER_HOST=0.0.0.0 \
+    GAMBLER_PORT=8080
+
+COPY --from=builder /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/ca-certificates.crt
+COPY --from=builder /app/target/release/danske-spil-result-agent /result-agent
+
+EXPOSE 8080
+
+ENTRYPOINT ["/result-agent"]

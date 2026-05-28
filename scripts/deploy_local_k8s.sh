@@ -4,6 +4,7 @@ set -euo pipefail
 CONTEXT="${KUBE_CONTEXT:-docker-desktop}"
 NAMESPACE="${NAMESPACE:-danske-spil}"
 IMAGE="${IMAGE:-danske-spil-gambler:$(date +%Y%m%d%H%M%S)}"
+RESULT_AGENT_IMAGE="${RESULT_AGENT_IMAGE:-danske-spil-result-agent:$(date +%Y%m%d%H%M%S)}"
 SECRET_NAME="danske-spil-postgres-app"
 
 kubectl --context "$CONTEXT" get namespace "$NAMESPACE" >/dev/null 2>&1 || \
@@ -17,11 +18,12 @@ if ! kubectl --context "$CONTEXT" -n "$NAMESPACE" get secret "$SECRET_NAME" >/de
 fi
 
 docker build -t "$IMAGE" .
+docker build -f Dockerfile.result-agent -t "$RESULT_AGENT_IMAGE" .
 
 kubectl --context "$CONTEXT" apply -f k8s/base
 kubectl --context "$CONTEXT" -n "$NAMESPACE" set image deployment/gambler-api gambler-api="$IMAGE"
 kubectl --context "$CONTEXT" -n "$NAMESPACE" set image deployment/gambler-worker gambler-worker="$IMAGE"
-kubectl --context "$CONTEXT" -n "$NAMESPACE" set image deployment/gambler-result-agent gambler-result-agent="$IMAGE"
+kubectl --context "$CONTEXT" -n "$NAMESPACE" set image deployment/gambler-result-agent gambler-result-agent="$RESULT_AGENT_IMAGE"
 kubectl --context "$CONTEXT" -n "$NAMESPACE" set image deployment/hermes-agent hermes-agent="$IMAGE"
 kubectl --context "$CONTEXT" -n "$NAMESPACE" wait --for=condition=Ready cluster/danske-spil-postgres --timeout=300s
 kubectl --context "$CONTEXT" -n "$NAMESPACE" rollout status deployment/gambler-api --timeout=180s

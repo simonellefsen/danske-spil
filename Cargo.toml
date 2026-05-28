@@ -3,12 +3,25 @@ name = "danske-spil-gambler"
 version = "0.1.0"
 edition = "2021"
 
+[features]
+default = ["ui"]
+ui = ["dep:dioxus", "dep:dioxus-ssr"]
+
+[[bin]]
+name = "danske-spil-gambler"
+path = "src/main.rs"
+required-features = ["ui"]
+
+[[bin]]
+name = "danske-spil-result-agent"
+path = "src/bin/result_agent.rs"
+
 [dependencies]
 anyhow = "1"
 axum = "0.7"
 chrono = { version = "0.4", features = ["serde"] }
-dioxus = "0.6"
-dioxus-ssr = "0.6"
+dioxus = { version = "0.6", optional = true }
+dioxus-ssr = { version = "0.6", optional = true }
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"

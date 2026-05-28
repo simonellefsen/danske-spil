@@ -1,8 +1,3 @@
-mod config;
-mod danske_spil;
-mod models;
-mod service;
-mod store;
 mod ui;
 
 use axum::body::Bytes;
@@ -11,13 +6,13 @@ use axum::http::{header, StatusCode};
 use axum::response::{Html, IntoResponse, Response};
 use axum::routing::get;
 use axum::{Json, Router};
-use config::Settings;
+use danske_spil_gambler::config::Settings;
+use danske_spil_gambler::service::GamblerService;
+use danske_spil_gambler::store::Store;
 use serde_json::{json, Value};
-use service::GamblerService;
 use std::net::SocketAddr;
 use std::sync::Arc;
 use std::time::Duration;
-use store::Store;
 use tower_http::trace::TraceLayer;
 use tracing_subscriber::EnvFilter;
 

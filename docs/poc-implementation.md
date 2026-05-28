@@ -2,7 +2,7 @@
 
 This POC keeps the system non-mutating. It uses `agent-browser` for visual/DOM reconnaissance and a read-only content-service probe for structured odds data.
 
-The active app implementation is Rust. The HTTP API is served by Axum, the operator shell is rendered with Dioxus SSR, and the same binary runs either the API server or the scheduled worker loop.
+The active app implementation is Rust. The HTTP API is served by Axum and the operator shell is rendered with Dioxus SSR. The full `danske-spil-gambler` binary runs the API server or scheduled worker loop, while the separate `danske-spil-result-agent` binary runs the paper-only result reconciliation service without compiling the Dioxus UI dependency graph.
 
 ## Agent Browser Setup
 
@@ -293,7 +293,7 @@ Current result-review status:
 - Direct Sofascore HTTP fetches returned 403 in local testing even with browser-like request headers, while `agent-browser` could load the same match page and expose the final result text. Sofascore source rows are therefore flagged as requiring browser automation, and the direct auto-settler skips them with an audited `browser_automation_required_for_source` reason.
 - Browser-backed result evidence can be submitted through `POST /api/settlement/external-evidence`. The payload stores an `external_result_evidence` row and, when `settle` is true, attempts deterministic paper settlement for matching open single-leg winner markets only. The evidence payload should include `source_key`, `source_url`, `event_name`, `home_name`, `away_name`, `home_score`, `away_score`, and a short `raw_text_excerpt`; it must not include cookies, credentials, browser storage, or full account payloads.
 - `scripts/external_result_evidence_probe.py` is the local operator probe for browser-backed Sofascore, Flashscore, and LiveScore evidence. It opens the public match URL with `agent-browser`, extracts a compact final-score payload, and posts to the API only when not run with `--dry-run`. It defaults to `settle=false`, and explicit score/team arguments can be supplied when the page loads but does not expose a parseable final score.
-- The Rust worker consumes `/api/result-agent/queue` on the normal scan cadence and runs built-in Flashscore discovery for stale football, tennis, and basketball rows that do not yet have configured public result links. It stores the discovered source link and posts sanitized evidence through `POST /api/settlement/external-evidence` when a final score is available.
+- The dedicated Rust result-agent deployment consumes `/api/result-agent/queue` on its own cadence and runs built-in Flashscore discovery for stale football, tennis, and basketball rows that do not yet have configured public result links. It stores the discovered source link and posts sanitized evidence through `POST /api/settlement/external-evidence` when a final score is available.
 - `scripts/result_agent.py` remains available for local diagnostics and browser-only public result probes for configured links, so stale rows do not require operator URL prompts.
 - Settlement-review rows include all configured external result links when known match URLs exist, including whether each source requires browser evidence. The direct auto-check attempts every non-browser source before reporting that browser evidence is required.
 - Operators can still attach additional public result URLs through `POST /api/settlement/source-link` as a fallback integration point. The normal UI path now favors the result-agent queue instead of prompting operators to paste URLs.

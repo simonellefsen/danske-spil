@@ -165,9 +165,8 @@ spec:
     spec:
       containers:
         - name: gambler-result-agent
-          image: danske-spil-gambler:local
+          image: danske-spil-result-agent:local
           imagePullPolicy: IfNotPresent
-          command: ["/gambler", "result-agent"]
           ports:
             - name: http
               containerPort: 8080

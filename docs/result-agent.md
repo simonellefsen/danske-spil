@@ -72,8 +72,9 @@ post only compact settlement facts to the API.
 
 ## Built-In Public-Source Agent
 
-The Kubernetes POC runs a dedicated `gambler-result-agent` deployment for the
-read-only public-source result-agent pass. It consumes
+The Kubernetes POC runs a dedicated `gambler-result-agent` deployment and
+slim `danske-spil-result-agent` image for the read-only public-source
+result-agent pass. It consumes
 `GET /api/result-agent/queue`, discovers missing Flashscore result links for
 supported sports, stores the durable source link, and posts sanitized
 final-score evidence when the event is finished. The same cycle can be
