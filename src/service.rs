@@ -504,7 +504,10 @@ impl GamblerService {
             }
 
             match flashscore_discover(&http, &task).await {
-                Ok(Some(evidence)) => {
+                Ok(FlashscoreDiscovery {
+                    evidence: Some(evidence),
+                    diagnostics,
+                }) => {
                     let source_link_payload = evidence.source_link_payload();
                     let source_link_result = match self
                         .store
@@ -560,6 +563,7 @@ impl GamblerService {
                         "score": {"home": evidence.home_score, "away": evidence.away_score},
                         "finished": evidence.finished,
                         "match_score": evidence.match_score,
+                        "diagnostics": diagnostics,
                         "source_link": source_link_result,
                         "evidence_result": evidence_result,
                         "paper_only": true
@@ -570,11 +574,22 @@ impl GamblerService {
                         .ok();
                     results.push(result);
                 }
-                Ok(None) => skipped.push(json!({
-                    "task_kind": task_kind,
-                    "reason": "flashscore_discovery_no_match",
-                    "selection": task.get("selection").cloned().unwrap_or(Value::Null)
-                })),
+                Ok(FlashscoreDiscovery {
+                    evidence: None,
+                    diagnostics,
+                }) => {
+                    let skipped_item = json!({
+                        "task_kind": task_kind,
+                        "reason": "flashscore_discovery_no_match",
+                        "selection": task.get("selection").cloned().unwrap_or(Value::Null),
+                        "diagnostics": diagnostics
+                    });
+                    self.store
+                        .record_audit("result_agent_flashscore_no_match", skipped_item.clone())
+                        .await
+                        .ok();
+                    skipped.push(skipped_item);
+                }
                 Err(error) => skipped.push(json!({
                     "task_kind": task_kind,
                     "reason": "flashscore_discovery_failed",
@@ -1108,6 +1123,7 @@ struct FlashscoreParticipant {
     id: String,
     title: String,
     url: String,
+    participant_type_id: Option<i64>,
 }
 
 #[derive(Clone, Debug)]
@@ -1127,6 +1143,12 @@ struct FlashscoreEvidence {
     home_aliases: Vec<String>,
     away_aliases: Vec<String>,
     raw_text_excerpt: String,
+}
+
+#[derive(Clone, Debug)]
+struct FlashscoreDiscovery {
+    evidence: Option<FlashscoreEvidence>,
+    diagnostics: Value,
 }
 
 impl FlashscoreEvidence {
@@ -1200,40 +1222,94 @@ fn flashscore_http_client() -> anyhow::Result<HttpClient> {
 async fn flashscore_discover(
     http: &HttpClient,
     task: &Value,
-) -> anyhow::Result<Option<FlashscoreEvidence>> {
+) -> anyhow::Result<FlashscoreDiscovery> {
     let selection = task.get("selection").unwrap_or(&Value::Null);
     let sport_key = text(selection, "sport_key")
         .unwrap_or_default()
         .to_lowercase();
+    let mut diagnostics = serde_json::Map::new();
+    diagnostics.insert("source_key".to_string(), json!(FLASHSCORE_SOURCE_KEY));
+    diagnostics.insert("sport_key".to_string(), json!(sport_key));
+    diagnostics.insert("selection".to_string(), selection.clone());
     if flashscore_sport_id(&sport_key).is_none() {
-        return Ok(None);
+        diagnostics.insert("reason".to_string(), json!("unsupported_flashscore_sport"));
+        return Ok(FlashscoreDiscovery {
+            evidence: None,
+            diagnostics: Value::Object(diagnostics),
+        });
     }
     let Some(event_name) = text(selection, "event_name").map(str::trim) else {
-        return Ok(None);
+        diagnostics.insert("reason".to_string(), json!("missing_event_name"));
+        return Ok(FlashscoreDiscovery {
+            evidence: None,
+            diagnostics: Value::Object(diagnostics),
+        });
     };
+    diagnostics.insert("event_name".to_string(), json!(event_name));
     let Some((home_name, away_name)) = split_event_name(event_name) else {
-        return Ok(None);
+        diagnostics.insert("reason".to_string(), json!("unsupported_event_name_shape"));
+        return Ok(FlashscoreDiscovery {
+            evidence: None,
+            diagnostics: Value::Object(diagnostics),
+        });
     };
+    diagnostics.insert("home_name".to_string(), json!(home_name));
+    diagnostics.insert("away_name".to_string(), json!(away_name));
     let gender_scope = infer_selection_gender_scope(selection);
-    let Some(home) =
-        best_flashscore_participant(http, &home_name, &sport_key, gender_scope.as_deref()).await?
-    else {
-        return Ok(None);
+    diagnostics.insert("gender_scope".to_string(), json!(gender_scope));
+    let home_candidates =
+        ranked_flashscore_participants(http, &home_name, &sport_key, gender_scope.as_deref())
+            .await?;
+    diagnostics.insert(
+        "home_participant_candidates".to_string(),
+        flashscore_participant_candidates_json(&home_candidates),
+    );
+    let Some((_, home)) = home_candidates.first().cloned() else {
+        diagnostics.insert("reason".to_string(), json!("home_participant_not_found"));
+        return Ok(FlashscoreDiscovery {
+            evidence: None,
+            diagnostics: Value::Object(diagnostics),
+        });
     };
-    let Some(away) =
-        best_flashscore_participant(http, &away_name, &sport_key, gender_scope.as_deref()).await?
-    else {
-        return Ok(None);
+    let away_candidates =
+        ranked_flashscore_participants(http, &away_name, &sport_key, gender_scope.as_deref())
+            .await?;
+    diagnostics.insert(
+        "away_participant_candidates".to_string(),
+        flashscore_participant_candidates_json(&away_candidates),
+    );
+    let Some((_, away)) = away_candidates.first().cloned() else {
+        diagnostics.insert("reason".to_string(), json!("away_participant_not_found"));
+        return Ok(FlashscoreDiscovery {
+            evidence: None,
+            diagnostics: Value::Object(diagnostics),
+        });
     };
+    diagnostics.insert(
+        "selected_participants".to_string(),
+        json!({
+            "home": flashscore_participant_json(None, &home),
+            "away": flashscore_participant_json(None, &away)
+        }),
+    );
     let expected_check_after = text(task, "expected_result_check_after")
         .and_then(|value| DateTime::parse_from_rfc3339(value).ok())
         .map(|value| value.with_timezone(&Utc));
+    diagnostics.insert(
+        "expected_result_check_after".to_string(),
+        json!(expected_check_after),
+    );
 
     let mut best: Option<(f64, bool, Value, String)> = None;
+    let mut feed_diagnostics = Vec::new();
     for feed_participant in [&home, &away] {
         let Some(feed_sign) =
             fetch_flashscore_feed_sign(http, feed_participant, &sport_key).await?
         else {
+            feed_diagnostics.push(json!({
+                "participant": flashscore_participant_json(None, feed_participant),
+                "reason": "feed_sign_not_available"
+            }));
             continue;
         };
         let feed_name = format!("pe_2_2_{}_x", feed_participant.id);
@@ -1247,6 +1323,8 @@ async fn flashscore_discover(
             .text()
             .await?;
         let rows = parse_flashscore_feed_rows(&feed);
+        let rows_seen = rows.len();
+        let mut best_in_feed: Option<(f64, bool, Value)> = None;
 
         for row in rows {
             let (score, reversed_side) = score_flashscore_row(
@@ -1257,6 +1335,13 @@ async fn flashscore_discover(
                 &away.id,
                 expected_check_after,
             );
+            if best_in_feed
+                .as_ref()
+                .map(|(current, _, _)| score > *current)
+                .unwrap_or(true)
+            {
+                best_in_feed = Some((score, reversed_side, row.clone()));
+            }
             if score >= 90.0
                 && best
                     .as_ref()
@@ -1266,9 +1351,30 @@ async fn flashscore_discover(
                 best = Some((score, reversed_side, row, feed_name.clone()));
             }
         }
+        feed_diagnostics.push(json!({
+            "feed_name": feed_name,
+            "participant": flashscore_participant_json(None, feed_participant),
+            "rows_seen": rows_seen,
+            "best_row": best_in_feed.as_ref().map(|(score, reversed_side, row)| {
+                json!({
+                    "score": score,
+                    "reversed_side": reversed_side,
+                    "row": flashscore_row_preview(row)
+                })
+            })
+        }));
     }
+    diagnostics.insert("feeds_checked".to_string(), json!(feed_diagnostics));
     let Some((match_score, reversed_side, row, feed_name)) = best else {
-        return Ok(None);
+        diagnostics.insert(
+            "reason".to_string(),
+            json!("no_feed_row_above_match_threshold"),
+        );
+        diagnostics.insert("match_threshold".to_string(), json!(90.0));
+        return Ok(FlashscoreDiscovery {
+            evidence: None,
+            diagnostics: Value::Object(diagnostics),
+        });
     };
     let mut feed_home = row_text(&row, "AE")
         .or_else(|| row_text(&row, "FH"))
@@ -1299,7 +1405,7 @@ async fn flashscore_discover(
     let source_url = flashscore_match_url(&sport_key, &event_id, &home, &away);
     let home_aliases = flashscore_aliases(&home_name, &feed_home, &home.title, &sport_key);
     let away_aliases = flashscore_aliases(&away_name, &feed_away, &away.title, &sport_key);
-    Ok(Some(FlashscoreEvidence {
+    let evidence = FlashscoreEvidence {
         source_url,
         sport_key,
         gender_scope,
@@ -1317,20 +1423,28 @@ async fn flashscore_discover(
         raw_text_excerpt: format!(
             "Flashscore feed {feed_name} matched {event_id}; stage={stage}; score={home_score}:{away_score}"
         ),
-    }))
+    };
+    diagnostics.insert("reason".to_string(), json!("match_found"));
+    diagnostics.insert("matched_feed_name".to_string(), json!(feed_name));
+    diagnostics.insert("matched_row".to_string(), flashscore_row_preview(&row));
+    Ok(FlashscoreDiscovery {
+        evidence: Some(evidence),
+        diagnostics: Value::Object(diagnostics),
+    })
 }
 
-async fn best_flashscore_participant(
+async fn ranked_flashscore_participants(
     http: &HttpClient,
     name: &str,
     sport_key: &str,
     gender_scope: Option<&str>,
-) -> anyhow::Result<Option<FlashscoreParticipant>> {
+) -> anyhow::Result<Vec<(f64, FlashscoreParticipant)>> {
     let queries = flashscore_name_variants(name, sport_key);
     let mut candidates = Vec::new();
     for query in queries {
         for participant in flashscore_search_participants(http, &query, sport_key).await? {
-            let score = flashscore_participant_score(name, &query, &participant, gender_scope);
+            let score =
+                flashscore_participant_score(name, &query, &participant, sport_key, gender_scope);
             if score >= 0.5 {
                 candidates.push((score, participant));
             }
@@ -1341,7 +1455,7 @@ async fn best_flashscore_participant(
             .partial_cmp(left_score)
             .unwrap_or(std::cmp::Ordering::Equal)
     });
-    Ok(candidates.into_iter().map(|(_, item)| item).next())
+    Ok(candidates)
 }
 
 async fn flashscore_search_participants(
@@ -1383,6 +1497,7 @@ async fn flashscore_search_participants(
                 id: text(item, "id")?.to_string(),
                 title: text(item, "title")?.to_string(),
                 url: text(item, "url")?.to_string(),
+                participant_type_id: json_i64(item.get("participant_type_id")),
             })
         })
         .collect();
@@ -1447,6 +1562,36 @@ fn parse_flashscore_feed_rows(feed: &str) -> Vec<Value> {
             }
         })
         .collect()
+}
+
+fn flashscore_participant_candidates_json(candidates: &[(f64, FlashscoreParticipant)]) -> Value {
+    Value::Array(
+        candidates
+            .iter()
+            .take(5)
+            .map(|(score, participant)| flashscore_participant_json(Some(*score), participant))
+            .collect(),
+    )
+}
+
+fn flashscore_participant_json(score: Option<f64>, participant: &FlashscoreParticipant) -> Value {
+    json!({
+        "id": participant.id,
+        "title": participant.title,
+        "url": participant.url,
+        "participant_type_id": participant.participant_type_id,
+        "score": score
+    })
+}
+
+fn flashscore_row_preview(row: &Value) -> Value {
+    let mut preview = serde_json::Map::new();
+    for key in ["AA", "AD", "AC", "AE", "AF", "AG", "AH", "PX", "PY"] {
+        if let Some(value) = row_text(row, key) {
+            preview.insert(key.to_string(), Value::String(value));
+        }
+    }
+    Value::Object(preview)
 }
 
 fn score_flashscore_row(
@@ -1570,6 +1715,7 @@ fn flashscore_participant_score(
     requested_name: &str,
     query: &str,
     participant: &FlashscoreParticipant,
+    sport_key: &str,
     gender_scope: Option<&str>,
 ) -> f64 {
     let title = strip_country_suffix(&participant.title);
@@ -1582,7 +1728,15 @@ fn flashscore_participant_score(
         (None, Some("women")) if !selection_name_has_women_marker(requested_name) => score *= 0.2,
         _ => {}
     }
+    if participant.participant_type_id == Some(2) && !sport_uses_individual_participants(sport_key)
+    {
+        score *= 0.35;
+    }
     score
+}
+
+fn sport_uses_individual_participants(sport_key: &str) -> bool {
+    matches!(sport_key, "tennis" | "formula1" | "golf" | "cycling")
 }
 
 fn flashscore_title_gender(title: &str) -> Option<String> {
@@ -1664,6 +1818,12 @@ fn flashscore_known_name_aliases(name: &str) -> Vec<String> {
             vec!["Naestved".to_string(), "Team FOG Naestved".to_string()]
         }
         "bakken bears" => vec!["Bakken Bears".to_string()],
+        "kolding if k" | "kolding if kvinder" | "kolding if women" => {
+            vec!["KoldingQ".to_string(), "Kolding IF W".to_string()]
+        }
+        "fortuna hjorring k" | "fortuna hjorring kvinder" | "fortuna hjorring women" => {
+            vec!["Fortuna Hjorring W".to_string()]
+        }
         "scu torreense" => vec!["Torreense".to_string()],
         "casa pia ac" => vec!["Casa Pia".to_string()],
         _ => Vec::new(),
@@ -1703,6 +1863,7 @@ fn infer_selection_gender_scope(selection: &Value) -> Option<String> {
         "kvinde",
         "kvinder",
         "wta",
+        "k",
     ];
     let men_markers = [
         "men",
@@ -1712,6 +1873,7 @@ fn infer_selection_gender_scope(selection: &Value) -> Option<String> {
         "herrer",
         "herresingle",
         "atp",
+        "m",
     ];
     if women_markers
         .iter()
@@ -1856,6 +2018,8 @@ mod tests {
             .contains(&"Tortona".to_string()));
         assert!(flashscore_name_variants("Kamil Majchrzak", "tennis")
             .contains(&"majchrzak kamil".to_string()));
+        assert!(flashscore_name_variants("Kolding IF (k)", "football")
+            .contains(&"KoldingQ".to_string()));
     }
 
     #[test]
@@ -1864,19 +2028,74 @@ mod tests {
             id: "example".to_string(),
             title: "Derthona Basket W (Italy)".to_string(),
             url: "derthona-basket".to_string(),
+            participant_type_id: Some(1),
         };
 
         assert!(
-            flashscore_participant_score("Derthona Basket", "Derthona Basket", &participant, None)
-                < 0.5
+            flashscore_participant_score(
+                "Derthona Basket",
+                "Derthona Basket",
+                &participant,
+                "basketball",
+                None
+            ) < 0.5
         );
         assert!(
             flashscore_participant_score(
                 "Derthona Basket W",
                 "Derthona Basket W",
                 &participant,
+                "basketball",
                 Some("women"),
             ) > 1.0
+        );
+    }
+
+    #[test]
+    fn flashscore_participant_score_penalizes_team_sport_players() {
+        let player = FlashscoreParticipant {
+            id: "player".to_string(),
+            title: "Kolding Mie (Vejgaard W)".to_string(),
+            url: "kolding-mie".to_string(),
+            participant_type_id: Some(2),
+        };
+        let team = FlashscoreParticipant {
+            id: "team".to_string(),
+            title: "KoldingQ W (Denmark)".to_string(),
+            url: "koldingq".to_string(),
+            participant_type_id: Some(1),
+        };
+
+        let player_score = flashscore_participant_score(
+            "Kolding IF (k)",
+            "KoldingQ",
+            &player,
+            "football",
+            Some("women"),
+        );
+        let team_score = flashscore_participant_score(
+            "Kolding IF (k)",
+            "KoldingQ",
+            &team,
+            "football",
+            Some("women"),
+        );
+
+        assert!(team_score > player_score);
+    }
+
+    #[test]
+    fn infers_danish_k_marker_as_women_scope() {
+        let selection = json!({
+            "competition": "A-Liga",
+            "event_name": "Kolding IF (k) - Fortuna Hjørring (k)",
+            "market_name": "Kampvinder",
+            "outcome_name": "Kolding IF (k)"
+        });
+
+        assert_eq!(
+            infer_selection_gender_scope(&selection).as_deref(),
+            Some("women")
         );
     }
 
