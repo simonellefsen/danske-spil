@@ -22,6 +22,7 @@ pub struct Settings {
     pub settlement_lookup_cooldown_minutes: i64,
     pub result_agent_enabled: bool,
     pub result_agent_per_cycle_limit: usize,
+    pub result_agent_interval_seconds: u64,
     pub database_url: Option<String>,
 }
 
@@ -98,6 +99,10 @@ impl Settings {
                 .ok()
                 .and_then(|v| v.parse().ok())
                 .unwrap_or(10),
+            result_agent_interval_seconds: env::var("GAMBLER_RESULT_AGENT_INTERVAL_SECONDS")
+                .ok()
+                .and_then(|v| v.parse().ok())
+                .unwrap_or(900),
             database_url,
         }
     }

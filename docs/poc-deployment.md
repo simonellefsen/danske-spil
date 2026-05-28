@@ -13,7 +13,8 @@ dependencies and mainly rebuild `danske-spil-gambler`.
 
 - `danske-spil-postgres`: CloudNativePG cluster with two instances.
 - `gambler-api`: API and web UI.
-- `gambler-worker`: scheduled observe-only scanner and result-agent loop. The default Kubernetes cadence is `GAMBLER_SCAN_INTERVAL_SECONDS=900`, or roughly every 15 minutes.
+- `gambler-worker`: scheduled observe-only scanner, paper-placement loop, and settlement-review queue refresher. The default Kubernetes cadence is `GAMBLER_SCAN_INTERVAL_SECONDS=900`, or roughly every 15 minutes.
+- `gambler-result-agent`: scheduled paper-only result reconciliation service. It runs `POST /api/result-agent/run` logic on `GAMBLER_RESULT_AGENT_INTERVAL_SECONDS=900` and also exposes the same API routes internally through the `gambler-result-agent` ClusterIP service.
 - `hermes-agent`: POC read-only Hermes view backed by the same API image. It does not receive browser control or credentials.
 
 ## Deploy
@@ -40,7 +41,8 @@ Then open `http://127.0.0.1:18080`.
 rtk kubectl --context docker-desktop -n danske-spil get pods,svc,cluster
 rtk kubectl --context docker-desktop -n danske-spil logs deployment/gambler-api --tail=120
 rtk kubectl --context docker-desktop -n danske-spil logs deployment/gambler-worker --tail=120
+rtk kubectl --context docker-desktop -n danske-spil logs deployment/gambler-result-agent --tail=120
 rtk kubectl --context docker-desktop -n danske-spil logs deployment/hermes-agent --tail=120
 ```
 
-The web UI can trigger a scan, show normalized candidate odds, display structured rationale, create paper-ledger entries, and run the read-only result agent. The worker also runs the scan loop on its configured cadence, advances finished paper bets into the awaiting-result queue, and attempts Flashscore public-result discovery for stale rows that do not already have a configured result link. There is no endpoint that submits real bets.
+The web UI can trigger a scan, show normalized candidate odds, display structured rationale, create paper-ledger entries, and run the read-only result agent. The worker runs the scan loop on its configured cadence and advances finished paper bets into the awaiting-result queue. The dedicated result-agent deployment attempts Flashscore public-result discovery for stale rows that do not already have a configured result link. There is no endpoint that submits real bets.

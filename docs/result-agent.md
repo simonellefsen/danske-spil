@@ -72,19 +72,23 @@ post only compact settlement facts to the API.
 
 ## Built-In Public-Source Agent
 
-The Rust worker runs a read-only public-source result-agent pass on the same
-cadence as market scans. It consumes `GET /api/result-agent/queue`, discovers
-missing Flashscore result links for supported sports, stores the durable source
-link, and posts sanitized final-score evidence when the event is finished. The
-same cycle can be triggered manually from the web UI or API:
+The Kubernetes POC runs a dedicated `gambler-result-agent` deployment for the
+read-only public-source result-agent pass. It consumes
+`GET /api/result-agent/queue`, discovers missing Flashscore result links for
+supported sports, stores the durable source link, and posts sanitized
+final-score evidence when the event is finished. The same cycle can be
+triggered manually from the web UI or API:
 
 ```text
 POST /api/result-agent/run
 ```
 
 Kubernetes enables this by default with
-`GAMBLER_RESULT_AGENT_ENABLED=true` and limits each worker cycle with
-`GAMBLER_RESULT_AGENT_PER_CYCLE_LIMIT`.
+`GAMBLER_RESULT_AGENT_ENABLED=true`, schedules the dedicated service with
+`GAMBLER_RESULT_AGENT_INTERVAL_SECONDS=900`, and limits each cycle with
+`GAMBLER_RESULT_AGENT_PER_CYCLE_LIMIT`. The scanner worker sets
+`GAMBLER_RESULT_AGENT_ENABLED=false` so it advances settlement-review state
+without also running public result reconciliation.
 
 ## Local Browser Public-Source Agent
 

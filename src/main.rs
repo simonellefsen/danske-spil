@@ -59,6 +59,7 @@ async fn main() -> anyhow::Result<()> {
 
     match std::env::args().nth(1).as_deref() {
         Some("worker") => run_worker(settings, service).await,
+        Some("result-agent") => run_result_agent(settings, service).await,
         _ => run_http(settings, service).await,
     }
 }
@@ -95,20 +96,46 @@ async fn run_worker(settings: Settings, service: GamblerService) -> anyhow::Resu
                 .unwrap_or_default(),
             "settlement_review_refreshed"
         );
-        let result_agent_summary = service.run_result_agent_once().await;
-        tracing::info!(
-            attempted_count = result_agent_summary
-                .get("attempted_count")
-                .and_then(|value| value.as_u64())
-                .unwrap_or_default(),
-            settled_count = result_agent_summary
-                .get("settled_count")
-                .and_then(|value| value.as_u64())
-                .unwrap_or_default(),
-            "result_agent_cycle_completed"
-        );
+        if settings.result_agent_enabled {
+            let result_agent_summary = service.run_result_agent_once().await;
+            tracing::info!(
+                attempted_count = result_agent_summary
+                    .get("attempted_count")
+                    .and_then(|value| value.as_u64())
+                    .unwrap_or_default(),
+                settled_count = result_agent_summary
+                    .get("settled_count")
+                    .and_then(|value| value.as_u64())
+                    .unwrap_or_default(),
+                "result_agent_cycle_completed"
+            );
+        }
         tokio::time::sleep(Duration::from_secs(settings.scan_interval_seconds)).await;
     }
+}
+
+async fn run_result_agent(settings: Settings, service: GamblerService) -> anyhow::Result<()> {
+    let loop_service = service.clone();
+    let interval_seconds = settings.result_agent_interval_seconds;
+    tokio::spawn(async move {
+        loop {
+            let result_agent_summary = loop_service.run_result_agent_once().await;
+            tracing::info!(
+                attempted_count = result_agent_summary
+                    .get("attempted_count")
+                    .and_then(|value| value.as_u64())
+                    .unwrap_or_default(),
+                settled_count = result_agent_summary
+                    .get("settled_count")
+                    .and_then(|value| value.as_u64())
+                    .unwrap_or_default(),
+                "result_agent_cycle_completed"
+            );
+            tokio::time::sleep(Duration::from_secs(interval_seconds)).await;
+        }
+    });
+
+    run_http(settings, service).await
 }
 
 async fn run_http(settings: Settings, service: GamblerService) -> anyhow::Result<()> {

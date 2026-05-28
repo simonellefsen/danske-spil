@@ -21,10 +21,12 @@ docker build -t "$IMAGE" .
 kubectl --context "$CONTEXT" apply -f k8s/base
 kubectl --context "$CONTEXT" -n "$NAMESPACE" set image deployment/gambler-api gambler-api="$IMAGE"
 kubectl --context "$CONTEXT" -n "$NAMESPACE" set image deployment/gambler-worker gambler-worker="$IMAGE"
+kubectl --context "$CONTEXT" -n "$NAMESPACE" set image deployment/gambler-result-agent gambler-result-agent="$IMAGE"
 kubectl --context "$CONTEXT" -n "$NAMESPACE" set image deployment/hermes-agent hermes-agent="$IMAGE"
 kubectl --context "$CONTEXT" -n "$NAMESPACE" wait --for=condition=Ready cluster/danske-spil-postgres --timeout=300s
 kubectl --context "$CONTEXT" -n "$NAMESPACE" rollout status deployment/gambler-api --timeout=180s
 kubectl --context "$CONTEXT" -n "$NAMESPACE" rollout status deployment/gambler-worker --timeout=180s
+kubectl --context "$CONTEXT" -n "$NAMESPACE" rollout status deployment/gambler-result-agent --timeout=180s
 kubectl --context "$CONTEXT" -n "$NAMESPACE" rollout status deployment/hermes-agent --timeout=180s
 
 kubectl --context "$CONTEXT" -n "$NAMESPACE" get pods,svc,cluster

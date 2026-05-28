@@ -97,7 +97,8 @@ impl GamblerService {
                 "limit": self.settings.settlement_queue_limit,
                 "lookup_cooldown_minutes": self.settings.settlement_lookup_cooldown_minutes,
                 "result_agent_enabled": self.settings.result_agent_enabled,
-                "result_agent_per_cycle_limit": self.settings.result_agent_per_cycle_limit
+                "result_agent_per_cycle_limit": self.settings.result_agent_per_cycle_limit,
+                "result_agent_interval_seconds": self.settings.result_agent_interval_seconds
             },
             "runtime": "rust-dioxus",
             "sports_scope": ["football", "tennis", "basketball", "formula1", "golf", "cycling"]
