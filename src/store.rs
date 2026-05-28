@@ -2875,6 +2875,7 @@ impl Store {
                 let expected_result_check_after: Option<DateTime<Utc>> =
                     row.get("expected_result_check_after");
                 let last_lookup_at: Option<DateTime<Utc>> = row.get("last_lookup_at");
+                let event_name: Option<String> = row.get("event_name");
                 let lookup_stale = last_lookup_at
                     .map(|value| {
                         value
@@ -2893,6 +2894,11 @@ impl Store {
                 let overdue_minutes = settlement_overdue_minutes(expected_result_check_after);
                 let recommended_source_key = settlement_recommended_source_key(recommendation);
                 let recommended_source_keys = settlement_recommended_source_keys(recommendation);
+                let external_result_link = event_name
+                    .as_deref()
+                    .and_then(|name| external_result_link_for_event(&settlement_source_policy, name))
+                    .map(|link| external_result_link_json(&link))
+                    .unwrap_or(Value::Null);
                 json!({
                     "item_type": "single",
                     "bet_id": row.get::<_, String>("id"),
@@ -2900,7 +2906,7 @@ impl Store {
                     "candidate_id": row.get::<_, String>("candidate_id"),
                     "sport_key": row.get::<_, String>("sport_key"),
                     "event_id": row.get::<_, Option<String>>("event_id"),
-                    "event_name": row.get::<_, Option<String>>("event_name"),
+                    "event_name": event_name,
                     "competition": row.get::<_, Option<String>>("competition"),
                     "market_id": row.get::<_, Option<String>>("market_id"),
                     "market_name": row.get::<_, Option<String>>("market_name"),
@@ -2926,7 +2932,8 @@ impl Store {
                     "settlement_source_policy": settlement_source_policy.clone(),
                     "recommendation": recommendation,
                     "recommended_source_key": recommended_source_key,
-                    "recommended_source_keys": recommended_source_keys
+                    "recommended_source_keys": recommended_source_keys,
+                    "external_result_link": external_result_link
                 })
             })
             .collect();
@@ -2943,6 +2950,15 @@ impl Store {
             let overdue_minutes = settlement_overdue_minutes(expected_result_check_after);
             let recommended_source_key = settlement_recommended_source_key(recommendation);
             let recommended_source_keys = settlement_recommended_source_keys(recommendation);
+            let external_result_links: Vec<Value> = legs
+                .as_array()
+                .map(Vec::as_slice)
+                .unwrap_or_default()
+                .iter()
+                .filter_map(|leg| leg.get("event_name").and_then(Value::as_str))
+                .filter_map(|name| external_result_link_for_event(&settlement_source_policy, name))
+                .map(|link| external_result_link_json(&link))
+                .collect();
             json!({
                 "item_type": "coupon",
                 "coupon_simulation_id": row.get::<_, String>("id"),
@@ -2961,7 +2977,8 @@ impl Store {
                 "settlement_source_policy": settlement_source_policy.clone(),
                 "recommendation": recommendation,
                 "recommended_source_key": recommended_source_key,
-                "recommended_source_keys": recommended_source_keys
+                "recommended_source_keys": recommended_source_keys,
+                "external_result_links": external_result_links
             })
         }));
 
@@ -7305,6 +7322,16 @@ fn external_result_link_for_event(
                     })
                 })
         })
+}
+
+fn external_result_link_json(link: &ExternalResultLink) -> Value {
+    json!({
+        "source_key": link.source_key.clone(),
+        "source_url": link.url.clone(),
+        "home_aliases": link.home_aliases.clone(),
+        "away_aliases": link.away_aliases.clone(),
+        "requires_browser_automation": link.requires_browser_automation
+    })
 }
 
 async fn fetch_external_match_result(

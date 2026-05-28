@@ -334,6 +334,7 @@ th { color: #596678; font-size: 12px; text-transform: uppercase; letter-spacing:
 .muted { color: #596678; }
 .actions { display: flex; gap: 6px; flex-wrap: wrap; }
 .actions button { min-height: 28px; padding: 0 8px; font-size: 12px; }
+.source-links { display: flex; flex-direction: column; gap: 3px; margin-top: 6px; }
 .settlement-selected { background: #eef6ff; outline: 2px solid #1f6feb; outline-offset: -2px; }
 .actions button.selected { background: #1f6feb; color: #ffffff; border-color: #1f6feb; }
 .danger { color: #9f1239; }
@@ -363,6 +364,20 @@ const esc = (value) => String(value ?? "").replace(/[&<>"']/g, (ch) => ({
 }[ch]));
 const hostLabel = (url) => {
   try { return new URL(url).hostname; } catch (_) { return url || ""; }
+};
+const renderExternalResultLink = (link) => {
+  if (!link || !link.source_url) return "";
+  const source = link.source_key || "external_result";
+  const browser = link.requires_browser_automation ? " browser evidence" : " direct check";
+  return `<div><a class="muted" href="${esc(link.source_url)}" target="_blank" rel="noreferrer">${esc(source)} (${esc(hostLabel(link.source_url))})</a><br><span class="label">${esc(browser)}</span></div>`;
+};
+const renderExternalResultLinks = (item) => {
+  const links = item.item_type === "coupon"
+    ? (Array.isArray(item.external_result_links) ? item.external_result_links : [])
+    : (item.external_result_link ? [item.external_result_link] : []);
+  const rendered = links.map(renderExternalResultLink).filter(Boolean);
+  if (!rendered.length) return "";
+  return `<div class="source-links">${rendered.join("")}</div>`;
 };
 const openSettlementStatuses = ["open", "awaiting_result", "unresolved", "postponed"];
 const settlementActions = [
@@ -630,6 +645,7 @@ function renderSettlementReview(summary) {
         <td>
           <span class="pill">${esc(item.recommendation || "await_more_evidence")}</span>
           <br><span class="muted">source: ${esc(sourceOptions)}</span>
+          ${renderExternalResultLinks(item)}
           <div class="actions">${reviewSettlementButtons(actionAttribute, actionId, !canSettle, sourceLabel)}</div>
           ${pending ? `<span class="label">selected: ${esc(pending.result)} via ${esc(pending.source)}</span>` : ""}
         </td>

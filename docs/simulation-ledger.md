@@ -85,12 +85,15 @@ GET  /api/settlement/external-evidence
 
 The POST endpoint stores source URL, match names, final score, confidence, and a short browser text excerpt in `external_result_evidence`. When `settle` is true, it settles only matching open single-leg winner markets whose selected outcome maps deterministically to home, away, or draw.
 
-For Sofascore, run the local browser probe from a workstation that has access to
-the API, usually through a short-lived port-forward:
+For browser-backed public match pages, run the local evidence probe from a
+workstation that has access to the API, usually through a short-lived
+port-forward. The probe supports Sofascore, Flashscore, and LiveScore source
+keys, and it can be used with explicit score arguments when a page does not
+expose a parseable final score:
 
 ```text
 rtk kubectl --context docker-desktop -n danske-spil port-forward svc/gambler-api 18083:8080
-scripts/sofascore_evidence_probe.py \
+scripts/external_result_evidence_probe.py \
   "https://www.sofascore.com/da/tennis/match/katarina-kujovic-andreea-diana-soare/FtiesyjFg" \
   --event-name "Andreea Diana Soare - Katarina Kujovic" \
   --home-name "Andreea Diana Soare" \
