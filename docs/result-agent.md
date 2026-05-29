@@ -11,6 +11,7 @@ The Rust service exposes:
 
 ```text
 GET /api/result-agent/queue
+GET /api/result-agent/account-requests
 ```
 
 The queue is built from settlement-review rows that are due, overdue, ready to
@@ -25,6 +26,18 @@ grade, or require cancellation/refund review. Each task includes:
 
 The queue deliberately avoids raw cookies, credentials, browser storage, and
 account payloads.
+
+`GET /api/result-agent/account-requests` exposes a focused subset for a local
+read-only Danske Spil account-history browser agent. It is independent of
+whether the Kubernetes API pod has credentials, because the intended worker is
+operator-controlled and local. Each request includes paper bet/coupon ids,
+selection context, expected truth to inspect, and an evidence template for
+`POST /api/settlement/external-evidence`.
+
+The account-history request contract explicitly forbids storing credentials,
+cookies, browser storage, payment data, Spil-ID/MitID payloads, or full account
+pages. The first submitted payload should use `settle=false` unless the local
+agent has deterministic bookmaker-settlement evidence for the paper row.
 
 ## Alias Registry
 
@@ -144,8 +157,10 @@ pages, or hidden model reasoning.
 The current implementation creates the queue, supports configured public result
 links, and automatically discovers Flashscore result links for common stale
 football, basketball, and tennis rows from the scheduled Rust worker. Winner and
-over/under markets can be graded from external final-score evidence. The next
-implementation step is a local read-only Danske Spil account-history agent that
-uses an authenticated browser session to read settled coupon history and submit
-the same sanitized evidence payload, especially for cancellations, refunds, and
-markets that cannot be graded from a plain final score.
+over/under markets can be graded from external final-score evidence. The
+account-history request endpoint and dashboard table now define the sanitized
+worklist for a local read-only Danske Spil account-history agent. The next
+implementation step is the local browser worker that consumes those requests,
+reads settled coupon history, and submits the same sanitized evidence payload,
+especially for cancellations, refunds, and markets that cannot be graded from a
+plain final score.

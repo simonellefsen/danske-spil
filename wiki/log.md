@@ -170,6 +170,12 @@ Append-only timeline for project wiki maintenance. Use headings with the format 
 - Hermes cycles now refresh replay evidence for open strategy experiments before recomputing promotion gates; the refresh is paper-only and does not change experiment status or place bets.
 - `GET /api/hermes` and the web UI now expose the latest Hermes cycle audit summary, including reflection id, replay refresh counts, trigger, and safety posture.
 
+## [2026-05-29] implementation | account-history request contract
+
+- Added `GET /api/result-agent/account-requests` as a focused, sanitized worklist for a future local read-only Danske Spil account-history browser agent.
+- Added a web UI account-history requests table showing the paper row, expected bookmaker truth, and allowed evidence contract.
+- Documented that the account-history path must not store credentials, cookies, browser storage, payment data, Spil-ID/MitID payloads, or full account pages.
+
 ## [2026-05-25] implementation | Candidate ranking and paper settlement POC
 
 - Added `poc_ranker_v1` candidate scoring fields: implied probability, model probability, expected value, confidence, score, risk flags, and feature snapshot.

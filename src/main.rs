@@ -229,6 +229,18 @@ async fn get_handler(State(state): State<Arc<AppState>>, uri: OriginalUri) -> Re
             Ok(None) => Json(state.service.result_agent_queue().await).into_response(),
             Err(error) => error_response(StatusCode::BAD_GATEWAY, error),
         },
+        "/api/result-agent/account-requests" => match proxy_result_agent_json(
+            &state.settings,
+            Method::GET,
+            "/api/result-agent/account-requests",
+            None,
+        )
+        .await
+        {
+            Ok(Some(value)) => Json(value).into_response(),
+            Ok(None) => Json(state.service.account_history_requests().await).into_response(),
+            Err(error) => error_response(StatusCode::BAD_GATEWAY, error),
+        },
         "/api/result-agent/run" => match proxy_result_agent_json(
             &state.settings,
             Method::GET,

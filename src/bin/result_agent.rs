@@ -97,6 +97,9 @@ async fn get_handler(State(state): State<Arc<AppState>>, uri: OriginalUri) -> Re
             .into_response(),
         "/api/status" => Json(state.service.status().await).into_response(),
         "/api/result-agent/queue" => Json(state.service.result_agent_queue().await).into_response(),
+        "/api/result-agent/account-requests" => {
+            Json(state.service.account_history_requests().await).into_response()
+        }
         "/api/result-agent/run" => {
             Json(state.service.run_result_agent_once().await).into_response()
         }

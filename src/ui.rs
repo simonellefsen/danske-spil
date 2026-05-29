@@ -112,6 +112,15 @@ pub fn render_index(base_path: &str) -> String {
                         }
                     }
                     section {
+                        h2 { title: "Focused worklist for a local read-only Danske Spil account-history browser agent. It lists settlement facts to inspect and forbids credentials, cookies, browser storage, and full account pages.", "Account-history requests" }
+                        table {
+                            thead { tr {
+                                th { "Request" } th { "Selection" } th { "Expected truth" } th { "Evidence contract" }
+                            } }
+                            tbody { id: "account-history-requests" }
+                        }
+                    }
+                    section {
                         h2 { title: "Ordered source policy used for settlement evidence. Account history is preferred, then official results, then public result pages.", "Settlement sources" }
                         table {
                             thead { tr {
@@ -777,6 +786,38 @@ function renderResultAgentQueue(queue) {
     $("result-agent-queue").innerHTML = `<tr><td colspan="4" class="muted">No result-agent tasks are due.</td></tr>`;
   }
 }
+function renderAccountHistoryRequests(requests) {
+  const items = requests.items || [];
+  $("account-history-requests").innerHTML = items.map((item) => {
+    const selection = item.selection || {};
+    const ids = item.ids || {};
+    const eventNames = (selection.event_names || []).length
+      ? selection.event_names.map(esc).join("<br>")
+      : esc(selection.event_name || ids.bet_id || ids.coupon_simulation_id || "-");
+    const overdueText = item.overdue_minutes === null || item.overdue_minutes === undefined
+      ? ""
+      : `<br><span class="danger">${esc(durationMins(item.overdue_minutes))} overdue</span>`;
+    const template = item.evidence_template || {};
+    const contract = [
+      `source ${template.source_key || item.source_key || "-"}`,
+      item.evidence_endpoint || "",
+      template.settle === false ? "settle=false first" : ""
+    ].filter(Boolean).map(esc).join("<br>");
+    return `
+      <tr title="${esc("Use a local operator browser session. Do not submit bets or store credentials, cookies, browser storage, full account pages, payment data, Spil-ID, or MitID payloads.")}">
+        <td><span class="pill">${esc(item.request_kind || "account_history_request")}</span><br><span class="label">${esc(item.recommendation || "")}</span>${overdueText}</td>
+        <td>${Array.isArray(selection.event_names) && selection.event_names.length ? eventNames : eventNames}<br><span class="label">${esc([selection.sport_key, selection.competition, selection.market_name, selection.outcome_name].filter(Boolean).join(" / "))}</span></td>
+        <td>${esc(item.expected_truth || "")}<br><span class="label">${esc(item.lookup_stale ? "lookup stale" : "recent lookup")}</span></td>
+        <td>${contract}<br><span class="label">paper-only sanitized facts</span></td>
+      </tr>
+    `;
+  }).join("");
+  if (!items.length) {
+    const agent = requests.danskespil_account_agent || {};
+    const readiness = agent.available ? "No account-history requests are due." : "No account-history requests are due, or no local account-agent context is configured.";
+    $("account-history-requests").innerHTML = `<tr><td colspan="4" class="muted">${esc(readiness)}</td></tr>`;
+  }
+}
 function renderSettlementSources(sources) {
   const items = sources.items || [];
   currentSettlementSourceKey = settlementSourceKey(sources);
@@ -1335,6 +1376,8 @@ async function load() {
   renderSettlementReview(settlementReview);
   const resultAgentQueue = await json(api("/api/result-agent/queue"));
   renderResultAgentQueue(resultAgentQueue);
+  const accountHistoryRequests = await json(api("/api/result-agent/account-requests"));
+  renderAccountHistoryRequests(accountHistoryRequests);
   const settlementObservations = await json(api("/api/settlement/observations"));
   renderSettlementObservations(settlementObservations);
   const externalResultEvidence = await json(api("/api/settlement/external-evidence"));

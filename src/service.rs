@@ -579,6 +579,76 @@ impl GamblerService {
         })
     }
 
+    pub async fn account_history_requests(&self) -> Value {
+        if !self.settings.settlement_queue_enabled {
+            return json!({"enabled": false, "request_count": 0, "items": []});
+        }
+
+        let review = self.refresh_settlement_review_queue().await;
+        let items = review
+            .get("items")
+            .and_then(Value::as_array)
+            .cloned()
+            .unwrap_or_default();
+        let account_agent = danskespil_account_agent_status();
+        let requests = items
+            .iter()
+            .filter_map(|item| account_history_request(item))
+            .collect::<Vec<_>>();
+
+        json!({
+            "enabled": true,
+            "paper_only": true,
+            "agent": {
+                "name": "danskespil_account_history_agent",
+                "mode": "local_operator_browser_read_only",
+                "runs_in_cluster": false,
+                "settles_real_bets": false,
+                "stores_credentials": false,
+                "stores_cookies": false,
+                "stores_browser_storage": false,
+                "credential_values_exposed": false
+            },
+            "danskespil_account_agent": account_agent,
+            "review_count": items.len(),
+            "request_count": requests.len(),
+            "items": requests,
+            "evidence_endpoint": "/api/settlement/external-evidence",
+            "allowed_evidence_fields": [
+                "source_key",
+                "bet_id",
+                "coupon_simulation_id",
+                "event_name",
+                "market_name",
+                "outcome_name",
+                "settlement_result",
+                "result_status",
+                "home_name",
+                "away_name",
+                "home_score",
+                "away_score",
+                "confidence",
+                "raw_text_excerpt",
+                "settle"
+            ],
+            "forbidden_payloads": [
+                "credentials",
+                "cookies",
+                "browser_storage",
+                "full_account_pages",
+                "payment_data",
+                "spil_id_identifiers",
+                "mitid_payloads"
+            ],
+            "instructions": [
+                "Use an operator-controlled local browser session only.",
+                "Read account or coupon history without placing, editing, depositing, withdrawing, or submitting anything.",
+                "Post only compact sanitized settlement facts to /api/settlement/external-evidence.",
+                "Use source_key=danskespil_account_history for bookmaker-settlement evidence."
+            ]
+        })
+    }
+
     pub async fn run_result_agent_once(&self) -> Value {
         if !self.settings.result_agent_enabled {
             return json!({
@@ -906,6 +976,99 @@ fn result_agent_task(item: &Value, account_agent: &Value) -> Option<Value> {
         ],
         "evidence_endpoint": "/api/settlement/external-evidence",
         "source_link_endpoint": "/api/settlement/source-link"
+    }))
+}
+
+fn account_history_request(item: &Value) -> Option<Value> {
+    let recommendation = item
+        .get("recommendation")
+        .and_then(Value::as_str)
+        .unwrap_or("await_more_evidence");
+    if !matches!(
+        recommendation,
+        "external_result_required"
+            | "expected_finish_passed_recheck"
+            | "manual_grade_ready"
+            | "manual_void_or_refund_review"
+    ) {
+        return None;
+    }
+
+    let item_type = item
+        .get("item_type")
+        .and_then(Value::as_str)
+        .unwrap_or("single");
+    let request_kind = match (item_type, recommendation) {
+        (_, "manual_void_or_refund_review") => "account_history_void_or_refund_check",
+        ("coupon", _) => "account_history_coupon_result_check",
+        _ => "account_history_result_check",
+    };
+    let event_names = result_agent_event_names(item);
+    let legs = if item_type == "coupon" {
+        item.get("legs").cloned().unwrap_or_else(|| json!([]))
+    } else {
+        json!([])
+    };
+    let selection = json!({
+        "event_name": item.get("event_name").cloned().unwrap_or(Value::Null),
+        "event_names": event_names,
+        "sport_key": item.get("sport_key").cloned().unwrap_or(Value::Null),
+        "competition": item.get("competition").cloned().unwrap_or(Value::Null),
+        "market_name": item.get("market_name").cloned().unwrap_or(Value::Null),
+        "market_kind": item.get("market_kind").cloned().unwrap_or(Value::Null),
+        "outcome_name": item.get("outcome_name").cloned().unwrap_or(Value::Null),
+        "legs": legs
+    });
+    let expected_truth = match recommendation {
+        "manual_void_or_refund_review" => {
+            "bookmaker cancellation, refund, void, push, postponement, or abandoned-state truth"
+        }
+        "manual_grade_ready" => "bookmaker settled won/lost/void/refund status",
+        _ => "bookmaker final settlement status or final-score evidence",
+    };
+
+    Some(json!({
+        "item_type": item_type,
+        "request_kind": request_kind,
+        "recommendation": recommendation,
+        "expected_truth": expected_truth,
+        "overdue_minutes": item.get("overdue_minutes").cloned().unwrap_or(Value::Null),
+        "expected_result_check_after": item.get("expected_result_check_after").cloned().unwrap_or(Value::Null),
+        "last_lookup_at": item.get("last_lookup_at").cloned().unwrap_or(Value::Null),
+        "lookup_stale": item.get("lookup_stale").cloned().unwrap_or(Value::Bool(true)),
+        "ids": {
+            "bet_id": item.get("bet_id").cloned().unwrap_or(Value::Null),
+            "coupon_simulation_id": item.get("coupon_simulation_id").cloned().unwrap_or(Value::Null),
+            "candidate_id": item.get("candidate_id").cloned().unwrap_or(Value::Null),
+            "event_id": item.get("event_id").cloned().unwrap_or(Value::Null)
+        },
+        "selection": selection,
+        "event_state": {
+            "event_status": item.get("event_status").cloned().unwrap_or(Value::Null),
+            "event_resulted": item.get("event_resulted").cloned().unwrap_or(Value::Null),
+            "event_settled": item.get("event_settled").cloned().unwrap_or(Value::Null)
+        },
+        "source_key": "danskespil_account_history",
+        "evidence_endpoint": "/api/settlement/external-evidence",
+        "evidence_template": {
+            "source_key": "danskespil_account_history",
+            "bet_id": item.get("bet_id").cloned().unwrap_or(Value::Null),
+            "coupon_simulation_id": item.get("coupon_simulation_id").cloned().unwrap_or(Value::Null),
+            "event_name": item.get("event_name").cloned().unwrap_or(Value::Null),
+            "sport_key": item.get("sport_key").cloned().unwrap_or(Value::Null),
+            "market_name": item.get("market_name").cloned().unwrap_or(Value::Null),
+            "outcome_name": item.get("outcome_name").cloned().unwrap_or(Value::Null),
+            "settle": false,
+            "paper_only": true
+        },
+        "safety": {
+            "read_only_browser": true,
+            "store_credentials": false,
+            "store_cookies": false,
+            "store_full_account_payload": false,
+            "submit_bets": false,
+            "deposit_or_withdraw": false
+        }
     }))
 }
 
