@@ -165,6 +165,9 @@ For parser development or sanitized fixtures, use `--history-text-file` or
 `--extracted-json` together with `--requests-json`; these modes bypass
 `agent-browser` and the API request queue and are suitable for offline tests.
 Account-history source URLs are stored without query strings or fragments.
+By default the agent defers non-terminal bookmaker states such as `afventer`,
+`open`, `pending`, and `postponed`; use `--include-nonterminal` only for
+diagnostic dry runs where those states should be emitted as payloads.
 The checked-in sanitized fixture can be exercised with:
 
 ```text

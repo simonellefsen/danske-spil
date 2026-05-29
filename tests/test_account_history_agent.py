@@ -118,6 +118,7 @@ class AccountHistoryAgentTests(unittest.TestCase):
                 no_open=True,
                 limit=10,
                 context_radius=3,
+                include_nonterminal=False,
                 settle=False,
                 dry_run=True,
             )
@@ -140,6 +141,34 @@ class AccountHistoryAgentTests(unittest.TestCase):
             no_open=True,
             limit=10,
             context_radius=0,
+            include_nonterminal=False,
+            settle=False,
+            dry_run=True,
+        )
+
+        summary = agent.run_once(args)
+
+        self.assertEqual(summary["evidence_count"], 1)
+        self.assertEqual(summary["skipped_count"], 1)
+        self.assertEqual(
+            [item["payload"]["settlement_result"] for item in summary["results"]],
+            ["won"],
+        )
+        self.assertEqual(summary["skipped"][0]["reason"], "nonterminal_bookmaker_status")
+
+    def test_include_nonterminal_fixture_can_emit_unresolved_for_diagnostics(self) -> None:
+        args = SimpleNamespace(
+            api="http://127.0.0.1:1",
+            requests_json=str(FIXTURES / "account_history_requests.json"),
+            extracted_json=None,
+            history_text_file=str(FIXTURES / "account_history_text.txt"),
+            session_name="test-session",
+            history_url="https://danskespil.dk/oddset",
+            wait_ms=0,
+            no_open=True,
+            limit=10,
+            context_radius=0,
+            include_nonterminal=True,
             settle=False,
             dry_run=True,
         )

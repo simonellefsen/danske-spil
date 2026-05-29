@@ -49,6 +49,7 @@ STATUS_PATTERNS = [
     ("won", ("vundet", "gevinst", "udbetalt", "won", "settled won", "paid out")),
     ("unresolved", ("afventer", "pending", "unresolved", "åben", "open")),
 ]
+NON_TERMINAL_RESULTS = {"postponed", "unresolved"}
 
 
 def fetch_json(url: str) -> dict:
@@ -337,6 +338,15 @@ def run_once(args: argparse.Namespace) -> dict:
             })
             continue
         result, phrase = status
+        if result in NON_TERMINAL_RESULTS and not args.include_nonterminal:
+            skipped.append({
+                "reason": "nonterminal_bookmaker_status",
+                "event_names": event_names,
+                "result": result,
+                "matched_status_phrase": phrase,
+                "request": request.get("ids"),
+            })
+            continue
         payload = build_payload(request, result, phrase, context, extracted, args.settle)
         if args.dry_run:
             results.append({"event_names": event_names, "payload": payload, "posted": False})
@@ -381,6 +391,11 @@ def main() -> int:
     parser.add_argument("--requests-json", help="Offline account-request queue JSON fixture")
     parser.add_argument("--extracted-json", help="Offline extracted account-history JSON fixture")
     parser.add_argument("--history-text-file", help="Offline account-history text fixture")
+    parser.add_argument(
+        "--include-nonterminal",
+        action="store_true",
+        help="Include unresolved/postponed bookmaker states as evidence payloads instead of deferring them",
+    )
     parser.add_argument("--settle", action="store_true", help="Allow deterministic paper settlement")
     parser.add_argument("--dry-run", action="store_true", help="Print sanitized payloads without POSTing")
     args = parser.parse_args()
