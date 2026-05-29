@@ -193,6 +193,13 @@ Append-only timeline for project wiki maintenance. Use headings with the format 
 - Added local account-history runbook metadata to `GET /api/result-agent/account-requests`, including the port-forward command, dry-run command, script name, and local history URL environment key.
 - Surfaced that runbook in the web UI next to account-history requests so operators can run the local agent without guessing the next safe command.
 
+## [2026-05-29] implementation | account-history parser tests
+
+- Added offline fixture modes to `scripts/account_history_agent.py` so parser development can use sanitized text or extracted JSON without opening a browser session.
+- Added request-queue fixture support so the account-history agent can dry-run the full matching path without Kubernetes or browser access.
+- Added unit tests for Danish-name normalization, ambiguous status rejection, account-history URL query stripping, and text-fixture line extraction.
+- Added `make account-history-agent-test` for the local parser test suite.
+
 ## [2026-05-25] implementation | Candidate ranking and paper settlement POC
 
 - Added `poc_ranker_v1` candidate scoring fields: implied probability, model probability, expected value, confidence, score, risk flags, and feature snapshot.

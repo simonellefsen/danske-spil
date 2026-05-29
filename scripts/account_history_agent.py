@@ -17,7 +17,9 @@ import subprocess
 import sys
 import unicodedata
 import urllib.error
+import urllib.parse
 import urllib.request
+from pathlib import Path
 
 
 DANSKESPIL_DOMAINS = "danskespil.dk,www.danskespil.dk"
@@ -69,9 +71,56 @@ def post_json(url: str, payload: dict) -> dict:
         raise RuntimeError(f"POST {url} failed: HTTP {error.code}: {body}") from error
 
 
+def history_text_to_extracted(text: str, title: str, url: str | None, session_name: str) -> dict:
+    lines = [line.strip() for line in text.splitlines() if line.strip()]
+    return {
+        "title": title,
+        "url": url,
+        "line_count": len(lines),
+        "lines": lines,
+        "session_name": session_name,
+    }
+
+
+def load_extracted_json(path: Path, session_name: str) -> dict:
+    value = json.loads(path.read_text(encoding="utf-8"))
+    if not isinstance(value, dict):
+        raise ValueError("--extracted-json must contain a JSON object")
+    if "lines" not in value and isinstance(value.get("text"), str):
+        value = history_text_to_extracted(
+            value["text"],
+            str(value.get("title") or "offline account-history fixture"),
+            value.get("url"),
+            session_name,
+        )
+    lines = value.get("lines")
+    if not isinstance(lines, list) or not all(isinstance(line, str) for line in lines):
+        raise ValueError("--extracted-json must contain string lines or a text field")
+    value["line_count"] = len(lines)
+    value["session_name"] = session_name
+    return value
+
+
+def sanitize_account_history_url(value: str | None) -> str | None:
+    if not value:
+        return None
+    parsed = urllib.parse.urlparse(value)
+    if not parsed.scheme or not parsed.netloc:
+        return None
+    return urllib.parse.urlunparse((parsed.scheme, parsed.netloc, parsed.path, "", "", ""))
+
+
 def normalize(value: str | None) -> str:
     if not value:
         return ""
+    value = (
+        value.replace("Æ", "Ae")
+        .replace("æ", "ae")
+        .replace("Ø", "Oe")
+        .replace("ø", "oe")
+        .replace("Å", "Aa")
+        .replace("å", "aa")
+    )
     decomposed = unicodedata.normalize("NFKD", value)
     asciiish = "".join(char for char in decomposed if not unicodedata.combining(char))
     return re.sub(r"[^a-z0-9]+", " ", asciiish.lower()).strip()
@@ -205,7 +254,7 @@ def build_payload(request: dict, result: str, matched_phrase: str, context: str,
             "read_only": True,
         },
         "source_title": extracted.get("title"),
-        "source_url": extracted.get("url"),
+        "source_url": sanitize_account_history_url(extracted.get("url")),
         "raw_text_excerpt": context[:500],
         "matched_status_phrase": matched_phrase,
     }
@@ -233,11 +282,36 @@ def run_agent_browser(session_name: str, url: str, wait_ms: int, no_open: bool) 
     return value
 
 
-def run_once(args: argparse.Namespace) -> dict:
+def load_extracted(args: argparse.Namespace) -> dict:
+    if args.extracted_json:
+        return load_extracted_json(Path(args.extracted_json), args.session_name)
+    if args.history_text_file:
+        text = Path(args.history_text_file).read_text(encoding="utf-8")
+        return history_text_to_extracted(
+            text,
+            "offline account-history text fixture",
+            None,
+            args.session_name,
+        )
+    return run_agent_browser(args.session_name, args.history_url, args.wait_ms, args.no_open)
+
+
+def load_requests(args: argparse.Namespace) -> dict:
+    if args.requests_json:
+        value = json.loads(Path(args.requests_json).read_text(encoding="utf-8"))
+        if isinstance(value, list):
+            return {"items": value}
+        if not isinstance(value, dict):
+            raise ValueError("--requests-json must contain a JSON object or list")
+        return value
     api_base = args.api.rstrip("/")
-    requests = fetch_json(f"{api_base}/api/result-agent/account-requests")
+    return fetch_json(f"{api_base}/api/result-agent/account-requests")
+
+
+def run_once(args: argparse.Namespace) -> dict:
+    requests = load_requests(args)
     items = (requests.get("items") or [])[: args.limit]
-    extracted = run_agent_browser(args.session_name, args.history_url, args.wait_ms, args.no_open)
+    extracted = load_extracted(args)
     lines = extracted.get("lines") or []
     results = []
     skipped = []
@@ -267,6 +341,7 @@ def run_once(args: argparse.Namespace) -> dict:
         if args.dry_run:
             results.append({"event_names": event_names, "payload": payload, "posted": False})
             continue
+        api_base = args.api.rstrip("/")
         response = post_json(f"{api_base}/api/settlement/external-evidence", payload)
         results.append({"event_names": event_names, "payload": payload, "response": response, "posted": True})
     return {
@@ -303,6 +378,9 @@ def main() -> int:
     parser.add_argument("--limit", type=int, default=10)
     parser.add_argument("--context-radius", type=int, default=12)
     parser.add_argument("--no-open", action="store_true", help="Inspect the current session page without navigation")
+    parser.add_argument("--requests-json", help="Offline account-request queue JSON fixture")
+    parser.add_argument("--extracted-json", help="Offline extracted account-history JSON fixture")
+    parser.add_argument("--history-text-file", help="Offline account-history text fixture")
     parser.add_argument("--settle", action="store_true", help="Allow deterministic paper settlement")
     parser.add_argument("--dry-run", action="store_true", help="Print sanitized payloads without POSTing")
     args = parser.parse_args()

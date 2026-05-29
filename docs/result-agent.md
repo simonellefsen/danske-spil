@@ -161,6 +161,10 @@ Use an existing authenticated browser session or let the script open the page
 so the operator can sign in locally. Add `--settle` only after dry-run output
 shows deterministic bookmaker truth for the paper rows. `--no-open` inspects
 the current `agent-browser` session page without navigating.
+For parser development or sanitized fixtures, use `--history-text-file` or
+`--extracted-json` together with `--requests-json`; these modes bypass
+`agent-browser` and the API request queue and are suitable for offline tests.
+Account-history source URLs are stored without query strings or fragments.
 
 The web UI account-history panel exposes the same local runbook fields returned
 by `GET /api/result-agent/account-requests`: the port-forward command, dry-run
