@@ -170,6 +170,8 @@ By default the agent defers non-terminal bookmaker states such as `afventer`,
 diagnostic dry runs where those states should be emitted as payloads.
 Coupon requests preserve all leg event names in the payload and use a synthetic
 `Coupon: ...` event label when the request has no single event name.
+Coupon account-history matching requires every leg event to be visible in the
+local history context before emitting bookmaker evidence for the coupon.
 The checked-in sanitized fixture can be exercised with:
 
 ```text

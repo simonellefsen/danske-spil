@@ -201,6 +201,7 @@ Append-only timeline for project wiki maintenance. Use headings with the format 
 - Added checked-in sanitized account-history fixtures and `make account-history-agent-fixture-dry-run` for a no-browser, no-cluster parser smoke test.
 - Deferred non-terminal account-history states by default and added `--include-nonterminal` for diagnostic dry runs that intentionally emit unresolved/postponed payloads.
 - Preserved coupon leg event names in local account-history evidence payloads and synthesized a coupon-level event label when a request has no single event name.
+- Required all coupon legs to be visible in account-history context before emitting bookmaker evidence for a coupon.
 - Added `make account-history-agent-test` for the local parser test suite.
 
 ## [2026-05-25] implementation | Candidate ranking and paper settlement POC

@@ -127,6 +127,42 @@ class AccountHistoryAgentTests(unittest.TestCase):
         )
         self.assertNotIn("bet_id", payload)
 
+    def test_coupon_context_requires_all_leg_events(self) -> None:
+        lines = [
+            "Team FOG Naestved",
+            "Bakken Bears",
+            "Vundet",
+        ]
+
+        context = agent.find_context(
+            lines,
+            agent.request_event_names(COUPON_REQUEST),
+            radius=3,
+            require_all_events=True,
+        )
+
+        self.assertIsNone(context)
+
+    def test_coupon_context_can_span_all_leg_events(self) -> None:
+        lines = [
+            "Kupon",
+            "Team FOG Naestved",
+            "Bakken Bears",
+            "Fajing Sun",
+            "Jay Dylan Hara Friend",
+            "Vundet",
+        ]
+
+        context = agent.find_context(
+            lines,
+            agent.request_event_names(COUPON_REQUEST),
+            radius=5,
+            require_all_events=True,
+        )
+
+        self.assertIsNotNone(context)
+        self.assertEqual(agent.infer_status(context or ""), ("won", "vundet"))
+
     def test_text_fixture_loads_lines(self) -> None:
         extracted = agent.history_text_to_extracted(
             "A\n\nB\n",

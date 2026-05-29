@@ -182,7 +182,42 @@ def window_matches_event(window: str, event_names: list[str]) -> bool:
     return False
 
 
-def find_context(lines: list[str], event_names: list[str], radius: int) -> str | None:
+def find_context(
+    lines: list[str],
+    event_names: list[str],
+    radius: int,
+    require_all_events: bool = False,
+) -> str | None:
+    if require_all_events and event_names:
+        matching_indexes = []
+        for event_name in event_names:
+            match_index = next(
+                (
+                    index
+                    for index, _line in enumerate(lines)
+                    if window_matches_event(
+                        "\n".join(
+                            lines[
+                                max(0, index - radius) : min(
+                                    len(lines), index + radius + 1
+                                )
+                            ]
+                        ),
+                        [event_name],
+                    )
+                ),
+                None,
+            )
+            if match_index is None:
+                return None
+            matching_indexes.append(match_index)
+        start = max(0, min(matching_indexes) - radius)
+        end = min(len(lines), max(matching_indexes) + radius + 1)
+        context = "\n".join(lines[start:end])
+        if window_matches_all_events(context, event_names):
+            return context[:1200]
+        return None
+
     for index, _line in enumerate(lines):
         start = max(0, index - radius)
         end = min(len(lines), index + radius + 1)
@@ -190,6 +225,10 @@ def find_context(lines: list[str], event_names: list[str], radius: int) -> str |
         if window_matches_event(window, event_names):
             return window[:1200]
     return None
+
+
+def window_matches_all_events(window: str, event_names: list[str]) -> bool:
+    return all(window_matches_event(window, [event_name]) for event_name in event_names)
 
 
 def infer_status(context: str) -> tuple[str, str] | None:
@@ -241,6 +280,15 @@ def request_event_names(request: dict) -> list[str]:
             seen.add(key)
             unique.append(name)
     return unique
+
+
+def request_is_coupon(request: dict) -> bool:
+    ids = request.get("ids") or {}
+    template = request.get("evidence_template") or {}
+    if ids.get("coupon_simulation_id") or template.get("coupon_simulation_id"):
+        return True
+    selection = request.get("selection") or {}
+    return bool(selection.get("legs"))
 
 
 def build_payload(request: dict, result: str, matched_phrase: str, context: str, extracted: dict, settle: bool) -> dict:
@@ -339,10 +387,15 @@ def run_once(args: argparse.Namespace) -> dict:
         if not event_names:
             skipped.append({"reason": "missing_event_name", "request": request.get("ids")})
             continue
-        context = find_context(lines, event_names, args.context_radius)
+        require_all_events = request_is_coupon(request) and len(event_names) > 1
+        context = find_context(lines, event_names, args.context_radius, require_all_events)
         if not context:
             skipped.append({
-                "reason": "event_not_visible_in_account_history",
+                "reason": (
+                    "coupon_legs_not_visible_in_account_history"
+                    if require_all_events
+                    else "event_not_visible_in_account_history"
+                ),
                 "event_names": event_names,
                 "request": request.get("ids"),
             })
