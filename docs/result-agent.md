@@ -162,6 +162,12 @@ so the operator can sign in locally. Add `--settle` only after dry-run output
 shows deterministic bookmaker truth for the paper rows. `--no-open` inspects
 the current `agent-browser` session page without navigating.
 
+The web UI account-history panel exposes the same local runbook fields returned
+by `GET /api/result-agent/account-requests`: the port-forward command, dry-run
+command, script name, and the `DANSKESPIL_ACCOUNT_HISTORY_URL` environment
+knob. This is intentionally informational only; the cluster does not launch the
+operator browser or read account-history pages.
+
 ## Evidence Contract
 
 All automated result workers submit evidence through:

@@ -188,6 +188,11 @@ Append-only timeline for project wiki maintenance. Use headings with the format 
 - Added a `make account-history-agent-dry-run` helper and documented the dry-run-first workflow before allowing `--settle`.
 - Added `DANSKESPIL_ACCOUNT_HISTORY_URL` to the local env template so the operator-controlled account/history page can be configured without storing browser state.
 
+## [2026-05-29] implementation | account-history runbook in UI
+
+- Added local account-history runbook metadata to `GET /api/result-agent/account-requests`, including the port-forward command, dry-run command, script name, and local history URL environment key.
+- Surfaced that runbook in the web UI next to account-history requests so operators can run the local agent without guessing the next safe command.
+
 ## [2026-05-25] implementation | Candidate ranking and paper settlement POC
 
 - Added `poc_ranker_v1` candidate scoring fields: implied probability, model probability, expected value, confidence, score, risk flags, and feature snapshot.

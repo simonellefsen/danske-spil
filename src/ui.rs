@@ -113,6 +113,7 @@ pub fn render_index(base_path: &str) -> String {
                     }
                     section {
                         h2 { title: "Focused worklist for a local read-only Danske Spil account-history browser agent. It lists settlement facts to inspect and forbids credentials, cookies, browser storage, and full account pages.", "Account-history requests" }
+                        div { class: "operator-note", id: "account-history-agent-runbook", "Loading local account-history agent runbook..." }
                         table {
                             thead { tr {
                                 th { "Request" } th { "Selection" } th { "Expected truth" } th { "Evidence contract" }
@@ -389,6 +390,8 @@ table { width: 100%; border-collapse: collapse; font-size: 13px; }
 th, td { text-align: left; border-bottom: 1px solid #e6ebf2; padding: 9px 8px; vertical-align: top; }
 th { color: #596678; font-size: 12px; text-transform: uppercase; letter-spacing: .04em; }
 .pill { display: inline-block; border: 1px solid #cdd5df; border-radius: 999px; padding: 2px 8px; font-size: 12px; }
+.operator-note { border-top: 1px solid #e6ebf2; border-bottom: 1px solid #e6ebf2; padding: 10px 0; margin-bottom: 10px; font-size: 13px; }
+.operator-note code { background: #f1f5f9; border: 1px solid #d9dee7; border-radius: 4px; padding: 2px 5px; word-break: break-word; }
 .muted { color: #596678; }
 .actions { display: flex; gap: 6px; flex-wrap: wrap; }
 .actions button { min-height: 28px; padding: 0 8px; font-size: 12px; }
@@ -788,6 +791,16 @@ function renderResultAgentQueue(queue) {
 }
 function renderAccountHistoryRequests(requests) {
   const items = requests.items || [];
+  const runbook = requests.local_agent_runbook || {};
+  const agent = requests.danskespil_account_agent || {};
+  const dryRunCommand = runbook.make_dry_run_target || runbook.dry_run_command || "";
+  $("account-history-agent-runbook").innerHTML = `
+    <div><span class="label">Local account-history agent</span></div>
+    <div>${esc(items.length)} request${items.length === 1 ? "" : "s"} pending. Run locally with an operator-controlled browser session; the cluster cannot access account history.</div>
+    <div class="muted">First port-forward: <code>${esc(runbook.port_forward_command || "-")}</code></div>
+    <div class="muted">Then dry-run: <code>${esc(dryRunCommand || "-")}</code></div>
+    <div class="${agent.available ? "ok" : "muted"}">${esc(agent.available ? "Local credential env vars are present in this process context." : "Credential values are not exposed here; sign in only in the local browser session.")}</div>
+  `;
   $("account-history-requests").innerHTML = items.map((item) => {
     const selection = item.selection || {};
     const ids = item.ids || {};
@@ -813,7 +826,6 @@ function renderAccountHistoryRequests(requests) {
     `;
   }).join("");
   if (!items.length) {
-    const agent = requests.danskespil_account_agent || {};
     const readiness = agent.available ? "No account-history requests are due." : "No account-history requests are due, or no local account-agent context is configured.";
     $("account-history-requests").innerHTML = `<tr><td colspan="4" class="muted">${esc(readiness)}</td></tr>`;
   }

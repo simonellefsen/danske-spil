@@ -610,6 +610,19 @@ impl GamblerService {
                 "credential_values_exposed": false
             },
             "danskespil_account_agent": account_agent,
+            "local_agent_runbook": {
+                "script": "scripts/account_history_agent.py",
+                "runs_in_cluster": false,
+                "requires_local_agent_browser": true,
+                "requires_port_forward": true,
+                "port_forward_command": "rtk kubectl --context docker-desktop -n danske-spil port-forward svc/gambler-api 18083:8080",
+                "dry_run_command": "rtk python3 scripts/account_history_agent.py --api http://127.0.0.1:18083 --dry-run",
+                "settle_command": "rtk python3 scripts/account_history_agent.py --api http://127.0.0.1:18083 --settle",
+                "make_dry_run_target": "rtk make account-history-agent-dry-run",
+                "history_url_env": "DANSKESPIL_ACCOUNT_HISTORY_URL",
+                "dry_run_first": true,
+                "settle_requires_deterministic_bookmaker_truth": true
+            },
             "review_count": items.len(),
             "request_count": requests.len(),
             "items": requests,
