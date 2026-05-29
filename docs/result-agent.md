@@ -165,6 +165,11 @@ For parser development or sanitized fixtures, use `--history-text-file` or
 `--extracted-json` together with `--requests-json`; these modes bypass
 `agent-browser` and the API request queue and are suitable for offline tests.
 Account-history source URLs are stored without query strings or fragments.
+The checked-in sanitized fixture can be exercised with:
+
+```text
+rtk make account-history-agent-fixture-dry-run
+```
 
 The web UI account-history panel exposes the same local runbook fields returned
 by `GET /api/result-agent/account-requests`: the port-forward command, dry-run

@@ -11,6 +11,9 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))
 import account_history_agent as agent
 
 
+ROOT = Path(__file__).resolve().parents[1]
+FIXTURES = ROOT / "tests" / "fixtures"
+
 REQUEST = {
     "ids": {"bet_id": "paper-bet-1", "coupon_simulation_id": None},
     "selection": {
@@ -88,9 +91,8 @@ class AccountHistoryAgentTests(unittest.TestCase):
 
     def test_run_once_can_use_fixtures_without_browser_or_api(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
-            root = Path(directory)
-            requests_json = root / "requests.json"
-            extracted_json = root / "history.json"
+            requests_json = Path(directory) / "requests.json"
+            extracted_json = Path(directory) / "history.json"
             requests_json.write_text(
                 '{"items": [' + json.dumps(REQUEST) + "]}",
                 encoding="utf-8",
@@ -125,6 +127,30 @@ class AccountHistoryAgentTests(unittest.TestCase):
         self.assertEqual(summary["evidence_count"], 1)
         self.assertEqual(summary["posted_count"], 0)
         self.assertEqual(summary["results"][0]["payload"]["settlement_result"], "won")
+
+    def test_checked_in_fixture_dry_run_matches_expected_statuses(self) -> None:
+        args = SimpleNamespace(
+            api="http://127.0.0.1:1",
+            requests_json=str(FIXTURES / "account_history_requests.json"),
+            extracted_json=None,
+            history_text_file=str(FIXTURES / "account_history_text.txt"),
+            session_name="test-session",
+            history_url="https://danskespil.dk/oddset",
+            wait_ms=0,
+            no_open=True,
+            limit=10,
+            context_radius=0,
+            settle=False,
+            dry_run=True,
+        )
+
+        summary = agent.run_once(args)
+
+        self.assertEqual(summary["evidence_count"], 2)
+        self.assertEqual(
+            [item["payload"]["settlement_result"] for item in summary["results"]],
+            ["won", "unresolved"],
+        )
 
 
 if __name__ == "__main__":

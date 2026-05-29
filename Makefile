@@ -6,10 +6,17 @@ METRICS_CHART ?= metrics-server/metrics-server
 METRICS_REPO_NAME ?= metrics-server
 METRICS_REPO_URL ?= https://kubernetes-sigs.github.io/metrics-server/
 
-.PHONY: account-history-agent-dry-run account-history-agent-test metrics-api-install metrics-api-status metrics-api-top
+.PHONY: account-history-agent-dry-run account-history-agent-fixture-dry-run account-history-agent-test metrics-api-install metrics-api-status metrics-api-top
 
 account-history-agent-dry-run:
 	rtk python3 scripts/account_history_agent.py --api $(GAMBLER_API) --dry-run
+
+account-history-agent-fixture-dry-run:
+	rtk python3 scripts/account_history_agent.py \
+		--requests-json tests/fixtures/account_history_requests.json \
+		--history-text-file tests/fixtures/account_history_text.txt \
+		--context-radius 0 \
+		--dry-run
 
 account-history-agent-test:
 	rtk python3 -m unittest tests.test_account_history_agent

@@ -1,0 +1,60 @@
+{
+  "items": [
+    {
+      "ids": {
+        "bet_id": "paper-bet-fixture-1",
+        "coupon_simulation_id": null
+      },
+      "selection": {
+        "event_name": "Team Fog Næstved - Bakken Bears",
+        "event_names": [
+          "Team Fog Næstved - Bakken Bears"
+        ],
+        "sport_key": "basketball",
+        "competition": "Denmark Basketligaen",
+        "market_name": "Kampvinder (Inkl. OT)",
+        "outcome_name": "Bakken Bears",
+        "legs": []
+      },
+      "evidence_template": {
+        "source_key": "danskespil_account_history",
+        "bet_id": "paper-bet-fixture-1",
+        "coupon_simulation_id": null,
+        "event_name": "Team Fog Næstved - Bakken Bears",
+        "sport_key": "basketball",
+        "market_name": "Kampvinder (Inkl. OT)",
+        "outcome_name": "Bakken Bears",
+        "settle": false,
+        "paper_only": true
+      }
+    },
+    {
+      "ids": {
+        "bet_id": "paper-bet-fixture-2",
+        "coupon_simulation_id": null
+      },
+      "selection": {
+        "event_name": "Fajing Sun - Jay Dylan Hara Friend",
+        "event_names": [
+          "Fajing Sun - Jay Dylan Hara Friend"
+        ],
+        "sport_key": "tennis",
+        "competition": "ATP Challenger Little Rock, Single",
+        "market_name": "Kampvinder",
+        "outcome_name": "Fajing Sun",
+        "legs": []
+      },
+      "evidence_template": {
+        "source_key": "danskespil_account_history",
+        "bet_id": "paper-bet-fixture-2",
+        "coupon_simulation_id": null,
+        "event_name": "Fajing Sun - Jay Dylan Hara Friend",
+        "sport_key": "tennis",
+        "market_name": "Kampvinder",
+        "outcome_name": "Fajing Sun",
+        "settle": false,
+        "paper_only": true
+      }
+    }
+  ]
+}
