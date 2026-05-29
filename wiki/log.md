@@ -182,6 +182,12 @@ Append-only timeline for project wiki maintenance. Use headings with the format 
 - The API can now persist `mode=account_history_settlement_evidence` rows without final scores and can reconcile a paper bet or coupon when `settle=true`.
 - The web UI external-evidence table now displays the bookmaker settlement state instead of a placeholder score for status-only account-history evidence.
 
+## [2026-05-29] implementation | local account-history agent
+
+- Added `scripts/account_history_agent.py`, a local `agent-browser` worker that consumes `GET /api/result-agent/account-requests`, matches visible account-history text to queued paper rows, and posts compact status-only evidence.
+- Added a `make account-history-agent-dry-run` helper and documented the dry-run-first workflow before allowing `--settle`.
+- Added `DANSKESPIL_ACCOUNT_HISTORY_URL` to the local env template so the operator-controlled account/history page can be configured without storing browser state.
+
 ## [2026-05-25] implementation | Candidate ranking and paper settlement POC
 
 - Added `poc_ranker_v1` candidate scoring fields: implied probability, model probability, expected value, confidence, score, risk flags, and feature snapshot.

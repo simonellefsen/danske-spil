@@ -139,6 +139,9 @@ postponed, or still unresolved. Those payloads still use
 `POST /api/settlement/external-evidence`, must include `bet_id` or
 `coupon_simulation_id`, and should default to `settle=false` until the local
 browser agent has deterministic bookmaker truth.
+`scripts/account_history_agent.py` consumes the account-history request queue
+and can submit those compact status-only payloads from a local authenticated
+browser session without committing full account pages or browser state.
 
 Every settlement observation should record:
 

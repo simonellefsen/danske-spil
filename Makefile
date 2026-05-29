@@ -1,11 +1,15 @@
 KUBE_CONTEXT ?= docker-desktop
+GAMBLER_API ?= http://127.0.0.1:18083
 METRICS_NAMESPACE ?= kube-system
 METRICS_RELEASE ?= metrics-server
 METRICS_CHART ?= metrics-server/metrics-server
 METRICS_REPO_NAME ?= metrics-server
 METRICS_REPO_URL ?= https://kubernetes-sigs.github.io/metrics-server/
 
-.PHONY: metrics-api-install metrics-api-status metrics-api-top
+.PHONY: account-history-agent-dry-run metrics-api-install metrics-api-status metrics-api-top
+
+account-history-agent-dry-run:
+	rtk python3 scripts/account_history_agent.py --api $(GAMBLER_API) --dry-run
 
 metrics-api-install:
 	rtk helm repo add $(METRICS_REPO_NAME) $(METRICS_REPO_URL)

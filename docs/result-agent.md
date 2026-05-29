@@ -139,6 +139,29 @@ row still returns `flashscore_discovery_no_match`, the next step is to add
 another source adapter or a sport-specific pagination path, not an operator
 prompt.
 
+## Local Account-History Agent
+
+`scripts/account_history_agent.py` is the local read-only companion for
+`GET /api/result-agent/account-requests`. It opens
+`DANSKESPIL_ACCOUNT_HISTORY_URL` when configured, otherwise
+`DANSKESPIL_LOGIN_URL`, in an `agent-browser` session and inspects the visible
+account/history text locally. The script never posts page text in full. It
+matches queued paper rows to visible event context, accepts only deterministic
+bookmaker states, and sends compact status-only evidence to
+`POST /api/settlement/external-evidence`.
+
+Typical run:
+
+```text
+rtk kubectl --context docker-desktop -n danske-spil port-forward svc/gambler-api 18083:8080
+rtk python3 scripts/account_history_agent.py --api http://127.0.0.1:18083 --dry-run
+```
+
+Use an existing authenticated browser session or let the script open the page
+so the operator can sign in locally. Add `--settle` only after dry-run output
+shows deterministic bookmaker truth for the paper rows. `--no-open` inspects
+the current `agent-browser` session page without navigating.
+
 ## Evidence Contract
 
 All automated result workers submit evidence through:
