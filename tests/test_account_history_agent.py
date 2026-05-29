@@ -214,6 +214,54 @@ class AccountHistoryAgentTests(unittest.TestCase):
         self.assertEqual(summary["posted_count"], 0)
         self.assertEqual(summary["results"][0]["payload"]["settlement_result"], "won")
 
+    def test_run_once_skips_conflicting_visible_account_history_statuses(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            requests_json = Path(directory) / "requests.json"
+            extracted_json = Path(directory) / "history.json"
+            requests_json.write_text(
+                '{"items": [' + json.dumps(REQUEST) + "]}",
+                encoding="utf-8",
+            )
+            extracted_json.write_text(
+                json.dumps(
+                    {
+                        "title": "fixture",
+                        "url": "https://danskespil.dk/konto/spilhistorik",
+                        "text": "\n".join(
+                            [
+                                "Team FOG Naestved Bakken Bears",
+                                "Vundet",
+                                "older row",
+                                "Team FOG Naestved Bakken Bears",
+                                "Tabt",
+                            ]
+                        ),
+                    }
+                ),
+                encoding="utf-8",
+            )
+            args = SimpleNamespace(
+                api="http://127.0.0.1:1",
+                requests_json=str(requests_json),
+                extracted_json=str(extracted_json),
+                history_text_file=None,
+                session_name="test-session",
+                history_url="https://danskespil.dk/oddset",
+                wait_ms=0,
+                no_open=True,
+                limit=10,
+                context_radius=1,
+                include_nonterminal=False,
+                settle=False,
+                dry_run=True,
+            )
+
+            summary = agent.run_once(args)
+
+        self.assertEqual(summary["evidence_count"], 0)
+        self.assertEqual(summary["skipped_count"], 1)
+        self.assertEqual(summary["skipped"][0]["reason"], "ambiguous_account_history_status")
+
     def test_checked_in_fixture_dry_run_matches_expected_statuses(self) -> None:
         args = SimpleNamespace(
             api="http://127.0.0.1:1",

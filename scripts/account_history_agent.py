@@ -182,48 +182,73 @@ def window_matches_event(window: str, event_names: list[str]) -> bool:
     return False
 
 
+def find_all_events_context(lines: list[str], event_names: list[str], radius: int) -> str | None:
+    if not event_names:
+        return None
+    matching_indexes = []
+    for event_name in event_names:
+        match_index = next(
+            (
+                index
+                for index, _line in enumerate(lines)
+                if window_matches_event(
+                    "\n".join(
+                        lines[
+                            max(0, index - radius) : min(
+                                len(lines), index + radius + 1
+                            )
+                        ]
+                    ),
+                    [event_name],
+                )
+            ),
+            None,
+        )
+        if match_index is None:
+            return None
+        matching_indexes.append(match_index)
+    start = max(0, min(matching_indexes) - radius)
+    end = min(len(lines), max(matching_indexes) + radius + 1)
+    context = "\n".join(lines[start:end])
+    if window_matches_all_events(context, event_names):
+        return context[:1200]
+    return None
+
+
+def find_contexts(
+    lines: list[str],
+    event_names: list[str],
+    radius: int,
+    require_all_events: bool = False,
+) -> list[str]:
+    if require_all_events:
+        context = find_all_events_context(lines, event_names, radius)
+        return [context] if context else []
+
+    contexts = []
+    seen = set()
+    for index, _line in enumerate(lines):
+        start = max(0, index - radius)
+        end = min(len(lines), index + radius + 1)
+        window = "\n".join(lines[start:end])
+        if window_matches_event(window, event_names):
+            context = window[:1200]
+            key = normalize(context)
+            if key and key not in seen:
+                seen.add(key)
+                contexts.append(context)
+    return contexts
+
+
 def find_context(
     lines: list[str],
     event_names: list[str],
     radius: int,
     require_all_events: bool = False,
 ) -> str | None:
-    if require_all_events and event_names:
-        matching_indexes = []
-        for event_name in event_names:
-            match_index = next(
-                (
-                    index
-                    for index, _line in enumerate(lines)
-                    if window_matches_event(
-                        "\n".join(
-                            lines[
-                                max(0, index - radius) : min(
-                                    len(lines), index + radius + 1
-                                )
-                            ]
-                        ),
-                        [event_name],
-                    )
-                ),
-                None,
-            )
-            if match_index is None:
-                return None
-            matching_indexes.append(match_index)
-        start = max(0, min(matching_indexes) - radius)
-        end = min(len(lines), max(matching_indexes) + radius + 1)
-        context = "\n".join(lines[start:end])
-        if window_matches_all_events(context, event_names):
-            return context[:1200]
-        return None
-
-    for index, _line in enumerate(lines):
-        start = max(0, index - radius)
-        end = min(len(lines), index + radius + 1)
-        window = "\n".join(lines[start:end])
-        if window_matches_event(window, event_names):
-            return window[:1200]
+    contexts = find_contexts(lines, event_names, radius, require_all_events)
+    if contexts:
+        return contexts[0]
     return None
 
 
@@ -388,8 +413,8 @@ def run_once(args: argparse.Namespace) -> dict:
             skipped.append({"reason": "missing_event_name", "request": request.get("ids")})
             continue
         require_all_events = request_is_coupon(request) and len(event_names) > 1
-        context = find_context(lines, event_names, args.context_radius, require_all_events)
-        if not context:
+        contexts = find_contexts(lines, event_names, args.context_radius, require_all_events)
+        if not contexts:
             skipped.append({
                 "reason": (
                     "coupon_legs_not_visible_in_account_history"
@@ -400,15 +425,34 @@ def run_once(args: argparse.Namespace) -> dict:
                 "request": request.get("ids"),
             })
             continue
-        status = infer_status(context)
-        if not status:
+        status_matches = [
+            {"context": context, "status": status}
+            for context in contexts
+            if (status := infer_status(context))
+        ]
+        if not status_matches:
             skipped.append({
                 "reason": "no_deterministic_status_in_context",
                 "event_names": event_names,
+                "context_count": len(contexts),
                 "request": request.get("ids"),
             })
             continue
-        result, phrase = status
+        unique_results = {match["status"][0] for match in status_matches}
+        if len(unique_results) != 1:
+            skipped.append({
+                "reason": "ambiguous_account_history_status",
+                "event_names": event_names,
+                "status_matches": [
+                    {"result": result, "matched_status_phrase": phrase}
+                    for result, phrase in (match["status"] for match in status_matches)
+                ],
+                "context_count": len(contexts),
+                "request": request.get("ids"),
+            })
+            continue
+        context = status_matches[0]["context"]
+        result, phrase = status_matches[0]["status"]
         if result in NON_TERMINAL_RESULTS and not args.include_nonterminal:
             skipped.append({
                 "reason": "nonterminal_bookmaker_status",

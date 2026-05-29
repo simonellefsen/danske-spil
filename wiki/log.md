@@ -204,6 +204,7 @@ Append-only timeline for project wiki maintenance. Use headings with the format 
 - Required all coupon legs to be visible in account-history context before emitting bookmaker evidence for a coupon.
 - Preserved account-history `event_names` through the API evidence template, stored evidence payload, and settlement notes so coupon-level audit rows keep their leg context.
 - Displayed preserved account-history coupon leg names in the settlement observations and external evidence tables.
+- Skipped local account-history evidence when multiple visible contexts for the same queued event contain conflicting deterministic bookmaker statuses.
 - Added `make account-history-agent-test` for the local parser test suite.
 
 ## [2026-05-25] implementation | Candidate ranking and paper settlement POC

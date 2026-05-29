@@ -172,6 +172,9 @@ Coupon requests preserve all leg event names in the payload and use a synthetic
 `Coupon: ...` event label when the request has no single event name.
 Coupon account-history matching requires every leg event to be visible in the
 local history context before emitting bookmaker evidence for the coupon.
+When the same queued event appears in multiple visible account-history contexts
+with conflicting deterministic statuses, the local agent skips the request as
+ambiguous instead of posting settlement evidence.
 The checked-in sanitized fixture can be exercised with:
 
 ```text
