@@ -25,11 +25,21 @@ binary and CA bundle into `scratch`.
 rtk bash scripts/deploy_local_k8s.sh
 ```
 
+Or use the Makefile wrapper:
+
+```bash
+rtk make k8s-deploy
+```
+
 The script creates `danske-spil-postgres-app` directly in Kubernetes with a generated password if the secret does not already exist. The generated password is not written to the repository.
 
 By default the script builds timestamped local images for the full app and the
 result-agent, then patches deployments to those tags so Docker Desktop does not
 reuse stale `:local` images.
+
+`rtk make docker-build` builds both scratch-container images without applying
+Kubernetes manifests. `rtk make k8s-status` prints the current local namespace
+pods, deployments, services, and CNPG cluster state.
 
 ## Open The Web UI
 

@@ -4297,8 +4297,8 @@ impl Store {
                 r#"
                 SELECT
                   (now() AT TIME ZONE 'Europe/Copenhagen')::date::text AS local_date,
-                  ((now() AT TIME ZONE 'Europe/Copenhagen')::date AT TIME ZONE 'Europe/Copenhagen') AS window_start,
-                  (((now() AT TIME ZONE 'Europe/Copenhagen')::date + interval '1 day') AT TIME ZONE 'Europe/Copenhagen') AS window_end
+                  ((now() AT TIME ZONE 'Europe/Copenhagen')::date::timestamp AT TIME ZONE 'Europe/Copenhagen') AS window_start,
+                  (((now() AT TIME ZONE 'Europe/Copenhagen')::date + interval '1 day')::timestamp AT TIME ZONE 'Europe/Copenhagen') AS window_end
                 "#,
                 &[],
             )
