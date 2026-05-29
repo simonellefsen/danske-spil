@@ -208,6 +208,8 @@ the right grading signal. The payload must include `bet_id` or
 paper ledger should be reconciled from that truth. The stored evidence payload
 marks these rows with `mode=account_history_settlement_evidence` and
 `score_available=false` when no score was supplied.
+Coupon evidence may also include `event_names`; these leg event names are
+preserved in the stored evidence payload and settlement notes for auditability.
 
 ## Current Boundary
 

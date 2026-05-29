@@ -3965,6 +3965,7 @@ impl Store {
             ));
         }
         let result_status_raw = account_history_raw_status(payload);
+        let event_names = account_history_event_names(payload, &event_name);
         let evidence_id = new_id();
         let evidence_payload = json!({
             "mode": "account_history_settlement_evidence",
@@ -3973,6 +3974,7 @@ impl Store {
             "source_url": source_url,
             "source_title": title,
             "event_name": event_name,
+            "event_names": event_names,
             "home_name": home_name,
             "away_name": away_name,
             "home_score": home_score,
@@ -4028,6 +4030,7 @@ impl Store {
                     "source_url": source_url,
                     "source_title": title,
                     "event_name": event_name,
+                    "event_names": event_names,
                     "settlement_result": settlement_result,
                     "result_status_raw": result_status_raw,
                     "paper_only": true
@@ -4077,6 +4080,7 @@ impl Store {
                     "source_url": source_url,
                     "source_title": title,
                     "event_name": event_name,
+                    "event_names": event_names,
                     "settlement_result": settlement_result,
                     "result_status_raw": result_status_raw,
                     "coupon_level": true,
@@ -4149,6 +4153,7 @@ impl Store {
             "source_key": source_key,
             "source_url": source_url,
             "event_name": event_name,
+            "event_names": event_names,
             "score_available": payload.get("home_score").is_some() && payload.get("away_score").is_some(),
             "settlement_result": settlement_result,
             "result_status_raw": result_status_raw,
@@ -8341,6 +8346,20 @@ fn account_history_raw_status(payload: &Value) -> Option<String> {
     })
 }
 
+fn account_history_event_names(payload: &Value, fallback_event_name: &str) -> Vec<String> {
+    let mut names = dedup_strings(
+        json_string_array(payload.get("event_names"))
+            .into_iter()
+            .map(|value| value.trim().to_string())
+            .filter(|value| !value.is_empty())
+            .collect(),
+    );
+    if names.is_empty() && !fallback_event_name.trim().is_empty() {
+        names.push(fallback_event_name.trim().to_string());
+    }
+    names
+}
+
 fn account_history_settlement_result(payload: &Value) -> Option<&'static str> {
     let raw = account_history_raw_status(payload)?;
     let normalized = raw
@@ -9506,6 +9525,35 @@ mod tests {
             account_history_settlement_result(&json!({"status": "manual review required"})),
             None
         );
+    }
+
+    #[test]
+    fn account_history_event_names_preserve_coupon_legs() {
+        let names = account_history_event_names(
+            &json!({
+                "event_names": [
+                    "Team Fog Næstved - Bakken Bears",
+                    "Team Fog Næstved - Bakken Bears",
+                    "Fajing Sun - Jay Dylan Hara Friend"
+                ]
+            }),
+            "Coupon: Team Fog Næstved - Bakken Bears / Fajing Sun - Jay Dylan Hara Friend",
+        );
+
+        assert_eq!(
+            names,
+            vec![
+                "Team Fog Næstved - Bakken Bears".to_string(),
+                "Fajing Sun - Jay Dylan Hara Friend".to_string()
+            ]
+        );
+    }
+
+    #[test]
+    fn account_history_event_names_fall_back_to_event_name() {
+        let names = account_history_event_names(&json!({}), "Notts County - Salford City FC");
+
+        assert_eq!(names, vec!["Notts County - Salford City FC".to_string()]);
     }
 
     #[test]
