@@ -203,6 +203,11 @@ Current POC metrics are exposed through `/api/ledger/summary`:
 - Average observed odds.
 - Status breakdown.
 
+`/api/ledger` exposes recent paper singles with joined candidate context:
+`sport_key`, `event_name`, `competition`, `market_name`, `market_kind`, and
+`outcome_name`. This lets daily reporting and the web UI summarize paper
+placements without parsing candidate payload JSON.
+
 `/api/performance` adds an operational performance and opportunity report:
 
 - Latest scan candidate intake by selected/rejected status.

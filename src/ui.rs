@@ -633,14 +633,17 @@ function renderSimulatedCoupons(items) {
 function renderLedger(items) {
   const candidateLabel = (item) => {
     const candidate = item.payload && item.payload.candidate ? item.payload.candidate : {};
-    return `${candidate.event_name || item.candidate_id || ""} / ${candidate.outcome_name || ""}`;
+    const eventName = item.event_name || candidate.event_name || item.candidate_id || "";
+    const outcomeName = item.outcome_name || candidate.outcome_name || "";
+    return `${eventName} / ${outcomeName}`;
   };
   $("ledger").innerHTML = items.map((item) => {
     const canSettle = openSettlementStatuses.includes(item.status);
+    const detail = [item.sport_key, item.competition, item.market_name].filter(Boolean).join(" / ");
     return `
     <tr>
       <td>${esc(item.created_at)}</td>
-      <td>${esc(candidateLabel(item))}<br><span class="label">${esc(item.strategy_id || "")}</span></td>
+      <td>${esc(candidateLabel(item))}<br><span class="label">${esc(detail || item.strategy_id || "")}</span></td>
       <td>${money(item.hypothetical_stake)}<br><span class="muted">@ ${item.observed_decimal_odds ?? "-"}</span></td>
       <td>${esc(item.expected_result_check_after || "-")}<br><span class="muted">${esc(item.event_start_time || "")}</span></td>
       <td>${esc(item.status)}</td>

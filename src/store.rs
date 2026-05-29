@@ -4170,14 +4170,18 @@ impl Store {
         let rows = client
             .query(
                 r#"
-                SELECT id, candidate_id, created_at, hypothetical_stake::float8 AS hypothetical_stake,
-                       observed_decimal_odds::float8 AS observed_decimal_odds, status,
-                       strategy_id, event_start_time, expected_result_check_after, settled_at,
-                       simulated_return::float8 AS simulated_return,
-                       profit_loss::float8 AS profit_loss,
-                       settlement_payload, payload
-                FROM simulated_bets
-                ORDER BY created_at DESC
+                SELECT sb.id, sb.candidate_id, sb.created_at,
+                       cb.sport_key, cb.event_name, cb.competition, cb.market_name,
+                       cb.market_kind, cb.outcome_name,
+                       sb.hypothetical_stake::float8 AS hypothetical_stake,
+                       sb.observed_decimal_odds::float8 AS observed_decimal_odds, sb.status,
+                       sb.strategy_id, sb.event_start_time, sb.expected_result_check_after, sb.settled_at,
+                       sb.simulated_return::float8 AS simulated_return,
+                       sb.profit_loss::float8 AS profit_loss,
+                       sb.settlement_payload, sb.payload
+                FROM simulated_bets sb
+                LEFT JOIN candidate_bets cb ON cb.id = sb.candidate_id
+                ORDER BY sb.created_at DESC
                 LIMIT $1
                 "#,
                 &[&limit],
@@ -9995,6 +9999,12 @@ fn simulated_bet_from_row(row: &Row) -> SimulatedBet {
         id: row.get("id"),
         candidate_id: row.get("candidate_id"),
         created_at: row.get("created_at"),
+        sport_key: row.get("sport_key"),
+        event_name: row.get("event_name"),
+        competition: row.get("competition"),
+        market_name: row.get("market_name"),
+        market_kind: row.get("market_kind"),
+        outcome_name: row.get("outcome_name"),
         hypothetical_stake: row.get("hypothetical_stake"),
         observed_decimal_odds: row.get("observed_decimal_odds"),
         status: row.get("status"),

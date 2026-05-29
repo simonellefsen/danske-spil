@@ -207,6 +207,10 @@ Append-only timeline for project wiki maintenance. Use headings with the format 
 - Skipped local account-history evidence when multiple visible contexts for the same queued event contain conflicting deterministic bookmaker statuses.
 - Added `make account-history-agent-test` for the local parser test suite.
 
+## [2026-05-29] implementation | Ledger reporting context
+
+- Added joined candidate context to `/api/ledger` rows (`sport_key`, event, competition, market, and outcome) so daily reporting and the web UI do not need to recover paper placement labels from nested payload JSON.
+
 ## [2026-05-25] implementation | Candidate ranking and paper settlement POC
 
 - Added `poc_ranker_v1` candidate scoring fields: implied probability, model probability, expected value, confidence, score, risk flags, and feature snapshot.
