@@ -168,6 +168,8 @@ Account-history source URLs are stored without query strings or fragments.
 By default the agent defers non-terminal bookmaker states such as `afventer`,
 `open`, `pending`, and `postponed`; use `--include-nonterminal` only for
 diagnostic dry runs where those states should be emitted as payloads.
+Coupon requests preserve all leg event names in the payload and use a synthetic
+`Coupon: ...` event label when the request has no single event name.
 The checked-in sanitized fixture can be exercised with:
 
 ```text

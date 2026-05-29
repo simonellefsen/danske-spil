@@ -34,6 +34,31 @@ REQUEST = {
     },
 }
 
+COUPON_REQUEST = {
+    "ids": {"bet_id": None, "coupon_simulation_id": "paper-coupon-1"},
+    "selection": {
+        "event_name": None,
+        "event_names": [
+            "Team Fog Næstved - Bakken Bears",
+            "Fajing Sun - Jay Dylan Hara Friend",
+        ],
+        "sport_key": "mixed",
+        "market_name": "Double",
+        "outcome_name": "Coupon",
+        "legs": [
+            {"event_name": "Team Fog Næstved - Bakken Bears"},
+            {"event_name": "Fajing Sun - Jay Dylan Hara Friend"},
+        ],
+    },
+    "evidence_template": {
+        "source_key": "danskespil_account_history",
+        "bet_id": None,
+        "coupon_simulation_id": "paper-coupon-1",
+        "event_name": None,
+        "settle": False,
+    },
+}
+
 
 class AccountHistoryAgentTests(unittest.TestCase):
     def test_matches_event_with_danish_alias_normalization(self) -> None:
@@ -77,6 +102,30 @@ class AccountHistoryAgentTests(unittest.TestCase):
         self.assertEqual(payload["settlement_result"], "refunded")
         self.assertFalse(payload["settle"])
         self.assertEqual(payload["bet_id"], "paper-bet-1")
+
+    def test_coupon_payload_preserves_leg_event_names(self) -> None:
+        payload = agent.build_payload(
+            COUPON_REQUEST,
+            "won",
+            "vundet",
+            "Team FOG Naestved Bakken Bears Fajing Sun Jay Dylan Hara Friend vundet",
+            {"title": "fixture", "url": None, "session_name": "test-session"},
+            settle=False,
+        )
+
+        self.assertEqual(payload["coupon_simulation_id"], "paper-coupon-1")
+        self.assertEqual(
+            payload["event_name"],
+            "Coupon: Team Fog Næstved - Bakken Bears / Fajing Sun - Jay Dylan Hara Friend",
+        )
+        self.assertEqual(
+            payload["event_names"],
+            [
+                "Team Fog Næstved - Bakken Bears",
+                "Fajing Sun - Jay Dylan Hara Friend",
+            ],
+        )
+        self.assertNotIn("bet_id", payload)
 
     def test_text_fixture_loads_lines(self) -> None:
         extracted = agent.history_text_to_extracted(

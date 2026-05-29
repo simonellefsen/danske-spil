@@ -200,6 +200,7 @@ Append-only timeline for project wiki maintenance. Use headings with the format 
 - Added unit tests for Danish-name normalization, ambiguous status rejection, account-history URL query stripping, and text-fixture line extraction.
 - Added checked-in sanitized account-history fixtures and `make account-history-agent-fixture-dry-run` for a no-browser, no-cluster parser smoke test.
 - Deferred non-terminal account-history states by default and added `--include-nonterminal` for diagnostic dry runs that intentionally emit unresolved/postponed payloads.
+- Preserved coupon leg event names in local account-history evidence payloads and synthesized a coupon-level event label when a request has no single event name.
 - Added `make account-history-agent-test` for the local parser test suite.
 
 ## [2026-05-25] implementation | Candidate ranking and paper settlement POC

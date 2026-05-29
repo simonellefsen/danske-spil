@@ -210,14 +210,27 @@ def infer_status(context: str) -> tuple[str, str] | None:
 
 def request_event_names(request: dict) -> list[str]:
     selection = request.get("selection") or {}
+    template = request.get("evidence_template") or {}
     names = []
     for value in selection.get("event_names") or []:
         if isinstance(value, str) and value.strip():
             names.append(value.strip())
+    for value in template.get("event_names") or []:
+        if isinstance(value, str) and value.strip():
+            names.append(value.strip())
+    for leg in selection.get("legs") or []:
+        if not isinstance(leg, dict):
+            continue
+        leg_name = leg.get("event_name")
+        if isinstance(leg_name, str) and leg_name.strip():
+            names.append(leg_name.strip())
+        for value in leg.get("event_names") or []:
+            if isinstance(value, str) and value.strip():
+                names.append(value.strip())
     value = selection.get("event_name")
     if isinstance(value, str) and value.strip():
         names.append(value.strip())
-    template_value = (request.get("evidence_template") or {}).get("event_name")
+    template_value = template.get("event_name")
     if isinstance(template_value, str) and template_value.strip():
         names.append(template_value.strip())
     seen = set()
@@ -234,12 +247,17 @@ def build_payload(request: dict, result: str, matched_phrase: str, context: str,
     template = dict(request.get("evidence_template") or {})
     selection = request.get("selection") or {}
     ids = request.get("ids") or {}
+    event_names = request_event_names(request)
+    coupon_id = template.get("coupon_simulation_id") or ids.get("coupon_simulation_id")
     event_name = template.get("event_name") or selection.get("event_name")
+    if not event_name and event_names:
+        event_name = f"Coupon: {' / '.join(event_names)}" if coupon_id else event_names[0]
     payload = {
         "source_key": "danskespil_account_history",
         "bet_id": template.get("bet_id") or ids.get("bet_id"),
-        "coupon_simulation_id": template.get("coupon_simulation_id") or ids.get("coupon_simulation_id"),
+        "coupon_simulation_id": coupon_id,
         "event_name": event_name,
+        "event_names": event_names,
         "sport_key": template.get("sport_key") or selection.get("sport_key"),
         "market_name": template.get("market_name") or selection.get("market_name"),
         "outcome_name": template.get("outcome_name") or selection.get("outcome_name"),
