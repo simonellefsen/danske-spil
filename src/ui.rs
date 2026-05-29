@@ -212,6 +212,16 @@ pub fn render_index(base_path: &str) -> String {
                         }
                     }
                     section {
+                        h2 { title: "Europe/Copenhagen local-day paper performance for singles and coupons. This answers today without database access.", "Today" }
+                        div { class: "operator-note", id: "today-window", "Loading today..." }
+                        table {
+                            thead { tr {
+                                th { "Scope" } th { "Played" } th { "Settled" } th { "Open" } th { "P/L" } th { "Hit rate" }
+                            } }
+                            tbody { id: "today-performance" }
+                        }
+                    }
+                    section {
                         h2 { "Risk flag performance" }
                         table {
                             thead { tr {
@@ -1108,6 +1118,52 @@ function renderPerformance(report) {
     $("opportunity-intake").innerHTML = `<tr><td colspan="4" class="muted">No latest candidate intake yet. Run a scan.</td></tr>`;
   }
 }
+function renderTodayPerformance(report) {
+  const summary = report.summary || {};
+  const observations = (report.settlement_observations || {}).items || [];
+  const observationLabel = observations.length
+    ? observations.map((item) => `${item.observed_result}: ${item.count}`).join(" / ")
+    : "no settlement observations today";
+  $("today-window").textContent = `${report.local_date || "-"} (${report.timezone || "local"}), ${report.window?.start || "-"} to ${report.window?.end || "-"}; ${observationLabel}`;
+
+  const rows = [{
+    scope: "all",
+    label: `singles ${summary.single_count || 0} / coupons ${summary.coupon_count || 0}`,
+    played_count: summary.placed_count || 0,
+    settled_count: summary.settled_count || 0,
+    open_count: summary.open_count || 0,
+    turnover: summary.turnover || 0,
+    open_exposure: summary.open_exposure || 0,
+    profit_loss: summary.realized_profit_loss || 0,
+    hit_rate: summary.hit_rate,
+    average_odds: summary.average_odds
+  }].concat((report.by_sport || []).map((item) => ({
+    scope: item.sport_key || "unknown",
+    label: `singles ${item.single_count || 0} / coupons ${item.coupon_count || 0}`,
+    played_count: item.placed_count || 0,
+    settled_count: item.settled_count || 0,
+    open_count: item.open_count || 0,
+    turnover: item.turnover || 0,
+    open_exposure: item.open_exposure || 0,
+    profit_loss: item.realized_profit_loss || 0,
+    hit_rate: item.hit_rate,
+    average_odds: item.average_odds
+  })));
+
+  $("today-performance").innerHTML = rows.map((item) => `
+    <tr>
+      <td><span class="pill">${esc(item.scope)}</span><br><span class="label">${esc(item.label)} / avg @ ${item.average_odds ? num(item.average_odds) : "-"}</span></td>
+      <td>${esc(item.played_count)}<br><span class="muted">${money(item.turnover)}</span></td>
+      <td>${esc(item.settled_count)}</td>
+      <td>${esc(item.open_count)}<br><span class="muted">${money(item.open_exposure)}</span></td>
+      <td>${money(item.profit_loss)}</td>
+      <td>${pct(item.hit_rate)}</td>
+    </tr>
+  `).join("");
+  if (!Number(summary.placed_count || 0) && !(report.by_sport || []).length) {
+    $("today-performance").innerHTML = `<tr><td colspan="6" class="muted">No paper placements recorded for today.</td></tr>`;
+  }
+}
 function renderPerformanceHistory(history) {
   const items = history.items || [];
   $("performance-history").innerHTML = items.map((item) => {
@@ -1432,6 +1488,8 @@ async function load() {
   renderPlayed(played);
   const performance = await json(api("/api/performance"));
   renderPerformance(performance);
+  const todayPerformance = await json(api("/api/performance/today"));
+  renderTodayPerformance(todayPerformance);
   const performanceHistory = await json(api("/api/performance/history"));
   renderPerformanceHistory(performanceHistory);
   const coverage = await json(api("/api/catalog/coverage"));

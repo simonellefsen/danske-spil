@@ -210,6 +210,8 @@ Append-only timeline for project wiki maintenance. Use headings with the format 
 ## [2026-05-29] implementation | Ledger reporting context
 
 - Added joined candidate context to `/api/ledger` rows (`sport_key`, event, competition, market, and outcome) so daily reporting and the web UI do not need to recover paper placement labels from nested payload JSON.
+- Added `/api/performance/today` for Europe/Copenhagen local-day paper performance, including singles, coupons, by-sport aggregates, recent placements, and settlement observation counts.
+- Added a web UI `Today` panel backed by `/api/performance/today`.
 
 ## [2026-05-25] implementation | Candidate ranking and paper settlement POC
 

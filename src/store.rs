@@ -4290,6 +4290,322 @@ impl Store {
         Ok(summary)
     }
 
+    pub async fn paper_performance_today(&self) -> anyhow::Result<Value> {
+        let client = self.connect().await?;
+        let window = client
+            .query_one(
+                r#"
+                SELECT
+                  (now() AT TIME ZONE 'Europe/Copenhagen')::date::text AS local_date,
+                  ((now() AT TIME ZONE 'Europe/Copenhagen')::date AT TIME ZONE 'Europe/Copenhagen') AS window_start,
+                  (((now() AT TIME ZONE 'Europe/Copenhagen')::date + interval '1 day') AT TIME ZONE 'Europe/Copenhagen') AS window_end
+                "#,
+                &[],
+            )
+            .await?;
+        let local_date: String = window.get("local_date");
+        let window_start: DateTime<Utc> = window.get("window_start");
+        let window_end: DateTime<Utc> = window.get("window_end");
+
+        let summary_row = client
+            .query_one(
+                r#"
+                WITH coupon_sports AS (
+                  SELECT
+                    sc.id,
+                    CASE
+                      WHEN count(DISTINCT cb.sport_key) = 1 THEN min(cb.sport_key)
+                      ELSE 'mixed'
+                    END AS sport_key
+                  FROM simulated_coupons sc
+                  LEFT JOIN simulated_coupon_legs scl ON scl.simulated_coupon_id = sc.id
+                  LEFT JOIN candidate_bets cb ON cb.id = scl.candidate_id
+                  GROUP BY sc.id
+                ),
+                positions AS (
+                  SELECT
+                    'single'::text AS item_type,
+                    sb.status,
+                    sb.hypothetical_stake::float8 AS stake,
+                    sb.observed_decimal_odds::float8 AS odds,
+                    sb.profit_loss::float8 AS profit_loss
+                  FROM simulated_bets sb
+                  WHERE sb.created_at >= $1 AND sb.created_at < $2
+                  UNION ALL
+                  SELECT
+                    'coupon'::text AS item_type,
+                    sc.status,
+                    sc.hypothetical_stake::float8 AS stake,
+                    sc.observed_combined_decimal_odds::float8 AS odds,
+                    sc.profit_loss::float8 AS profit_loss
+                  FROM simulated_coupons sc
+                  LEFT JOIN coupon_sports cs ON cs.id = sc.id
+                  WHERE sc.created_at >= $1 AND sc.created_at < $2
+                )
+                SELECT
+                  count(*) FILTER (WHERE status <> 'duplicate_void')::int AS placed_count,
+                  count(*) FILTER (WHERE item_type = 'single' AND status <> 'duplicate_void')::int AS single_count,
+                  count(*) FILTER (WHERE item_type = 'coupon' AND status <> 'duplicate_void')::int AS coupon_count,
+                  count(*) FILTER (WHERE status LIKE 'settled_%' OR status IN ('void', 'pushed', 'cancelled', 'abandoned', 'refunded'))::int AS settled_count,
+                  count(*) FILTER (WHERE status = 'settled_won')::int AS won_count,
+                  count(*) FILTER (WHERE status = 'settled_lost')::int AS lost_count,
+                  count(*) FILTER (WHERE status IN ('open', 'awaiting_result', 'unresolved', 'postponed'))::int AS open_count,
+                  count(*) FILTER (WHERE status = 'awaiting_result')::int AS awaiting_result_count,
+                  COALESCE(sum(stake) FILTER (WHERE status <> 'duplicate_void'), 0)::float8 AS turnover,
+                  COALESCE(sum(stake) FILTER (WHERE status IN ('open', 'awaiting_result', 'unresolved', 'postponed')), 0)::float8 AS open_exposure,
+                  COALESCE(sum(profit_loss) FILTER (WHERE status <> 'duplicate_void'), 0)::float8 AS realized_profit_loss,
+                  avg(odds) FILTER (WHERE status <> 'duplicate_void')::float8 AS average_odds
+                FROM positions
+                "#,
+                &[&window_start, &window_end],
+            )
+            .await?;
+        let won_count: i32 = summary_row.get("won_count");
+        let lost_count: i32 = summary_row.get("lost_count");
+        let decided_count = won_count + lost_count;
+        let hit_rate = if decided_count > 0 {
+            Some(won_count as f64 / decided_count as f64)
+        } else {
+            None
+        };
+
+        let sport_rows = client
+            .query(
+                r#"
+                WITH coupon_sports AS (
+                  SELECT
+                    sc.id,
+                    CASE
+                      WHEN count(DISTINCT cb.sport_key) = 1 THEN min(cb.sport_key)
+                      ELSE 'mixed'
+                    END AS sport_key
+                  FROM simulated_coupons sc
+                  LEFT JOIN simulated_coupon_legs scl ON scl.simulated_coupon_id = sc.id
+                  LEFT JOIN candidate_bets cb ON cb.id = scl.candidate_id
+                  GROUP BY sc.id
+                ),
+                positions AS (
+                  SELECT
+                    COALESCE(cb.sport_key, 'unknown') AS sport_key,
+                    'single'::text AS item_type,
+                    sb.status,
+                    sb.hypothetical_stake::float8 AS stake,
+                    sb.observed_decimal_odds::float8 AS odds,
+                    sb.profit_loss::float8 AS profit_loss
+                  FROM simulated_bets sb
+                  LEFT JOIN candidate_bets cb ON cb.id = sb.candidate_id
+                  WHERE sb.created_at >= $1 AND sb.created_at < $2
+                  UNION ALL
+                  SELECT
+                    COALESCE(cs.sport_key, 'unknown') AS sport_key,
+                    'coupon'::text AS item_type,
+                    sc.status,
+                    sc.hypothetical_stake::float8 AS stake,
+                    sc.observed_combined_decimal_odds::float8 AS odds,
+                    sc.profit_loss::float8 AS profit_loss
+                  FROM simulated_coupons sc
+                  LEFT JOIN coupon_sports cs ON cs.id = sc.id
+                  WHERE sc.created_at >= $1 AND sc.created_at < $2
+                )
+                SELECT
+                  sport_key,
+                  count(*) FILTER (WHERE status <> 'duplicate_void')::int AS placed_count,
+                  count(*) FILTER (WHERE item_type = 'single' AND status <> 'duplicate_void')::int AS single_count,
+                  count(*) FILTER (WHERE item_type = 'coupon' AND status <> 'duplicate_void')::int AS coupon_count,
+                  count(*) FILTER (WHERE status LIKE 'settled_%' OR status IN ('void', 'pushed', 'cancelled', 'abandoned', 'refunded'))::int AS settled_count,
+                  count(*) FILTER (WHERE status = 'settled_won')::int AS won_count,
+                  count(*) FILTER (WHERE status = 'settled_lost')::int AS lost_count,
+                  count(*) FILTER (WHERE status IN ('open', 'awaiting_result', 'unresolved', 'postponed'))::int AS open_count,
+                  COALESCE(sum(stake) FILTER (WHERE status <> 'duplicate_void'), 0)::float8 AS turnover,
+                  COALESCE(sum(stake) FILTER (WHERE status IN ('open', 'awaiting_result', 'unresolved', 'postponed')), 0)::float8 AS open_exposure,
+                  COALESCE(sum(profit_loss) FILTER (WHERE status <> 'duplicate_void'), 0)::float8 AS realized_profit_loss,
+                  avg(odds) FILTER (WHERE status <> 'duplicate_void')::float8 AS average_odds
+                FROM positions
+                GROUP BY sport_key
+                ORDER BY placed_count DESC, sport_key
+                "#,
+                &[&window_start, &window_end],
+            )
+            .await?;
+        let by_sport: Vec<Value> = sport_rows
+            .iter()
+            .map(|row| {
+                let won: i32 = row.get("won_count");
+                let lost: i32 = row.get("lost_count");
+                let decided = won + lost;
+                json!({
+                    "sport_key": row.get::<_, String>("sport_key"),
+                    "placed_count": row.get::<_, i32>("placed_count"),
+                    "single_count": row.get::<_, i32>("single_count"),
+                    "coupon_count": row.get::<_, i32>("coupon_count"),
+                    "settled_count": row.get::<_, i32>("settled_count"),
+                    "won_count": won,
+                    "lost_count": lost,
+                    "open_count": row.get::<_, i32>("open_count"),
+                    "turnover": row.get::<_, f64>("turnover"),
+                    "open_exposure": row.get::<_, f64>("open_exposure"),
+                    "realized_profit_loss": row.get::<_, f64>("realized_profit_loss"),
+                    "hit_rate": if decided > 0 { Some(won as f64 / decided as f64) } else { None },
+                    "average_odds": row.get::<_, Option<f64>>("average_odds")
+                })
+            })
+            .collect();
+
+        let recent_rows = client
+            .query(
+                r#"
+                WITH coupon_details AS (
+                  SELECT
+                    sc.id,
+                    CASE
+                      WHEN count(DISTINCT cb.sport_key) = 1 THEN min(cb.sport_key)
+                      ELSE 'mixed'
+                    END AS sport_key,
+                    min(cb.event_name) AS event_name,
+                    min(cb.competition) AS competition,
+                    min(cb.market_name) AS market_name,
+                    min(cb.market_kind) AS market_kind,
+                    string_agg(cb.outcome_name, ' + ' ORDER BY scl.leg_index) AS outcome_name,
+                    jsonb_agg(
+                      jsonb_build_object(
+                        'event_name', cb.event_name,
+                        'competition', cb.competition,
+                        'market_name', cb.market_name,
+                        'market_kind', cb.market_kind,
+                        'outcome_name', cb.outcome_name,
+                        'sport_key', cb.sport_key
+                      )
+                      ORDER BY scl.leg_index
+                    ) FILTER (WHERE cb.id IS NOT NULL) AS legs
+                  FROM simulated_coupons sc
+                  LEFT JOIN simulated_coupon_legs scl ON scl.simulated_coupon_id = sc.id
+                  LEFT JOIN candidate_bets cb ON cb.id = scl.candidate_id
+                  GROUP BY sc.id
+                ),
+                positions AS (
+                  SELECT
+                    'single'::text AS item_type,
+                    sb.id::text AS item_id,
+                    sb.created_at,
+                    COALESCE(cb.sport_key, 'unknown') AS sport_key,
+                    cb.event_name,
+                    cb.competition,
+                    cb.market_name,
+                    cb.market_kind,
+                    cb.outcome_name,
+                    sb.hypothetical_stake::float8 AS stake,
+                    sb.observed_decimal_odds::float8 AS odds,
+                    sb.status,
+                    sb.profit_loss::float8 AS profit_loss,
+                    '[]'::jsonb AS legs
+                  FROM simulated_bets sb
+                  LEFT JOIN candidate_bets cb ON cb.id = sb.candidate_id
+                  WHERE sb.created_at >= $1 AND sb.created_at < $2
+                  UNION ALL
+                  SELECT
+                    'coupon'::text AS item_type,
+                    sc.id::text AS item_id,
+                    sc.created_at,
+                    COALESCE(cd.sport_key, 'unknown') AS sport_key,
+                    cd.event_name,
+                    cd.competition,
+                    cd.market_name,
+                    cd.market_kind,
+                    cd.outcome_name,
+                    sc.hypothetical_stake::float8 AS stake,
+                    sc.observed_combined_decimal_odds::float8 AS odds,
+                    sc.status,
+                    sc.profit_loss::float8 AS profit_loss,
+                    COALESCE(cd.legs, '[]'::jsonb) AS legs
+                  FROM simulated_coupons sc
+                  LEFT JOIN coupon_details cd ON cd.id = sc.id
+                  WHERE sc.created_at >= $1 AND sc.created_at < $2
+                )
+                SELECT *
+                FROM positions
+                WHERE status <> 'duplicate_void'
+                ORDER BY created_at DESC
+                LIMIT 25
+                "#,
+                &[&window_start, &window_end],
+            )
+            .await?;
+        let recent: Vec<Value> = recent_rows
+            .iter()
+            .map(|row| {
+                let created_at: DateTime<Utc> = row.get("created_at");
+                json!({
+                    "item_type": row.get::<_, String>("item_type"),
+                    "item_id": row.get::<_, String>("item_id"),
+                    "created_at": created_at.to_rfc3339(),
+                    "sport_key": row.get::<_, String>("sport_key"),
+                    "event_name": row.get::<_, Option<String>>("event_name"),
+                    "competition": row.get::<_, Option<String>>("competition"),
+                    "market_name": row.get::<_, Option<String>>("market_name"),
+                    "market_kind": row.get::<_, Option<String>>("market_kind"),
+                    "outcome_name": row.get::<_, Option<String>>("outcome_name"),
+                    "stake": row.get::<_, f64>("stake"),
+                    "observed_odds": row.get::<_, Option<f64>>("odds"),
+                    "status": row.get::<_, String>("status"),
+                    "profit_loss": row.get::<_, Option<f64>>("profit_loss"),
+                    "legs": row.get::<_, Value>("legs")
+                })
+            })
+            .collect();
+
+        let observation_rows = client
+            .query(
+                r#"
+                SELECT observed_result, count(*)::int AS count
+                FROM settlement_observations
+                WHERE created_at >= $1 AND created_at < $2
+                GROUP BY observed_result
+                ORDER BY count DESC, observed_result
+                "#,
+                &[&window_start, &window_end],
+            )
+            .await?;
+        let observations: Vec<Value> = observation_rows
+            .iter()
+            .map(|row| {
+                json!({
+                    "observed_result": row.get::<_, String>("observed_result"),
+                    "count": row.get::<_, i32>("count")
+                })
+            })
+            .collect();
+
+        Ok(json!({
+            "paper_only": true,
+            "timezone": "Europe/Copenhagen",
+            "local_date": local_date,
+            "window": {
+                "start": window_start.to_rfc3339(),
+                "end": window_end.to_rfc3339()
+            },
+            "summary": {
+                "placed_count": summary_row.get::<_, i32>("placed_count"),
+                "single_count": summary_row.get::<_, i32>("single_count"),
+                "coupon_count": summary_row.get::<_, i32>("coupon_count"),
+                "settled_count": summary_row.get::<_, i32>("settled_count"),
+                "won_count": won_count,
+                "lost_count": lost_count,
+                "open_count": summary_row.get::<_, i32>("open_count"),
+                "awaiting_result_count": summary_row.get::<_, i32>("awaiting_result_count"),
+                "turnover": summary_row.get::<_, f64>("turnover"),
+                "open_exposure": summary_row.get::<_, f64>("open_exposure"),
+                "realized_profit_loss": summary_row.get::<_, f64>("realized_profit_loss"),
+                "hit_rate": hit_rate,
+                "average_odds": summary_row.get::<_, Option<f64>>("average_odds")
+            },
+            "by_sport": by_sport,
+            "recent": recent,
+            "settlement_observations": {
+                "items": observations
+            }
+        }))
+    }
+
     pub async fn strategy_played_summary(&self) -> anyhow::Result<Value> {
         let client = self.connect().await?;
         let by_strategy = client

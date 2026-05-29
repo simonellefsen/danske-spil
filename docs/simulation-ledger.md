@@ -225,6 +225,13 @@ Each scan records the live report into `simulation_performance_snapshots`.
 exposure, due-settlement workload, placement capacity, and simulated P/L across
 scan cycles instead of relying only on the current state.
 
+`/api/performance/today` exposes a Europe/Copenhagen local-day paper
+performance slice. It includes single and coupon counts, turnover, open
+exposure, realized P/L, hit rate, by-sport aggregates, the latest paper
+placements, and settlement observation counts for the same local-day window.
+The web UI renders this as the `Today` panel so operators can answer daily
+performance questions without querying Postgres directly.
+
 Auto-paper placement walks a wider ranked selection window than the per-scan
 placement limit. This lets it skip opportunities already represented by
 existing non-void simulated exposure and still fill the available paper slots

@@ -212,6 +212,10 @@ async fn get_handler(State(state): State<Arc<AppState>>, uri: OriginalUri) -> Re
             Err(error) => error_response(StatusCode::INTERNAL_SERVER_ERROR, error),
         },
         "/api/performance" => Json(state.service.performance_report().await).into_response(),
+        "/api/performance/today" => match state.service.store().paper_performance_today().await {
+            Ok(summary) => Json(summary).into_response(),
+            Err(error) => error_response(StatusCode::INTERNAL_SERVER_ERROR, error),
+        },
         "/api/performance/history" => Json(state.service.performance_history(25).await).into_response(),
         "/api/ledger/queue" => Json(state.service.advance_settlement_queue().await).into_response(),
         "/api/settlement/review" => {
