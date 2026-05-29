@@ -15,7 +15,7 @@ pub fn render_index(base_path: &str) -> String {
                     button { id: "run-result-agent", title: "Run the read-only result agent now. It discovers public result links and posts sanitized paper-settlement evidence without placing bets.", "Run result agent" }
                     button { id: "commit-settlements", title: "Apply the settlement outcomes you selected in Settlement review. Disabled until at least one row is selected.", disabled: true, "Commit selected settlements" }
                     button { id: "reflect-yesterday", title: "Record or refresh the Hermes-safe previous-day paper-performance reflection.", "Reflect yesterday" }
-                    button { id: "run-hermes", title: "Run one Hermes-safe loop cycle now: refresh the daily paper reflection and summarize current one-variable strategy proposals. This cannot control the browser or place bets.", "Run Hermes" }
+                    button { id: "run-hermes", title: "Run one Hermes-safe loop cycle now: refresh the daily paper reflection, refresh replay evidence for open one-variable experiments, and summarize promotion gates. This cannot control the browser or place bets.", "Run Hermes" }
                     button { id: "refresh", title: "Reload dashboard data without triggering a market scan.", "Refresh" }
                 }
             }
@@ -289,6 +289,15 @@ pub fn render_index(base_path: &str) -> String {
                                 th { "Status" } th { "Variable" } th { "Change" } th { "Evidence" } th {}
                             } }
                             tbody { id: "experiments" }
+                        }
+                    }
+                    section {
+                        h2 { title: "Latest scheduled or manual Hermes-safe cycle. Replay refresh updates evidence only; it does not place paper bets, change experiment status, or promote a baseline.", "Hermes cycle" }
+                        table {
+                            thead { tr {
+                                th { "Completed" } th { "Trigger" } th { "Reflection" } th { "Replay refresh" } th { "Safety" }
+                            } }
+                            tbody { id: "hermes-cycle" }
                         }
                     }
                     section {
@@ -1182,6 +1191,37 @@ function renderPromotionGates(gates) {
     $("hermes-promotion-gates").innerHTML = `<tr><td colspan="5" class="muted">No active experiments require promotion gating.</td></tr>`;
   }
 }
+function renderHermesCycle(hermes) {
+  const cycle = hermes.latest_cycle || null;
+  if (!cycle || !cycle.details) {
+    $("hermes-cycle").innerHTML = `<tr><td colspan="5" class="muted">No Hermes cycle has completed yet.</td></tr>`;
+    return;
+  }
+  const details = cycle.details || {};
+  const replay = details.replay_refresh || {};
+  const strategy = details.strategy || {};
+  const reflection = details.reflection || {};
+  const safety = details.safety || {};
+  const refreshed = replay.refreshed_count ?? 0;
+  const skipped = replay.skipped_count ?? 0;
+  const replayState = replay.error
+    ? `<span class="danger">${esc(replay.error)}</span>`
+    : `${esc(refreshed)} refreshed<br><span class="label">${esc(skipped)} skipped</span>`;
+  const safetyText = [
+    safety.browser_control === false ? "no browser" : "browser?",
+    safety.credential_access === false ? "no credentials" : "credentials?",
+    safety.real_money_placement === false ? "no real money" : "real money?"
+  ].join(", ");
+  $("hermes-cycle").innerHTML = `
+    <tr>
+      <td>${esc(cycle.created_at || "-")}<br><span class="label">${esc(cycle.id || "")}</span></td>
+      <td>${esc(details.trigger || "-")}<br><span class="label">${details.paper_only ? "paper-only" : "check safety"}</span></td>
+      <td>${esc(reflection.id || "-")}<br><span class="label">${esc(reflection.status || "")}</span></td>
+      <td>${replayState}<br><span class="label">experiments ${esc(strategy.experiment_count ?? 0)}, proposed ${esc(strategy.proposed_experiment_count ?? 0)}</span></td>
+      <td>${esc(safetyText)}</td>
+    </tr>
+  `;
+}
 function renderStrategy(strategy, gates) {
   const experiments = strategy.experiments || [];
   const gateByExperiment = new Map((gates || []).map((gate) => [gate.experiment_id, gate]));
@@ -1319,6 +1359,7 @@ async function load() {
   renderAuditEvents(auditEvents);
   const hermes = await json(api("/api/hermes"));
   renderStrategy(hermes.strategy || {}, hermes.promotion_gates || []);
+  renderHermesCycle(hermes);
   renderPromotionGates(hermes.promotion_gates || []);
   $("hermes").textContent = JSON.stringify(hermes, null, 2);
 }

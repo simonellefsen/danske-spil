@@ -7217,6 +7217,31 @@ impl Store {
         }))
     }
 
+    pub async fn latest_audit_event(&self, event_type: &str) -> anyhow::Result<Option<Value>> {
+        let client = self.connect().await?;
+        let row = client
+            .query_opt(
+                r#"
+                SELECT id, created_at, event_type, details
+                FROM audit_events
+                WHERE event_type = $1
+                ORDER BY created_at DESC
+                LIMIT 1
+                "#,
+                &[&event_type],
+            )
+            .await?;
+        Ok(row.map(|row| {
+            let created_at: DateTime<Utc> = row.get("created_at");
+            json!({
+                "id": row.get::<_, String>("id"),
+                "created_at": created_at,
+                "event_type": row.get::<_, String>("event_type"),
+                "details": row.get::<_, Value>("details")
+            })
+        }))
+    }
+
     async fn connect(&self) -> anyhow::Result<Client> {
         let database_url = self
             .database_url

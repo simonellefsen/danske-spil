@@ -216,9 +216,14 @@ impl GamblerService {
         let strategy = self.store.strategy_state().await?;
         let ledger_summary = self.store.ledger_summary().await.ok();
         let promotion_gates = hermes_promotion_gates(&strategy, ledger_summary.as_ref());
+        let latest_cycle = self
+            .store
+            .latest_audit_event("hermes_cycle_completed")
+            .await?
+            .map(compact_hermes_cycle_event);
         Ok(json!({
             "mode": "sanitized_reflection_and_one_variable_proposals",
-            "summary": "Hermes is integrated as a safe loop participant: it refreshes paper-only reflections, reads one-variable experiment proposals, and cannot control browsers, credentials, or real-money placement.",
+            "summary": "Hermes is integrated as a safe loop participant: it refreshes paper-only reflections and replay evidence, reads one-variable experiment proposals, and cannot control browsers, credentials, or real-money placement.",
             "loop": {
                 "enabled": self.settings.hermes_agent_enabled,
                 "reflection_interval_seconds": self.settings.hermes_reflection_interval_seconds,
@@ -241,7 +246,8 @@ impl GamblerService {
             "reflections": reflections,
             "strategy": strategy,
             "ledger_summary": ledger_summary,
-            "promotion_gates": promotion_gates
+            "promotion_gates": promotion_gates,
+            "latest_cycle": latest_cycle
         }))
     }
 
@@ -2240,6 +2246,79 @@ fn hermes_promotion_gates(strategy: &Value, ledger_summary: Option<&LedgerSummar
             })
         })
         .collect()
+}
+
+fn compact_hermes_cycle_event(event: Value) -> Value {
+    let details = event.get("details").cloned().unwrap_or_else(|| json!({}));
+    let reflection = details
+        .get("reflection")
+        .cloned()
+        .unwrap_or_else(|| json!({}));
+    let replay_refresh = details
+        .get("replay_refresh")
+        .cloned()
+        .unwrap_or_else(|| json!({}));
+    let refreshed = replay_refresh
+        .get("refreshed")
+        .and_then(Value::as_array)
+        .map(|items| {
+            items
+                .iter()
+                .map(|item| {
+                    let replay = item
+                        .get("replay_evidence")
+                        .cloned()
+                        .unwrap_or_else(|| json!({}));
+                    json!({
+                        "experiment_id": item.get("experiment_id").cloned().unwrap_or(Value::Null),
+                        "title": item.get("title").cloned().unwrap_or(Value::Null),
+                        "status": item.get("status").cloned().unwrap_or(Value::Null),
+                        "variable_name": replay.get("variable_name").cloned().unwrap_or(Value::Null),
+                        "candidate_count": replay.get("candidate_count").cloned().unwrap_or(Value::Null),
+                        "delta": replay.get("delta").cloned().unwrap_or(Value::Null),
+                        "replayed_at": replay.get("replayed_at").cloned().unwrap_or(Value::Null)
+                    })
+                })
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_default();
+    let skipped = replay_refresh
+        .get("skipped")
+        .and_then(Value::as_array)
+        .cloned()
+        .unwrap_or_default();
+    json!({
+        "id": event.get("id").cloned().unwrap_or(Value::Null),
+        "created_at": event.get("created_at").cloned().unwrap_or(Value::Null),
+        "event_type": event.get("event_type").cloned().unwrap_or(Value::Null),
+        "details": {
+            "enabled": details.get("enabled").cloned().unwrap_or(Value::Null),
+            "trigger": details.get("trigger").cloned().unwrap_or(Value::Null),
+            "paper_only": details.get("paper_only").cloned().unwrap_or(Value::Null),
+            "mode": details.get("mode").cloned().unwrap_or(Value::Null),
+            "reflection": {
+                "id": reflection.get("id").cloned().unwrap_or(Value::Null),
+                "title": reflection.get("title").cloned().unwrap_or(Value::Null),
+                "status": reflection.get("status").cloned().unwrap_or(Value::Null),
+                "created_at": reflection.get("created_at").cloned().unwrap_or(Value::Null),
+                "summary": reflection.get("summary").cloned().unwrap_or(Value::Null)
+            },
+            "replay_refresh": {
+                "paper_only": replay_refresh.get("paper_only").cloned().unwrap_or(Value::Null),
+                "does_not_place_paper_bets": replay_refresh.get("does_not_place_paper_bets").cloned().unwrap_or(Value::Null),
+                "does_not_change_experiment_status": replay_refresh.get("does_not_change_experiment_status").cloned().unwrap_or(Value::Null),
+                "requested_limit": replay_refresh.get("requested_limit").cloned().unwrap_or(Value::Null),
+                "refreshed_count": replay_refresh.get("refreshed_count").cloned().unwrap_or(Value::Null),
+                "skipped_count": replay_refresh.get("skipped_count").cloned().unwrap_or(Value::Null),
+                "refreshed": refreshed,
+                "skipped": skipped,
+                "error": replay_refresh.get("error").cloned().unwrap_or(Value::Null)
+            },
+            "strategy": details.get("strategy").cloned().unwrap_or(Value::Null),
+            "ledger_summary": details.get("ledger_summary").cloned().unwrap_or(Value::Null),
+            "safety": details.get("safety").cloned().unwrap_or(Value::Null)
+        }
+    })
 }
 
 #[cfg(test)]

@@ -168,6 +168,7 @@ Append-only timeline for project wiki maintenance. Use headings with the format 
 - The web UI now renders promotion gates and disables experiment promotion until the Hermes gate marks the experiment eligible.
 - The strategy review API now rejects promotion attempts when the Hermes promotion gate has not cleared.
 - Hermes cycles now refresh replay evidence for open strategy experiments before recomputing promotion gates; the refresh is paper-only and does not change experiment status or place bets.
+- `GET /api/hermes` and the web UI now expose the latest Hermes cycle audit summary, including reflection id, replay refresh counts, trigger, and safety posture.
 
 ## [2026-05-25] implementation | Candidate ranking and paper settlement POC
 
