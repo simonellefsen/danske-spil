@@ -23,6 +23,7 @@ The UI is not a marketing site. It is an operational dashboard for repeated revi
 - Open simulated placements, unresolved settlements, and settled paper results.
 - Recent paper plays, including both singles and multi-leg coupons with strategy, stake, observed odds, status, score, and confidence.
 - Browser-backed external result evidence, including source, event, score, confidence, and whether the evidence has driven a paper settlement.
+- Account-history coupon evidence shows preserved leg event names in the settlement observations and external evidence tables so coupon audit rows are readable without opening raw payload JSON.
 - All known external result links on settlement-review rows, with browser-evidence markers for sources such as Sofascore that block direct HTTP lookups.
 - Result-agent queue tasks for stale settlement rows, including source readiness, expected action, and whether public browser evidence or account-history evidence is needed.
 - Native hover tooltips on the main action buttons and result-review panels so operators can see what each control does without expanding the dashboard.

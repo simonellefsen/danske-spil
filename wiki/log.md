@@ -203,6 +203,7 @@ Append-only timeline for project wiki maintenance. Use headings with the format 
 - Preserved coupon leg event names in local account-history evidence payloads and synthesized a coupon-level event label when a request has no single event name.
 - Required all coupon legs to be visible in account-history context before emitting bookmaker evidence for a coupon.
 - Preserved account-history `event_names` through the API evidence template, stored evidence payload, and settlement notes so coupon-level audit rows keep their leg context.
+- Displayed preserved account-history coupon leg names in the settlement observations and external evidence tables.
 - Added `make account-history-agent-test` for the local parser test suite.
 
 ## [2026-05-25] implementation | Candidate ranking and paper settlement POC

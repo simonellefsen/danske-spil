@@ -884,6 +884,25 @@ function renderEntityAliases(aliases) {
     $("entity-aliases").innerHTML = `<tr><td colspan="5" class="muted">No aliases have been recorded yet.</td></tr>`;
   }
 }
+function evidenceEventNames(payload, fallbackEventName) {
+  const fallback = String(fallbackEventName || "").trim();
+  const names = Array.isArray(payload && payload.event_names)
+    ? payload.event_names.map((value) => String(value || "").trim()).filter(Boolean)
+    : [];
+  const unique = [];
+  const seen = new Set();
+  names.forEach((name) => {
+    const key = name.toLowerCase();
+    if (!seen.has(key)) {
+      seen.add(key);
+      unique.push(name);
+    }
+  });
+  if (!unique.length || (unique.length === 1 && unique[0] === fallback)) {
+    return "";
+  }
+  return unique.map(esc).join("<br>");
+}
 function renderSettlementObservations(observations) {
   const items = observations.items || [];
   $("settlement-observations").innerHTML = items.map((item) => {
@@ -892,13 +911,18 @@ function renderSettlementObservations(observations) {
     const itemLabel = item.item_type === "coupon"
       ? `${item.coupon_type || "coupon"} (${item.leg_count || 0})`
       : `${item.event_name || item.simulated_bet_id || ""}`;
-    const detail = item.item_type === "coupon"
+    const baseDetail = item.item_type === "coupon"
       ? item.strategy_id || ""
       : [item.market_name, item.outcome_name].filter(Boolean).join(" / ");
+    const eventNames = evidenceEventNames(item.payload || {}, item.event_name);
+    let detail = baseDetail ? `<span class="label">${esc(baseDetail)}</span>` : "";
+    if (eventNames) {
+      detail = `${detail ? `${detail}<br>` : ""}<span class="label">legs</span><br><span class="muted">${eventNames}</span>`;
+    }
     return `
       <tr>
         <td>${esc(item.created_at || "-")}</td>
-        <td><span class="pill">${esc(item.item_type)}</span> ${esc(itemLabel)}<br><span class="label">${esc(detail)}</span></td>
+        <td><span class="pill">${esc(item.item_type)}</span> ${esc(itemLabel)}${detail ? `<br>${detail}` : ""}</td>
         <td>${esc(item.observed_result)}<br><span class="muted">${esc(item.status || "")}</span></td>
         <td>${esc(item.source)}<br><span class="muted">${esc(sourceLabel)}</span></td>
         <td>${pct(item.confidence)}</td>
@@ -920,13 +944,14 @@ function renderExternalResultEvidence(evidence) {
     const resultLabel = scoreAvailable
       ? `${esc(item.home_score)} - ${esc(item.away_score)}`
       : esc(payload.settlement_result || payload.result_status_raw || "status-only");
+    const eventNames = evidenceEventNames(payload, item.event_name);
     const sourceUrl = item.source_url
       ? `<br><a class="muted" href="${esc(item.source_url)}" target="_blank" rel="noreferrer">${esc(hostLabel(item.source_url))}</a>`
       : "";
     return `
       <tr>
         <td>${esc(item.created_at || "-")}</td>
-        <td>${esc(item.event_name || "-")}<br><span class="label">${esc(item.home_name || "")} vs ${esc(item.away_name || "")}</span>${excerpt ? `<br><span class="muted">${esc(excerpt)}</span>` : ""}</td>
+        <td>${esc(item.event_name || "-")}<br><span class="label">${esc(item.home_name || "")} vs ${esc(item.away_name || "")}</span>${eventNames ? `<br><span class="label">legs</span><br><span class="muted">${eventNames}</span>` : ""}${excerpt ? `<br><span class="muted">${esc(excerpt)}</span>` : ""}</td>
         <td>${resultLabel}<br><span class="muted">${pct(item.confidence)}</span></td>
         <td>${esc(item.source_key || "-")}${sourceUrl}</td>
         <td><span class="${item.used_for_settlement ? "ok" : "muted"}">${item.used_for_settlement ? "settlement evidence" : "evidence only"}</span></td>
