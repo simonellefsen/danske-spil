@@ -152,6 +152,18 @@ event name, participant names, final score, confidence, and a short text
 excerpt. It must not include credentials, cookies, browser storage, full account
 pages, or hidden model reasoning.
 
+For `source_key=danskespil_account_history`, the endpoint also accepts
+status-only bookmaker evidence when a final score is not available or is not
+the right grading signal. The payload must include `bet_id` or
+`coupon_simulation_id`, `event_name`, and a deterministic
+`settlement_result`/`result_status` that normalizes to one of `won`, `lost`,
+`void`, `pushed`, `refunded`, `cancelled`, `abandoned`, `postponed`, or
+`unresolved`. Submit with `settle=false` for capture-only evidence; use
+`settle=true` only when the bookmaker account history is deterministic and the
+paper ledger should be reconciled from that truth. The stored evidence payload
+marks these rows with `mode=account_history_settlement_evidence` and
+`score_available=false` when no score was supplied.
+
 ## Current Boundary
 
 The current implementation creates the queue, supports configured public result
@@ -159,8 +171,8 @@ links, and automatically discovers Flashscore result links for common stale
 football, basketball, and tennis rows from the scheduled Rust worker. Winner and
 over/under markets can be graded from external final-score evidence. The
 account-history request endpoint and dashboard table now define the sanitized
-worklist for a local read-only Danske Spil account-history agent. The next
-implementation step is the local browser worker that consumes those requests,
-reads settled coupon history, and submits the same sanitized evidence payload,
-especially for cancellations, refunds, and markets that cannot be graded from a
-plain final score.
+worklist for a local read-only Danske Spil account-history agent, and the API
+can persist or apply status-only account-history evidence for cancellations,
+refunds, and markets that cannot be graded from a plain final score. The next
+implementation step is the local browser worker that consumes those requests
+and submits the sanitized payload automatically.

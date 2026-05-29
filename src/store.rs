@@ -3505,6 +3505,20 @@ impl Store {
             .or_else(|| payload.get("title"))
             .and_then(Value::as_str)
             .map(str::to_string);
+        if source_key == "danskespil_account_history" {
+            if let Some(settlement_result) = account_history_settlement_result(payload) {
+                return self
+                    .ingest_account_history_settlement_evidence(
+                        payload,
+                        source_key,
+                        source_record,
+                        source_url,
+                        title,
+                        settlement_result,
+                    )
+                    .await;
+            }
+        }
         let event_name = payload
             .get("event_name")
             .and_then(Value::as_str)
@@ -3855,6 +3869,294 @@ impl Store {
                 "home": recorded_home_aliases,
                 "away": recorded_away_aliases
             }
+        }))
+    }
+
+    async fn ingest_account_history_settlement_evidence(
+        &self,
+        payload: &Value,
+        source_key: &str,
+        source_record: Value,
+        source_url: Option<String>,
+        title: Option<String>,
+        settlement_result: &'static str,
+    ) -> anyhow::Result<Value> {
+        let event_name = payload
+            .get("event_name")
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .map(str::to_string)
+            .or_else(|| {
+                payload
+                    .get("event_names")
+                    .and_then(Value::as_array)
+                    .into_iter()
+                    .flatten()
+                    .filter_map(Value::as_str)
+                    .map(str::trim)
+                    .find(|value| !value.is_empty())
+                    .map(str::to_string)
+            })
+            .or_else(|| {
+                title
+                    .as_deref()
+                    .and_then(parse_score_title)
+                    .map(|(home, away, _, _)| format!("{home} - {away}"))
+            })
+            .ok_or_else(|| anyhow!("event_name is required for account-history evidence"))?;
+        let parsed_title = title.as_deref().and_then(parse_score_title);
+        let (event_home, event_away) = event_name
+            .split_once(" - ")
+            .map(|(home, away)| (home.trim().to_string(), away.trim().to_string()))
+            .unwrap_or_else(|| {
+                parsed_title
+                    .as_ref()
+                    .map(|(home, away, _, _)| (home.clone(), away.clone()))
+                    .unwrap_or_else(|| {
+                        (
+                            "bookmaker_account_history".to_string(),
+                            "paper_selection".to_string(),
+                        )
+                    })
+            });
+        let home_name = payload
+            .get("home_name")
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .map(str::to_string)
+            .unwrap_or(event_home);
+        let away_name = payload
+            .get("away_name")
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .map(str::to_string)
+            .unwrap_or(event_away);
+        let home_score = json_i32(payload.get("home_score")).unwrap_or(0);
+        let away_score = json_i32(payload.get("away_score")).unwrap_or(0);
+        let confidence = payload
+            .get("confidence")
+            .and_then(Value::as_f64)
+            .or_else(|| source_record.get("reliability").and_then(Value::as_f64))
+            .unwrap_or(0.95)
+            .clamp(0.0, 1.0);
+        let settle = payload
+            .get("settle")
+            .and_then(Value::as_bool)
+            .unwrap_or(false);
+        let bet_id = payload
+            .get("bet_id")
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .map(str::to_string);
+        let coupon_id = payload
+            .get("coupon_simulation_id")
+            .or_else(|| payload.get("coupon_id"))
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .map(str::to_string);
+        if bet_id.is_none() && coupon_id.is_none() {
+            return Err(anyhow!(
+                "bet_id or coupon_simulation_id is required for account-history settlement evidence"
+            ));
+        }
+        let result_status_raw = account_history_raw_status(payload);
+        let evidence_id = new_id();
+        let evidence_payload = json!({
+            "mode": "account_history_settlement_evidence",
+            "source_key": source_key,
+            "source_record": source_record,
+            "source_url": source_url,
+            "source_title": title,
+            "event_name": event_name,
+            "home_name": home_name,
+            "away_name": away_name,
+            "home_score": home_score,
+            "away_score": away_score,
+            "score_available": payload.get("home_score").is_some() && payload.get("away_score").is_some(),
+            "settlement_result": settlement_result,
+            "result_status_raw": result_status_raw,
+            "bet_id": bet_id,
+            "coupon_simulation_id": coupon_id,
+            "market_name": payload.get("market_name").cloned().unwrap_or(Value::Null),
+            "outcome_name": payload.get("outcome_name").cloned().unwrap_or(Value::Null),
+            "sport_key": payload.get("sport_key").cloned().unwrap_or(Value::Null),
+            "gender_scope": payload.get("gender_scope").or_else(|| payload.get("gender")).cloned().unwrap_or(Value::Null),
+            "browser_automation": payload.get("browser_automation").cloned().unwrap_or(Value::Null),
+            "browser_session": payload.get("browser_session").cloned().unwrap_or(Value::Null),
+            "raw_text_excerpt": payload.get("raw_text_excerpt").cloned().unwrap_or(Value::Null),
+            "paper_only": true
+        });
+        let client = self.connect().await?;
+        client
+            .execute(
+                r#"
+                INSERT INTO external_result_evidence (
+                  id, source_key, source_url, event_name, home_name, away_name,
+                  home_score, away_score, confidence, payload
+                )
+                VALUES ($1,$2,$3,$4,$5,$6,$7,$8,($9::float8)::numeric,$10)
+                "#,
+                &[
+                    &evidence_id,
+                    &source_key,
+                    &source_url,
+                    &event_name,
+                    &home_name,
+                    &away_name,
+                    &home_score,
+                    &away_score,
+                    &confidence,
+                    &evidence_payload,
+                ],
+            )
+            .await?;
+        drop(client);
+
+        let mut settled = Vec::new();
+        let mut skipped = Vec::new();
+        if let Some(bet_id) = bet_id.as_deref() {
+            if settle {
+                let notes = json!({
+                    "mode": "account_history_settlement_evidence",
+                    "external_result_evidence_id": evidence_id,
+                    "source_key": source_key,
+                    "source_url": source_url,
+                    "source_title": title,
+                    "event_name": event_name,
+                    "settlement_result": settlement_result,
+                    "result_status_raw": result_status_raw,
+                    "paper_only": true
+                })
+                .to_string();
+                match self
+                    .settle_simulated_bet(bet_id, settlement_result, source_key, confidence, &notes)
+                    .await
+                {
+                    Ok(item) => {
+                        let audit = json!({
+                            "external_result_evidence_id": evidence_id,
+                            "bet_id": item.id,
+                            "event_name": event_name,
+                            "result": settlement_result,
+                            "status": item.status,
+                            "source_key": source_key,
+                            "source_url": source_url,
+                            "paper_only": true
+                        });
+                        self.record_audit("paper_bet_settled_from_account_history", audit.clone())
+                            .await
+                            .ok();
+                        settled.push(audit);
+                    }
+                    Err(error) => skipped.push(json!({
+                        "bet_id": bet_id,
+                        "source_key": source_key,
+                        "reason": "settlement_write_failed",
+                        "error": error.to_string()
+                    })),
+                }
+            } else {
+                skipped.push(json!({
+                    "bet_id": bet_id,
+                    "mapped_result": settlement_result,
+                    "reason": "settle_false"
+                }));
+            }
+        }
+        if let Some(coupon_id) = coupon_id.as_deref() {
+            if settle {
+                let notes = json!({
+                    "mode": "account_history_settlement_evidence",
+                    "external_result_evidence_id": evidence_id,
+                    "source_key": source_key,
+                    "source_url": source_url,
+                    "source_title": title,
+                    "event_name": event_name,
+                    "settlement_result": settlement_result,
+                    "result_status_raw": result_status_raw,
+                    "coupon_level": true,
+                    "paper_only": true
+                })
+                .to_string();
+                match self
+                    .settle_simulated_coupon(
+                        coupon_id,
+                        settlement_result,
+                        source_key,
+                        confidence,
+                        &notes,
+                    )
+                    .await
+                {
+                    Ok(item) => {
+                        let status = item
+                            .get("status")
+                            .and_then(Value::as_str)
+                            .unwrap_or_default();
+                        let audit = json!({
+                            "external_result_evidence_id": evidence_id,
+                            "coupon_simulation_id": coupon_id,
+                            "event_name": event_name,
+                            "result": settlement_result,
+                            "status": status,
+                            "source_key": source_key,
+                            "source_url": source_url,
+                            "coupon_level": true,
+                            "paper_only": true
+                        });
+                        self.record_audit(
+                            "paper_coupon_settled_from_account_history",
+                            audit.clone(),
+                        )
+                        .await
+                        .ok();
+                        settled.push(audit);
+                    }
+                    Err(error) => skipped.push(json!({
+                        "coupon_simulation_id": coupon_id,
+                        "source_key": source_key,
+                        "reason": "settlement_write_failed",
+                        "error": error.to_string()
+                    })),
+                }
+            } else {
+                skipped.push(json!({
+                    "coupon_simulation_id": coupon_id,
+                    "mapped_result": settlement_result,
+                    "reason": "settle_false"
+                }));
+            }
+        }
+        if !settled.is_empty() {
+            let client = self.connect().await?;
+            client
+                .execute(
+                    "UPDATE external_result_evidence SET used_for_settlement = true WHERE id = $1",
+                    &[&evidence_id],
+                )
+                .await?;
+        }
+
+        Ok(json!({
+            "paper_only": true,
+            "mode": "account_history_settlement_evidence",
+            "external_result_evidence_id": evidence_id,
+            "source_key": source_key,
+            "source_url": source_url,
+            "event_name": event_name,
+            "score_available": payload.get("home_score").is_some() && payload.get("away_score").is_some(),
+            "settlement_result": settlement_result,
+            "result_status_raw": result_status_raw,
+            "matched_item_count": settled.len() + skipped.len(),
+            "settled_count": settled.len(),
+            "skipped_count": skipped.len(),
+            "settled": settled,
+            "skipped": skipped
         }))
     }
 
@@ -8020,6 +8322,84 @@ fn json_i32(value: Option<&Value>) -> Option<i32> {
     })
 }
 
+fn account_history_raw_status(payload: &Value) -> Option<String> {
+    [
+        "settlement_result",
+        "result",
+        "result_status",
+        "status",
+        "bookmaker_status",
+    ]
+    .into_iter()
+    .find_map(|key| {
+        payload
+            .get(key)
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .map(str::to_string)
+    })
+}
+
+fn account_history_settlement_result(payload: &Value) -> Option<&'static str> {
+    let raw = account_history_raw_status(payload)?;
+    let normalized = raw
+        .trim()
+        .to_ascii_lowercase()
+        .replace(['-', '_', '.', '/'], " ");
+    let words: HashSet<&str> = normalized.split_whitespace().collect();
+    if words.contains("won")
+        || words.contains("win")
+        || words.contains("vundet")
+        || words.contains("gevinst")
+        || normalized.contains("settled won")
+        || normalized.contains("paid out")
+    {
+        return Some("won");
+    }
+    if words.contains("lost")
+        || words.contains("loss")
+        || words.contains("tabt")
+        || normalized.contains("settled lost")
+    {
+        return Some("lost");
+    }
+    if words.contains("void") || words.contains("voided") || words.contains("annulled") {
+        return Some("void");
+    }
+    if words.contains("push")
+        || words.contains("pushed")
+        || normalized.contains("stake returned")
+        || normalized.contains("stake return")
+    {
+        return Some("pushed");
+    }
+    if words.contains("refund")
+        || words.contains("refunded")
+        || words.contains("refunderet")
+        || normalized.contains("money back")
+    {
+        return Some("refunded");
+    }
+    if words.contains("cancelled")
+        || words.contains("canceled")
+        || words.contains("cancel")
+        || words.contains("aflyst")
+    {
+        return Some("cancelled");
+    }
+    if words.contains("abandoned") || words.contains("abandon") {
+        return Some("abandoned");
+    }
+    if words.contains("postponed") || words.contains("postpone") || words.contains("udsat") {
+        return Some("postponed");
+    }
+    if words.contains("unresolved") || words.contains("pending") || words.contains("unknown") {
+        return Some("unresolved");
+    }
+    None
+}
+
 fn distinct_events(candidates: &[&CandidateBet]) -> bool {
     let mut seen = HashSet::new();
     for candidate in candidates {
@@ -9101,6 +9481,30 @@ mod tests {
         assert_eq!(
             parsed,
             ("Notts Co".to_string(), "Salford".to_string(), 3, 0)
+        );
+    }
+
+    #[test]
+    fn account_history_result_normalizes_bookmaker_statuses() {
+        assert_eq!(
+            account_history_settlement_result(&json!({"settlement_result": "settled_won"})),
+            Some("won")
+        );
+        assert_eq!(
+            account_history_settlement_result(&json!({"result_status": "settled-lost"})),
+            Some("lost")
+        );
+        assert_eq!(
+            account_history_settlement_result(&json!({"status": "stake returned"})),
+            Some("pushed")
+        );
+        assert_eq!(
+            account_history_settlement_result(&json!({"bookmaker_status": "refunderet"})),
+            Some("refunded")
+        );
+        assert_eq!(
+            account_history_settlement_result(&json!({"status": "manual review required"})),
+            None
         );
     }
 

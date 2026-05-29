@@ -904,6 +904,10 @@ function renderExternalResultEvidence(evidence) {
     const excerpt = payload.raw_text_excerpt
       ? String(payload.raw_text_excerpt).slice(0, 180)
       : "";
+    const scoreAvailable = payload.score_available !== false;
+    const resultLabel = scoreAvailable
+      ? `${esc(item.home_score)} - ${esc(item.away_score)}`
+      : esc(payload.settlement_result || payload.result_status_raw || "status-only");
     const sourceUrl = item.source_url
       ? `<br><a class="muted" href="${esc(item.source_url)}" target="_blank" rel="noreferrer">${esc(hostLabel(item.source_url))}</a>`
       : "";
@@ -911,7 +915,7 @@ function renderExternalResultEvidence(evidence) {
       <tr>
         <td>${esc(item.created_at || "-")}</td>
         <td>${esc(item.event_name || "-")}<br><span class="label">${esc(item.home_name || "")} vs ${esc(item.away_name || "")}</span>${excerpt ? `<br><span class="muted">${esc(excerpt)}</span>` : ""}</td>
-        <td>${esc(item.home_score)} - ${esc(item.away_score)}<br><span class="muted">${pct(item.confidence)}</span></td>
+        <td>${resultLabel}<br><span class="muted">${pct(item.confidence)}</span></td>
         <td>${esc(item.source_key || "-")}${sourceUrl}</td>
         <td><span class="${item.used_for_settlement ? "ok" : "muted"}">${item.used_for_settlement ? "settlement evidence" : "evidence only"}</span></td>
       </tr>

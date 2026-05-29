@@ -176,6 +176,12 @@ Append-only timeline for project wiki maintenance. Use headings with the format 
 - Added a web UI account-history requests table showing the paper row, expected bookmaker truth, and allowed evidence contract.
 - Documented that the account-history path must not store credentials, cookies, browser storage, payment data, Spil-ID/MitID payloads, or full account pages.
 
+## [2026-05-29] implementation | account-history settlement evidence
+
+- Added status-only account-history evidence ingestion for bookmaker won, lost, void, pushed, refund, cancellation, abandonment, postponement, and unresolved states.
+- The API can now persist `mode=account_history_settlement_evidence` rows without final scores and can reconcile a paper bet or coupon when `settle=true`.
+- The web UI external-evidence table now displays the bookmaker settlement state instead of a placeholder score for status-only account-history evidence.
+
 ## [2026-05-25] implementation | Candidate ranking and paper settlement POC
 
 - Added `poc_ranker_v1` candidate scoring fields: implied probability, model probability, expected value, confidence, score, risk flags, and feature snapshot.

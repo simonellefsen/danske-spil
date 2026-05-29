@@ -133,6 +133,12 @@ rtk python3 scripts/result_agent.py --api http://127.0.0.1:18083 --browser-only 
 The Danske Spil account-history path should be implemented as the same kind of
 local read-only browser agent: use an authenticated operator session, inspect
 settled coupon/account history, and post only sanitized settlement evidence.
+Account-history evidence may be status-only when the bookmaker view says the
+paper row was won, lost, voided, pushed, refunded, cancelled, abandoned,
+postponed, or still unresolved. Those payloads still use
+`POST /api/settlement/external-evidence`, must include `bet_id` or
+`coupon_simulation_id`, and should default to `settle=false` until the local
+browser agent has deterministic bookmaker truth.
 
 Every settlement observation should record:
 
@@ -160,6 +166,7 @@ Current POC status:
 - Automated review refreshes record non-grading `settlement_lookup_attempts` rows for due paper singles and coupons, throttled by `GAMBLER_SETTLEMENT_LOOKUP_COOLDOWN_MINUTES` so UI refreshes do not spam duplicate checks. These rows capture the lookup source, recommendation, current event/outcome state, and the approved settlement source policy so the 15-minute recheck loop is auditable even before automated grading exists.
 - Overdue paper singles that are more than 2 hours past the sport-specific expected event finish can be auto-settled only for winner markets when a configured external source URL exposes a parseable final score. For football this means kickoff plus roughly 130 minutes, then another 2 hours before external auto-checking. The settlement observation and `paper_bet_auto_settled_external` audit event preserve the source key, URL, page title, score, selected outcome, and simulated result used as truth.
 - Browser-backed source evidence is stored separately in `external_result_evidence` and may create `paper_bet_settled_from_external_evidence` audit events when it drives a deterministic paper settlement.
+- Danske Spil account-history evidence can be stored as `mode=account_history_settlement_evidence`; if `settle=true`, it can reconcile single paper bets or coupon-level simulations from the bookmaker settlement state without requiring a final-score scrape.
 - Strategy selection is stored in `strategy_candidate_decisions`; rejected candidates are preserved for review but blocked from paper-ledger placement.
 - Selected candidates can be auto-paper-placed into `simulated_bets` with per-scan and max-open-exposure caps. This is idempotent per candidate and remains simulation-only.
 - Multi-leg coupons are auto-paper-placed only after the active strategy baseline enables the coupon mode and provider accumulator support is verified from observed data.
