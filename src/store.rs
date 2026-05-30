@@ -3715,12 +3715,12 @@ impl Store {
                 WHERE sb.status IN ('awaiting_result', 'unresolved', 'postponed')
                   AND (
                     ($1::text IS NOT NULL AND sb.id = $1)
-                    OR ($1::text IS NULL AND cb.event_name = $2)
+                    OR ($1::text IS NULL AND cb.event_name = ANY($2))
                   )
                 ORDER BY sb.created_at ASC
                 LIMIT 25
                 "#,
-                &[&bet_id_filter, &event_name],
+                &[&bet_id_filter, &event_name_variants(&event_name)],
             )
             .await?;
         drop(client);
@@ -9402,7 +9402,7 @@ fn external_result_links_for_event(
     source_policy: &Value,
     event_name: &str,
 ) -> Vec<ExternalResultLink> {
-    let event_key = normalize_match_name(event_name);
+    let event_keys = normalized_event_name_variants(event_name);
     let mut links: Vec<ExternalResultLink> = source_policy
         .get("items")
         .and_then(Value::as_array)
@@ -9436,7 +9436,7 @@ fn external_result_links_for_event(
                 .flatten()
                 .filter_map(|item| {
                     let known_event = item.get("event_name").and_then(Value::as_str)?;
-                    if normalize_match_name(known_event) != event_key {
+                    if !event_keys.contains(&normalize_match_name(known_event)) {
                         return None;
                     }
                     Some(ExternalResultLink {
@@ -9593,7 +9593,12 @@ fn validate_external_result_url(source_key: &str, source_url: &str) -> anyhow::R
         .ok_or_else(|| anyhow!("external result URL must include a host"))?
         .to_ascii_lowercase();
     let allowed = match source_key {
-        "flashscore_results" => host == "flashscore.com" || host.ends_with(".flashscore.com"),
+        "flashscore_results" => {
+            host == "flashscore.com"
+                || host.ends_with(".flashscore.com")
+                || host == "flashscore.dk"
+                || host.ends_with(".flashscore.dk")
+        }
         "sofascore_results" => host == "sofascore.com" || host.ends_with(".sofascore.com"),
         "xscores_results" => host == "xscores.com" || host.ends_with(".xscores.com"),
         "livescore_results" => host == "livescore.com" || host.ends_with(".livescore.com"),
@@ -9612,6 +9617,28 @@ fn event_aliases_from_name(event_name: &str) -> (Vec<String>, Vec<String>) {
         .split_once(" - ")
         .map(|(home, away)| (vec![home.trim().to_string()], vec![away.trim().to_string()]))
         .unwrap_or_else(|| (Vec::new(), Vec::new()))
+}
+
+fn reversed_event_name(event_name: &str) -> Option<String> {
+    event_name
+        .split_once(" - ")
+        .map(|(home, away)| format!("{} - {}", away.trim(), home.trim()))
+}
+
+fn event_name_variants(event_name: &str) -> Vec<String> {
+    dedup_strings(
+        std::iter::once(event_name.to_string())
+            .chain(reversed_event_name(event_name))
+            .collect(),
+    )
+}
+
+fn normalized_event_name_variants(event_name: &str) -> HashSet<String> {
+    event_name_variants(event_name)
+        .into_iter()
+        .map(|value| normalize_match_name(&value))
+        .filter(|value| !value.is_empty())
+        .collect()
 }
 
 fn dedup_strings(values: Vec<String>) -> Vec<String> {
@@ -9719,7 +9746,10 @@ async fn fetch_flashscore_match_result(
         .ok_or_else(|| anyhow!("FlashScore match feed did not expose a home score"))?;
     let away_score = flashscore_score_field(&fields, &["DF", "DH", "DS"])
         .ok_or_else(|| anyhow!("FlashScore match feed did not expose an away score"))?;
-    let (home_name, away_name) = external_link_participants(link);
+    let (home_name, away_name) = fetch_flashscore_page_participants(http, &link.url)
+        .await?
+        .or_else(|| source_url_participant_names(link))
+        .unwrap_or_else(|| external_link_participants(link));
     let title = format!("{home_name} - {away_name} {home_score}:{away_score}");
     Ok(Some(ExternalMatchResult {
         source_key: link.source_key.clone(),
@@ -9731,6 +9761,24 @@ async fn fetch_flashscore_match_result(
         away_score,
         confidence: 0.86,
     }))
+}
+
+async fn fetch_flashscore_page_participants(
+    http: &HttpClient,
+    source_url: &str,
+) -> anyhow::Result<Option<(String, String)>> {
+    let html = http
+        .get(source_url)
+        .send()
+        .await
+        .with_context(|| format!("fetch FlashScore match page {source_url}"))?
+        .error_for_status()
+        .with_context(|| format!("FlashScore match page returned error {source_url}"))?
+        .text()
+        .await?;
+    Ok(extract_meta_content(&html, "og:title")
+        .or_else(|| extract_title(&html))
+        .and_then(|title| parse_flashscore_title_participants(&title)))
 }
 
 fn parse_xscores_match_result(
@@ -9819,8 +9867,8 @@ fn collapse_whitespace(value: &str) -> String {
 }
 
 fn flashscore_match_id(url: &str) -> Option<String> {
-    Url::parse(url)
-        .ok()?
+    let parsed = Url::parse(url).ok()?;
+    parsed
         .query_pairs()
         .find_map(|(key, value)| {
             if key == "mid" && !value.trim().is_empty() {
@@ -9828,6 +9876,18 @@ fn flashscore_match_id(url: &str) -> Option<String> {
             } else {
                 None
             }
+        })
+        .or_else(|| {
+            parsed
+                .path_segments()?
+                .filter_map(|segment| segment.rsplit_once('-').map(|(_, id)| id.to_string()))
+                .filter(|id| {
+                    id.len() >= 6
+                        && id
+                            .chars()
+                            .all(|character| character.is_ascii_alphanumeric())
+                })
+                .next_back()
         })
 }
 
@@ -9972,18 +10032,56 @@ fn grade_winner_outcome(
     link: &ExternalResultLink,
     evidence: &ExternalMatchResult,
 ) -> Option<&'static str> {
-    if evidence.home_score == evidence.away_score {
+    let evidence_home_is_link_home = alias_matches(&evidence.home_name, &link.home_aliases);
+    let evidence_away_is_link_away = alias_matches(&evidence.away_name, &link.away_aliases);
+    let evidence_home_is_link_away = alias_matches(&evidence.home_name, &link.away_aliases);
+    let evidence_away_is_link_home = alias_matches(&evidence.away_name, &link.home_aliases);
+    let reversed_source_order = evidence_home_is_link_away && evidence_away_is_link_home;
+    let normal_source_order = evidence_home_is_link_home && evidence_away_is_link_away;
+
+    let (home_score, away_score, home_aliases, away_aliases) = if reversed_source_order {
+        let mut home_aliases = link.home_aliases.clone();
+        home_aliases.push(evidence.away_name.clone());
+        let mut away_aliases = link.away_aliases.clone();
+        away_aliases.push(evidence.home_name.clone());
+        (
+            evidence.away_score,
+            evidence.home_score,
+            home_aliases,
+            away_aliases,
+        )
+    } else if normal_source_order {
+        let mut home_aliases = link.home_aliases.clone();
+        home_aliases.push(evidence.home_name.clone());
+        let mut away_aliases = link.away_aliases.clone();
+        away_aliases.push(evidence.away_name.clone());
+        (
+            evidence.home_score,
+            evidence.away_score,
+            home_aliases,
+            away_aliases,
+        )
+    } else {
+        let mut home_aliases = link.home_aliases.clone();
+        home_aliases.push(evidence.home_name.clone());
+        let mut away_aliases = link.away_aliases.clone();
+        away_aliases.push(evidence.away_name.clone());
+        (
+            evidence.home_score,
+            evidence.away_score,
+            home_aliases,
+            away_aliases,
+        )
+    };
+
+    if home_score == away_score {
         return Some(if is_draw_outcome(outcome_name) {
             "won"
         } else {
             "lost"
         });
     }
-    let home_won = evidence.home_score > evidence.away_score;
-    let mut home_aliases = link.home_aliases.clone();
-    home_aliases.push(evidence.home_name.clone());
-    let mut away_aliases = link.away_aliases.clone();
-    away_aliases.push(evidence.away_name.clone());
+    let home_won = home_score > away_score;
     if home_won && alias_matches(outcome_name, &home_aliases) {
         return Some("won");
     }
@@ -10048,6 +10146,41 @@ fn parse_score_title(title: &str) -> Option<(String, String, i32, i32)> {
         home_score.trim().parse().ok()?,
         away_score.trim().parse().ok()?,
     ))
+}
+
+fn parse_flashscore_title_participants(title: &str) -> Option<(String, String)> {
+    let clean = html_unescape(title);
+    let head = clean
+        .split('|')
+        .next()
+        .unwrap_or(clean.as_str())
+        .trim()
+        .to_string();
+    let without_date = head
+        .split_whitespace()
+        .take_while(|part| !looks_like_date(part))
+        .collect::<Vec<_>>()
+        .join(" ");
+    [" vs ", " - ", " v "].iter().find_map(|separator| {
+        without_date.split_once(separator).and_then(|(home, away)| {
+            let home = home.trim();
+            let away = away.trim();
+            if home.is_empty() || away.is_empty() {
+                None
+            } else {
+                Some((home.to_string(), away.to_string()))
+            }
+        })
+    })
+}
+
+fn looks_like_date(value: &str) -> bool {
+    let trimmed = value.trim_matches(|character: char| !character.is_ascii_digit());
+    let parts = trimmed.split('/').collect::<Vec<_>>();
+    parts.len() == 3
+        && parts.iter().all(|part| {
+            !part.is_empty() && part.chars().all(|character| character.is_ascii_digit())
+        })
 }
 
 fn extract_meta_content(html: &str, property: &str) -> Option<String> {
@@ -10301,6 +10434,19 @@ mod tests {
     }
 
     #[test]
+    fn parses_flashscore_danish_path_match_id_and_title_participants() {
+        let url = "https://www.flashscore.dk/kamp/fodbold/andorra-dnO5z404/irak-K8aAGt6r/";
+
+        assert_eq!(flashscore_match_id(url).as_deref(), Some("K8aAGt6r"));
+        assert_eq!(
+            parse_flashscore_title_participants(
+                "Irak vs Andorra 29/05/2026 | Fodbold - Flashscore"
+            ),
+            Some(("Irak".to_string(), "Andorra".to_string()))
+        );
+    }
+
+    #[test]
     fn parses_xscores_html_and_known_result_score() {
         let link = ExternalResultLink {
             source_key: "xscores_results".to_string(),
@@ -10391,6 +10537,11 @@ mod tests {
         )
         .is_ok());
         assert!(validate_external_result_url(
+            "flashscore_results",
+            "https://www.flashscore.dk/kamp/fodbold/andorra-dnO5z404/irak-K8aAGt6r/"
+        )
+        .is_ok());
+        assert!(validate_external_result_url(
             "sofascore_results",
             "https://www.flashscore.com/match/example"
         )
@@ -10398,6 +10549,33 @@ mod tests {
         assert!(
             validate_external_result_url("flashscore_results", "file:///tmp/result.html").is_err()
         );
+    }
+
+    #[test]
+    fn external_result_links_match_reversed_neutral_event_names() {
+        let policy = json!({
+            "items": [
+                {
+                    "source_key": "flashscore_results",
+                    "payload": {
+                        "known_matches": [
+                            {
+                                "event_name": "Irak - Andorra",
+                                "url": "https://www.flashscore.dk/kamp/fodbold/andorra-dnO5z404/irak-K8aAGt6r/",
+                                "home_aliases": ["Irak", "Iraq"],
+                                "away_aliases": ["Andorra"]
+                            }
+                        ]
+                    }
+                }
+            ]
+        });
+
+        let links = external_result_links_for_event(&policy, "Andorra - Irak");
+
+        assert_eq!(links.len(), 1);
+        assert_eq!(links[0].home_aliases, vec!["Irak", "Iraq"]);
+        assert_eq!(links[0].away_aliases, vec!["Andorra"]);
     }
 
     #[test]
@@ -10436,6 +10614,40 @@ mod tests {
         );
         assert_eq!(
             grade_winner_outcome("Uafgjort", &link, &evidence),
+            Some("lost")
+        );
+    }
+
+    #[test]
+    fn grades_neutral_friendly_when_source_order_is_reversed() {
+        let link = ExternalResultLink {
+            source_key: "flashscore_results".to_string(),
+            url: "https://www.flashscore.dk/kamp/fodbold/andorra-dnO5z404/irak-K8aAGt6r/"
+                .to_string(),
+            sport_key: Some("football".to_string()),
+            gender_scope: None,
+            home_aliases: vec!["Andorra".to_string()],
+            away_aliases: vec!["Irak".to_string(), "Iraq".to_string()],
+            requires_browser_automation: false,
+            known_home_score: None,
+            known_away_score: None,
+            known_result_status: None,
+            known_result_notes: None,
+        };
+        let evidence = ExternalMatchResult {
+            source_key: link.source_key.clone(),
+            url: link.url.clone(),
+            title: "Irak - Andorra 1:0".to_string(),
+            home_name: "Irak".to_string(),
+            away_name: "Andorra".to_string(),
+            home_score: 1,
+            away_score: 0,
+            confidence: 0.86,
+        };
+
+        assert_eq!(grade_winner_outcome("Irak", &link, &evidence), Some("won"));
+        assert_eq!(
+            grade_winner_outcome("Andorra", &link, &evidence),
             Some("lost")
         );
     }

@@ -155,8 +155,14 @@ where a participant feed exposes the event row and final score. Participant
 lookup expands common aliases before search, including Danish country names,
 Flashscore basketball naming differences, tennis first/last-name order, and
 gender-scoped team variants. The feed fetch falls back to Flashscore's stable
-`x-fsign` value when current pages do not expose a page-local `feed_sign`. If a
-row still returns `flashscore_discovery_no_match`, the next step is to add
+`x-fsign` value when current pages do not expose a page-local `feed_sign`.
+Friendly and neutral-ground football matches can be listed with arbitrary team
+order across providers. Settlement matching therefore treats `A - B` and
+`B - A` as the same external-result lookup target, accepts localized
+Flashscore domains, and orients winner-market grading by participant aliases
+before applying the final score. This prevents a source-side `Irak - Andorra
+1:0` result from being graded as if it were event-side `Andorra - Irak 1:0`.
+If a row still returns `flashscore_discovery_no_match`, the next step is to add
 another source adapter or a sport-specific pagination path, not an operator
 prompt.
 

@@ -300,3 +300,9 @@ Append-only timeline for project wiki maintenance. Use headings with the format 
 
 - Updated motorsports coverage to derive an effective series from stored competition, class, and event names when older snapshots still have `unknown` series context.
 - Added recovered versus missing series counts to the web UI so real adapter gaps are separated from legacy classification gaps.
+
+## [2026-05-30] implementation | Neutral friendly result orientation
+
+- Updated external result matching so reversed neutral-ground event names such as `Andorra - Irak` and `Irak - Andorra` can match the same public result link.
+- Updated winner-market grading to orient source-side evidence by participant aliases before applying the final score, preventing reversed Flashscore order from marking the wrong team as winner.
+- Allowed localized Flashscore domains and path-derived match ids for public result links such as `flashscore.dk`.
