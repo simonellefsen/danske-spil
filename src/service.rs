@@ -2204,24 +2204,29 @@ async fn flashscore_discover_tennis_doubles(
 
     let event_id = row_text(&row, "AA").unwrap_or_default();
     let stage = row_text(&row, "AC").unwrap_or_default();
-    let source_home = first_matching_participant(
-        &home_candidates,
-        &participant_ids(row_text(&row, "PX").as_deref()),
-    )
-    .or_else(|| first_candidate(&home_candidates))
-    .cloned();
-    let source_away = first_matching_participant(
-        &away_candidates,
-        &participant_ids(row_text(&row, "PY").as_deref()),
-    )
-    .or_else(|| first_candidate(&away_candidates))
-    .cloned();
+    let (matched_home_ids, matched_away_ids) = oriented_doubles_side_ids(&row, reversed_side);
+    let source_home = first_matching_participant(&home_candidates, &matched_home_ids)
+        .or_else(|| first_candidate(&home_candidates))
+        .cloned();
+    let source_away = first_matching_participant(&away_candidates, &matched_away_ids)
+        .or_else(|| first_candidate(&away_candidates))
+        .cloned();
     let source_url = match (source_home.as_ref(), source_away.as_ref()) {
         (Some(home), Some(away)) => flashscore_match_url(&sport_key, &event_id, home, away),
         _ => format!("{FLASHSCORE_BASE_URL}/match/tennis/?mid={event_id}"),
     };
-    let home_aliases = doubles_side_aliases(home_name, &home_players, &home_candidates);
-    let away_aliases = doubles_side_aliases(away_name, &away_players, &away_candidates);
+    let home_aliases = doubles_side_aliases(
+        home_name,
+        &home_players,
+        &home_candidates,
+        &matched_home_ids,
+    );
+    let away_aliases = doubles_side_aliases(
+        away_name,
+        &away_players,
+        &away_candidates,
+        &matched_away_ids,
+    );
 
     if let (Some(mut home_score), Some(mut away_score)) = (
         row_text(&row, "AG").and_then(|value| value.parse::<i32>().ok()),
@@ -2597,10 +2602,24 @@ fn first_matching_participant<'a>(
         .find(|participant| ids.contains(&participant.id))
 }
 
+fn oriented_doubles_side_ids(
+    row: &Value,
+    reversed_side: bool,
+) -> (HashSet<String>, HashSet<String>) {
+    let feed_home_ids = participant_ids(row_text(row, "PX").as_deref());
+    let feed_away_ids = participant_ids(row_text(row, "PY").as_deref());
+    if reversed_side {
+        (feed_away_ids, feed_home_ids)
+    } else {
+        (feed_home_ids, feed_away_ids)
+    }
+}
+
 fn doubles_side_aliases(
     requested_side: &str,
     players: &[String],
     candidates: &[Vec<(f64, FlashscoreParticipant)>],
+    matched_ids: &HashSet<String>,
 ) -> Vec<String> {
     let mut aliases = vec![
         requested_side.to_string(),
@@ -2608,12 +2627,15 @@ fn doubles_side_aliases(
         players.join("/"),
     ];
     aliases.extend(players.iter().cloned());
-    aliases.extend(candidates.iter().flat_map(|player_candidates| {
-        player_candidates
+    for player_candidates in candidates {
+        let matched = player_candidates
             .iter()
-            .take(2)
-            .map(|(_, participant)| strip_country_suffix(&participant.title))
-    }));
+            .find(|(_, participant)| matched_ids.contains(&participant.id))
+            .or_else(|| player_candidates.first());
+        if let Some((_, participant)) = matched {
+            aliases.push(strip_country_suffix(&participant.title));
+        }
+    }
     dedup_texts(aliases)
 }
 
@@ -3633,5 +3655,64 @@ mod tests {
         assert!(!reversed_side);
         assert!(score >= 90.0);
         assert_eq!(flashscore_status_result(&row), Some("refunded"));
+    }
+
+    #[test]
+    fn tennis_doubles_aliases_prefer_matched_feed_players() {
+        let candidates = vec![
+            vec![
+                (
+                    1.0,
+                    FlashscoreParticipant {
+                        id: "MmFrgePQ".to_string(),
+                        title: "Shimizu Yuta (Japan)".to_string(),
+                        url: "shimizu-yuta".to_string(),
+                        participant_type_id: Some(2),
+                    },
+                ),
+                (
+                    1.0,
+                    FlashscoreParticipant {
+                        id: "wrong-shimizu".to_string(),
+                        title: "Shimizu Ayano (Japan)".to_string(),
+                        url: "shimizu-ayano".to_string(),
+                        participant_type_id: Some(2),
+                    },
+                ),
+            ],
+            vec![
+                (
+                    1.0,
+                    FlashscoreParticipant {
+                        id: "IH1MWYjh".to_string(),
+                        title: "Watanabe Seita (Japan)".to_string(),
+                        url: "watanabe-seita".to_string(),
+                        participant_type_id: Some(2),
+                    },
+                ),
+                (
+                    1.0,
+                    FlashscoreParticipant {
+                        id: "wrong-watanabe".to_string(),
+                        title: "Watanabe-Giltz Jolene (France)".to_string(),
+                        url: "watanabe-giltz-jolene".to_string(),
+                        participant_type_id: Some(2),
+                    },
+                ),
+            ],
+        ];
+        let matched_ids = HashSet::from(["IH1MWYjh".to_string(), "MmFrgePQ".to_string()]);
+
+        let aliases = doubles_side_aliases(
+            "Shimizu Y / Watanabe S",
+            &["Shimizu Y".to_string(), "Watanabe S".to_string()],
+            &candidates,
+            &matched_ids,
+        );
+
+        assert!(aliases.contains(&"Shimizu Yuta".to_string()));
+        assert!(aliases.contains(&"Watanabe Seita".to_string()));
+        assert!(!aliases.contains(&"Shimizu Ayano".to_string()));
+        assert!(!aliases.contains(&"Watanabe-Giltz Jolene".to_string()));
     }
 }

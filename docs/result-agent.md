@@ -187,10 +187,12 @@ prompt.
 Tennis doubles use a dedicated Flashscore path. The agent searches the
 individual players on each side, matches both player ids in the participant
 feed row, and accepts provider-reversed pair order when the player-id sets are
-otherwise exact. When Flashscore has a matched doubles row with no final score
-but a terminal no-play/status marker, the paper ledger is settled as
-`refunded` and the audit payload records the source URL, event id, stage, raw
-row preview, and `paper_only=true`.
+otherwise exact. Source URLs and aliases are built from the player ids that
+actually appeared in the matched feed row, so same-surname search candidates do
+not pollute later alias matching. When Flashscore has a matched doubles row
+with no final score but a terminal no-play/status marker, the paper ledger is
+settled as `refunded` and the audit payload records the source URL, event id,
+stage, raw row preview, and `paper_only=true`.
 
 ## Local Account-History Agent
 

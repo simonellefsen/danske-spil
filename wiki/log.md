@@ -336,3 +336,8 @@ Append-only timeline for project wiki maintenance. Use headings with the format 
 - Added a Flashscore tennis doubles adapter that resolves each player separately, matches both player ids per doubles side, and handles provider-reversed pair rows without operator prompts.
 - Added status-only handling for matched doubles rows with no final score and a terminal Flashscore no-play marker, settling the paper ledger as `refunded` with source URL, event id, stage, and raw-row audit notes.
 - Documented the doubles-result path so unresolved stale rows should now flow through the result-agent cycle instead of manual URL discovery.
+
+## [2026-05-30] implementation | Tennis doubles alias hygiene
+
+- Tightened doubles source-link generation so aliases and source URLs use the player ids present in the matched Flashscore row instead of every high-ranked same-surname search candidate.
+- Added a regression test covering the Shimizu/Watanabe style ambiguity where Flashscore search can return unrelated same-surname players.
