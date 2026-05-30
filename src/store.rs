@@ -4553,29 +4553,22 @@ impl Store {
                 latest_lookup AS (
                   SELECT
                     positions.*,
-                    max(sla.created_at) AS last_lookup_at
+                    lookup.created_at AS last_lookup_at,
+                    lookup.source_key AS last_lookup_source_key,
+                    lookup.recommendation AS last_lookup_recommendation
                   FROM positions
-                  LEFT JOIN settlement_lookup_attempts sla
-                    ON (
-                     (positions.item_type = 'single' AND sla.simulated_bet_id = positions.item_id)
-                     OR (positions.item_type = 'coupon' AND sla.simulated_coupon_id = positions.item_id)
-                   )
-                  GROUP BY
-                    positions.item_type,
-                    positions.item_id,
-                    positions.created_at,
-                    positions.sport_key,
-                    positions.event_name,
-                    positions.competition,
-                    positions.market_name,
-                    positions.market_kind,
-                    positions.outcome_name,
-                    positions.stake,
-                    positions.odds,
-                    positions.status,
-                    positions.profit_loss,
-                    positions.expected_result_check_after,
-                    positions.legs
+                  LEFT JOIN LATERAL (
+                    SELECT
+                      sla.created_at,
+                      sla.source_key,
+                      sla.recommendation
+                    FROM settlement_lookup_attempts sla
+                    WHERE
+                      (positions.item_type = 'single' AND sla.simulated_bet_id = positions.item_id)
+                      OR (positions.item_type = 'coupon' AND sla.simulated_coupon_id = positions.item_id)
+                    ORDER BY sla.created_at DESC
+                    LIMIT 1
+                  ) lookup ON true
                 )
                 SELECT *
                 FROM latest_lookup
@@ -4593,6 +4586,9 @@ impl Store {
                 let expected_result_check_after: Option<DateTime<Utc>> =
                     row.get("expected_result_check_after");
                 let last_lookup_at: Option<DateTime<Utc>> = row.get("last_lookup_at");
+                let last_lookup_source_key: Option<String> = row.get("last_lookup_source_key");
+                let last_lookup_recommendation: Option<String> =
+                    row.get("last_lookup_recommendation");
                 let overdue_minutes = expected_result_check_after
                     .filter(|expected| Utc::now() > *expected)
                     .map(|expected| (Utc::now() - expected).num_minutes());
@@ -4612,6 +4608,8 @@ impl Store {
                     "profit_loss": row.get::<_, Option<f64>>("profit_loss"),
                     "expected_result_check_after": expected_result_check_after.map(|value| value.to_rfc3339()),
                     "last_lookup_at": last_lookup_at.map(|value| value.to_rfc3339()),
+                    "last_lookup_source_key": last_lookup_source_key,
+                    "last_lookup_recommendation": last_lookup_recommendation,
                     "overdue_minutes": overdue_minutes,
                     "legs": row.get::<_, Value>("legs")
                 })

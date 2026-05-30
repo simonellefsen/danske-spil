@@ -1220,8 +1220,9 @@ function renderDailyPerformanceRecent(items) {
     const overdue = item.overdue_minutes === null || item.overdue_minutes === undefined ? null : Number(item.overdue_minutes);
     const overdueLabel = overdue === null ? "" : overdue > 0 ? `${Math.round(overdue)}m overdue` : "not due";
     const lookupLabel = item.last_lookup_at ? `last ${item.last_lookup_at}` : "no lookup yet";
+    const lookupSource = [item.last_lookup_source_key, item.last_lookup_recommendation].filter(Boolean).join(" / ");
     const checkMeta = overdueLabel || lookupLabel;
-    const lookupMeta = overdueLabel ? lookupLabel : "";
+    const lookupMeta = [overdueLabel ? lookupLabel : "", lookupSource].filter(Boolean).join(" / ");
     return `
       <tr>
         <td>${esc(item.created_at || "-")}</td>
@@ -1640,7 +1641,7 @@ $("load-daily-performance").addEventListener("click", async () => {
   catch (error) {
     $("daily-performance-window").textContent = `Daily report failed: ${error.message || error}`;
     $("daily-performance").innerHTML = `<tr><td colspan="6" class="muted">Could not load daily report.</td></tr>`;
-    $("daily-performance-recent").innerHTML = `<tr><td colspan="5" class="muted">Could not load daily placements.</td></tr>`;
+    $("daily-performance-recent").innerHTML = `<tr><td colspan="6" class="muted">Could not load daily placements.</td></tr>`;
   }
   finally { $("load-daily-performance").disabled = false; }
 });
@@ -1648,7 +1649,7 @@ $("daily-performance-date").addEventListener("change", async () => {
   try { await loadDailyPerformanceForDate($("daily-performance-date").value); }
   catch (error) {
     $("daily-performance-window").textContent = `Daily report failed: ${error.message || error}`;
-    $("daily-performance-recent").innerHTML = `<tr><td colspan="5" class="muted">Could not load daily placements.</td></tr>`;
+    $("daily-performance-recent").innerHTML = `<tr><td colspan="6" class="muted">Could not load daily placements.</td></tr>`;
   }
 });
 $("commit-settlements").addEventListener("click", async () => {

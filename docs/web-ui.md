@@ -22,7 +22,7 @@ The UI is not a marketing site. It is an operational dashboard for repeated revi
 - Candidate count by product, market, confidence, and status.
 - Open simulated placements, unresolved settlements, and settled paper results.
 - Recent paper plays, including both singles and multi-leg coupons with strategy, stake, observed odds, status, score, and confidence.
-- Daily paper-placement rows should show expected result-check time, latest lookup time, and overdue age so unresolved rows can be reconciled without opening raw database state.
+- Daily paper-placement rows should show expected result-check time, latest lookup time, lookup source/recommendation, and overdue age so unresolved rows can be reconciled without opening raw database state.
 - Browser-backed external result evidence, including source, event, score, confidence, and whether the evidence has driven a paper settlement.
 - Account-history coupon evidence shows preserved leg event names in the settlement observations and external evidence tables so coupon audit rows are readable without opening raw payload JSON.
 - All known external result links on settlement-review rows, with browser-evidence markers for sources such as Sofascore that block direct HTTP lookups.
