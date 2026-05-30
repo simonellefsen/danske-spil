@@ -554,10 +554,12 @@ impl GamblerService {
             .cloned()
             .unwrap_or_default();
         let account_agent = danskespil_account_agent_status();
-        let mut tasks: Vec<Value> = items
-            .iter()
-            .filter_map(|item| result_agent_task(item, &account_agent))
-            .collect();
+        let mut tasks = Vec::new();
+        for item in &items {
+            if let Some(task) = result_agent_task(item, &account_agent) {
+                tasks.push(self.add_result_agent_alias_context(task).await);
+            }
+        }
         tasks.sort_by(|left, right| {
             number(right, "priority_score")
                 .partial_cmp(&number(left, "priority_score"))
@@ -625,6 +627,35 @@ impl GamblerService {
                 "Keep settlement paper-only; never submit a real bet."
             ]
         })
+    }
+
+    async fn add_result_agent_alias_context(&self, mut task: Value) -> Value {
+        let Some(selection) = task.get("selection") else {
+            return task;
+        };
+        let Some(event_name) = text(selection, "event_name").map(str::to_string) else {
+            return task;
+        };
+        let sport_key = text(selection, "sport_key").map(str::to_string);
+        let gender_scope = infer_selection_gender_scope(selection);
+        let Ok((home_aliases, away_aliases)) = self
+            .store
+            .participant_aliases_for_event(
+                sport_key.as_deref(),
+                gender_scope.as_deref(),
+                &event_name,
+            )
+            .await
+        else {
+            return task;
+        };
+
+        if let Some(selection) = task.get_mut("selection").and_then(Value::as_object_mut) {
+            selection.insert("home_aliases".to_string(), json!(home_aliases));
+            selection.insert("away_aliases".to_string(), json!(away_aliases));
+            selection.insert("alias_source".to_string(), json!("entity_alias_registry"));
+        }
+        task
     }
 
     pub async fn account_history_requests(&self) -> Value {
@@ -1921,9 +1952,15 @@ async fn flashscore_discover(
         )
         .await;
     }
-    let home_candidates =
-        ranked_flashscore_participants(http, &home_name, &sport_key, gender_scope.as_deref())
-            .await?;
+    let home_search_names = selection_name_candidates(selection, "home_aliases", &home_name);
+    diagnostics.insert("home_search_names".to_string(), json!(home_search_names));
+    let home_candidates = ranked_flashscore_participants_for_names(
+        http,
+        &home_search_names,
+        &sport_key,
+        gender_scope.as_deref(),
+    )
+    .await?;
     diagnostics.insert(
         "home_participant_candidates".to_string(),
         flashscore_participant_candidates_json(&home_candidates),
@@ -1957,9 +1994,15 @@ async fn flashscore_discover(
             diagnostics: Value::Object(diagnostics),
         });
     }
-    let away_candidates =
-        ranked_flashscore_participants(http, &away_name, &sport_key, gender_scope.as_deref())
-            .await?;
+    let away_search_names = selection_name_candidates(selection, "away_aliases", &away_name);
+    diagnostics.insert("away_search_names".to_string(), json!(away_search_names));
+    let away_candidates = ranked_flashscore_participants_for_names(
+        http,
+        &away_search_names,
+        &sport_key,
+        gender_scope.as_deref(),
+    )
+    .await?;
     diagnostics.insert(
         "away_participant_candidates".to_string(),
         flashscore_participant_candidates_json(&away_candidates),
@@ -2099,8 +2142,20 @@ async fn flashscore_discover(
     let event_id = row_text(&row, "AA").unwrap_or_default();
     let stage = row_text(&row, "AC").unwrap_or_default();
     let source_url = flashscore_match_url(&sport_key, &event_id, &home, &away);
-    let home_aliases = flashscore_aliases(&home_name, &feed_home, &home.title, &sport_key);
-    let away_aliases = flashscore_aliases(&away_name, &feed_away, &away.title, &sport_key);
+    let home_aliases = flashscore_aliases(
+        &home_name,
+        &feed_home,
+        &home.title,
+        &sport_key,
+        &home_search_names,
+    );
+    let away_aliases = flashscore_aliases(
+        &away_name,
+        &feed_away,
+        &away.title,
+        &sport_key,
+        &away_search_names,
+    );
     let evidence = FlashscoreEvidence {
         source_url,
         sport_key,
@@ -2414,14 +2469,32 @@ async fn ranked_flashscore_participants(
     sport_key: &str,
     gender_scope: Option<&str>,
 ) -> anyhow::Result<Vec<(f64, FlashscoreParticipant)>> {
-    let queries = flashscore_name_variants(name, sport_key);
+    ranked_flashscore_participants_for_names(http, &[name.to_string()], sport_key, gender_scope)
+        .await
+}
+
+async fn ranked_flashscore_participants_for_names(
+    http: &HttpClient,
+    names: &[String],
+    sport_key: &str,
+    gender_scope: Option<&str>,
+) -> anyhow::Result<Vec<(f64, FlashscoreParticipant)>> {
+    let names = dedup_texts(names.to_vec());
     let mut candidates = Vec::new();
-    for query in queries {
-        for participant in flashscore_search_participants(http, &query, sport_key).await? {
-            let score =
-                flashscore_participant_score(name, &query, &participant, sport_key, gender_scope);
-            if score >= 0.5 {
-                candidates.push((score, participant));
+    for name in names {
+        let queries = flashscore_name_variants(&name, sport_key);
+        for query in queries {
+            for participant in flashscore_search_participants(http, &query, sport_key).await? {
+                let score = flashscore_participant_score(
+                    &name,
+                    &query,
+                    &participant,
+                    sport_key,
+                    gender_scope,
+                );
+                if score >= 0.5 {
+                    candidates.push((score, participant));
+                }
             }
         }
     }
@@ -2831,15 +2904,35 @@ fn flashscore_aliases(
     feed_name: &str,
     flashscore_title: &str,
     sport_key: &str,
+    registry_aliases: &[String],
 ) -> Vec<String> {
     let mut aliases = vec![
         requested_name.to_string(),
         feed_name.to_string(),
         strip_country_suffix(flashscore_title),
     ];
+    aliases.extend(registry_aliases.iter().cloned());
     aliases.extend(flashscore_name_variants(requested_name, sport_key));
     aliases.extend(flashscore_known_name_aliases(requested_name));
     dedup_texts(aliases)
+}
+
+fn selection_name_candidates(selection: &Value, alias_key: &str, fallback: &str) -> Vec<String> {
+    let aliases = selection
+        .get(alias_key)
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter_map(Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(ToOwned::to_owned)
+        .collect::<Vec<_>>();
+    dedup_texts(
+        std::iter::once(fallback.to_string())
+            .chain(aliases)
+            .collect(),
+    )
 }
 
 fn flashscore_participant_score(
@@ -3750,6 +3843,52 @@ mod tests {
         assert!(flashscore_name_variants("Paris SG", "football").contains(&"PSG".to_string()));
         assert!(flashscore_name_variants("Paris Saint-Germain", "football")
             .contains(&"Paris SG".to_string()));
+    }
+
+    #[test]
+    fn selection_name_candidates_include_registry_aliases() {
+        let selection = json!({
+            "home_aliases": ["Team FOG Naestved", "Naestved", "Team FOG Naestved"],
+            "away_aliases": ["Bakken Bears"]
+        });
+
+        let names = selection_name_candidates(&selection, "home_aliases", "Team Fog Næstved");
+
+        assert_eq!(names[0], "Team Fog Næstved");
+        assert!(names.contains(&"Team FOG Naestved".to_string()));
+        assert!(names.contains(&"Naestved".to_string()));
+        assert_eq!(
+            names
+                .iter()
+                .filter(|name| name.as_str() == "Team FOG Naestved")
+                .count(),
+            1
+        );
+    }
+
+    #[test]
+    fn flashscore_aliases_preserve_registry_aliases() {
+        let aliases = flashscore_aliases(
+            "Team Fog Næstved",
+            "Naestved",
+            "Naestved (Denmark)",
+            "basketball",
+            &[
+                "Team FOG Naestved".to_string(),
+                "Naestved".to_string(),
+                "Team Fog Næstved".to_string(),
+            ],
+        );
+
+        assert!(aliases.contains(&"Team FOG Naestved".to_string()));
+        assert!(aliases.contains(&"Naestved".to_string()));
+        assert_eq!(
+            aliases
+                .iter()
+                .filter(|alias| alias.as_str() == "Team Fog Næstved")
+                .count(),
+            1
+        );
     }
 
     #[test]

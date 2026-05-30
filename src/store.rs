@@ -6600,6 +6600,39 @@ impl Store {
         }))
     }
 
+    pub async fn participant_aliases_for_event(
+        &self,
+        sport_key: Option<&str>,
+        gender_scope: Option<&str>,
+        event_name: &str,
+    ) -> anyhow::Result<(Vec<String>, Vec<String>)> {
+        let (home_aliases, away_aliases) = event_aliases_from_name(event_name);
+        if home_aliases.is_empty() && away_aliases.is_empty() {
+            return Ok((home_aliases, away_aliases));
+        }
+        if !use_external_result_alias_registry(sport_key, event_name) {
+            return Ok((home_aliases, away_aliases));
+        }
+        let client = self.connect().await?;
+        let home_aliases = expand_aliases_from_registry(
+            &client,
+            "participant",
+            sport_key,
+            gender_scope,
+            home_aliases,
+        )
+        .await?;
+        let away_aliases = expand_aliases_from_registry(
+            &client,
+            "participant",
+            sport_key,
+            gender_scope,
+            away_aliases,
+        )
+        .await?;
+        Ok((home_aliases, away_aliases))
+    }
+
     pub async fn add_entity_alias(&self, payload: &Value) -> anyhow::Result<Value> {
         let entity_kind = payload
             .get("entity_kind")

@@ -403,3 +403,8 @@ Append-only timeline for project wiki maintenance. Use headings with the format 
 
 - Added Mermaid architecture diagrams to the Kubernetes architecture doc and the wiki so future sessions can quickly understand how the UI, API, worker, result agent, Hermes, Postgres, gateway, and external sources interact.
 - Added explicit component-role and safety-boundary notes for the split result-agent and Hermes loops.
+
+## [2026-05-30] implementation | Result-agent alias discovery context
+
+- Wired the central participant alias registry into result-agent queue tasks so Flashscore source discovery searches learned home/away aliases before reporting `flashscore_discovery_no_match`.
+- Preserved those registry aliases in newly discovered source-link payloads and documented that aliases now help both discovery and settlement grading.

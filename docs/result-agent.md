@@ -91,6 +91,11 @@ result link or ingests external result evidence. Settlement matching expands
 home/away aliases from this registry before grading, so names learned from one
 source can help later Flashscore, Sofascore, LiveScore, official, or account
 history checks.
+The public result-agent queue also expands the displayed event participants
+through the alias registry before source discovery. Flashscore participant
+search therefore tries learned names such as localized country names,
+sponsor-heavy club names, gender-scoped team variants, and source-specific
+team/player names when a row has no configured result link yet.
 
 ## Source Order
 
@@ -170,6 +175,9 @@ lookup expands common aliases before search, including Danish country names,
 Flashscore basketball naming differences, tennis first/last-name order, and
 gender-scoped team variants. The feed fetch falls back to Flashscore's stable
 `x-fsign` value when current pages do not expose a page-local `feed_sign`.
+Alias expansion combines built-in aliases with the central `entity_aliases`
+registry populated by prior source links and external evidence, so each
+successful or operator-seeded match can improve future no-link discovery.
 Friendly and neutral-ground football matches can be listed with arbitrary team
 order across providers. Settlement matching therefore treats `A - B` and
 `B - A` as the same external-result lookup target, accepts localized
