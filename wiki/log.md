@@ -265,3 +265,8 @@ Append-only timeline for project wiki maintenance. Use headings with the format 
 - Added queued, selected, attempted, and skipped paper exposure fields to `POST /api/result-agent/run` summaries.
 - Included per-task stake and priority in result-agent discovery results and skip records.
 - Preserved the priority accounting in `result_agent_cycle_completed` audit events for scheduled cycle review.
+
+## [2026-05-30] implementation | Result-agent cycle UI
+
+- Added the latest compact `result_agent_cycle_completed` audit event to `GET /api/result-agent/queue`.
+- Added a result-agent cycle table to the web UI showing queued, selected, attempted, skipped, and settled cycle accounting beside the backlog.

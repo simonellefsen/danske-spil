@@ -38,6 +38,11 @@ attempted discovery count/exposure, skipped exposure, and the highest selected
 priority. This makes a capped result-agent cycle auditable without inspecting
 raw database rows.
 
+`GET /api/result-agent/queue` also includes the latest compact
+`result_agent_cycle_completed` audit event as `latest_cycle`, and the web UI
+renders it beside the backlog so operators can compare the current queue with
+the most recent scheduled or manual run.
+
 `GET /api/result-agent/account-requests` exposes a focused subset for a local
 read-only Danske Spil account-history browser agent. It is independent of
 whether the Kubernetes API pod has credentials, because the intended worker is
