@@ -330,3 +330,9 @@ Append-only timeline for project wiki maintenance. Use headings with the format 
 - Raised the dedicated result-agent per-cycle cap from 10 to 25 so manual and scheduled reconciliation cycles can cover the whole stale backlog instead of repeatedly retrying only the first ten rows.
 - Seeded Flashscore women-football links for Vasco W versus America Mineiro W and America de Cali W versus Inter Palmira W so those rows do not depend on Sofascore browser-only evidence.
 - Deployed the pass and ran live reconciliation: the overdue queue dropped from 11 rows to 3, leaving only ATP Challenger Little Rock doubles rows that still need a doubles-team result source adapter.
+
+## [2026-05-30] implementation | Tennis doubles result adapter
+
+- Added a Flashscore tennis doubles adapter that resolves each player separately, matches both player ids per doubles side, and handles provider-reversed pair rows without operator prompts.
+- Added status-only handling for matched doubles rows with no final score and a terminal Flashscore no-play marker, settling the paper ledger as `refunded` with source URL, event id, stage, and raw-row audit notes.
+- Documented the doubles-result path so unresolved stale rows should now flow through the result-agent cycle instead of manual URL discovery.

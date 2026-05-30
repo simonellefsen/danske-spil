@@ -184,10 +184,13 @@ names such as `Rinascita Basket Rimini` to `Rimini`, `Ueb Cividale` to
 If a row still returns `flashscore_discovery_no_match`, the next step is to add
 another source adapter or a sport-specific pagination path, not an operator
 prompt.
-The current known gap is tennis doubles. Flashscore participant search exposes
-individual players well, but not every temporary doubles pairing as a stable
-team participant, so unresolved doubles rows should be handled by a dedicated
-ATP/ITF/TennisExplorer-style doubles-result adapter rather than manual prompts.
+Tennis doubles use a dedicated Flashscore path. The agent searches the
+individual players on each side, matches both player ids in the participant
+feed row, and accepts provider-reversed pair order when the player-id sets are
+otherwise exact. When Flashscore has a matched doubles row with no final score
+but a terminal no-play/status marker, the paper ledger is settled as
+`refunded` and the audit payload records the source URL, event id, stage, raw
+row preview, and `paper_only=true`.
 
 ## Local Account-History Agent
 
