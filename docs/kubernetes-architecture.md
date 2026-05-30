@@ -63,6 +63,15 @@ Start closed and open narrowly:
 - `gambler-web` can call `gambler-api` and Postgres; it should not call `danskespil.dk` directly.
 - No public ingress in the first deployment.
 
+## Pod Security Baseline
+
+Application workloads should run as non-root UID/GID `65532`, disable service
+account token automounting unless a Kubernetes API call is explicitly needed,
+drop Linux capabilities, disallow privilege escalation, use
+`RuntimeDefault` seccomp, and keep the root filesystem read-only. Each workload
+mounts a memory-backed `/tmp` for runtime scratch space and declares conservative
+CPU/memory requests and limits.
+
 ## Deployment Order
 
 1. Namespace and secrets.
