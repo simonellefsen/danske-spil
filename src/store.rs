@@ -7707,6 +7707,13 @@ impl Store {
         let local_date_value = NaiveDate::parse_from_str(&local_date, "%Y-%m-%d")
             .with_context(|| format!("invalid reflection date: {local_date}"))?;
         let reflection_id = format!("daily-paper-reflection-{local_date}");
+        let daily_performance = self
+            .paper_performance_for_local_date(local_date_value)
+            .await?;
+        let daily_summary = daily_performance
+            .get("summary")
+            .cloned()
+            .unwrap_or(Value::Null);
 
         let performance_row = client
             .query_one(
@@ -7805,15 +7812,47 @@ impl Store {
         let open_count = bet_open_count + coupon_open_count;
         let total_profit_loss =
             bet_row.get::<_, f64>("profit_loss") + coupon_row.get::<_, f64>("profit_loss");
+        let performance_state = text(&daily_summary, "performance_state")
+            .unwrap_or(if open_count > 0 {
+                "provisional"
+            } else {
+                "complete"
+            })
+            .to_string();
+        let daily_settled_count = daily_summary
+            .get("settled_count")
+            .and_then(Value::as_i64)
+            .unwrap_or(realized_count);
+        let daily_placed_count = daily_summary
+            .get("placed_count")
+            .and_then(Value::as_i64)
+            .unwrap_or((bet_count + coupon_count).into());
+        let unresolved_exposure_ratio = number(&daily_summary, "unresolved_exposure_ratio");
+        let open_exposure = number(&daily_summary, "open_exposure").unwrap_or(0.0);
+        let realized_profit_loss =
+            number(&daily_summary, "realized_profit_loss").unwrap_or(total_profit_loss);
+        let worst_case_profit_loss =
+            number(&daily_summary, "worst_case_profit_loss").unwrap_or(realized_profit_loss);
+        let best_case_profit_loss =
+            number(&daily_summary, "best_case_profit_loss").unwrap_or(realized_profit_loss);
+        let settlement_progress = number(&daily_summary, "settlement_progress");
+        let break_even_open_profit_required =
+            number(&daily_summary, "break_even_open_profit_required").unwrap_or(0.0);
+        let break_even_open_profit_coverage =
+            number(&daily_summary, "break_even_open_profit_coverage");
         let first_snapshot_at: Option<DateTime<Utc>> = performance_row.get("first_snapshot_at");
         let last_snapshot_at: Option<DateTime<Utc>> = performance_row.get("last_snapshot_at");
         let title = format!("Daily paper reflection {local_date}");
         let summary = if bet_count + coupon_count == 0 {
             format!("{local_date}: no paper placements were created. {snapshot_count} performance snapshots were recorded; no settlement observations were available.")
-        } else if realized_count == 0 {
-            format!("{local_date}: recorded {snapshot_count} performance snapshots and {bet_count} paper singles / {coupon_count} paper coupons. Paper single turnover was {bet_turnover:.2}. {open_count} paper positions remain open or awaiting result, so won/lost performance is not evaluable.")
+        } else if performance_state == "provisional" {
+            format!(
+                "{local_date}: provisional paper performance. Recorded {snapshot_count} performance snapshots, {bet_count} paper singles / {coupon_count} paper coupons, {daily_settled_count}/{daily_placed_count} settled, realized P/L {realized_profit_loss:.2}, and worst/best-case P/L {worst_case_profit_loss:.2} to {best_case_profit_loss:.2}. {open_count} paper positions remain open or awaiting result with {open_exposure:.2} unresolved exposure."
+            )
         } else {
-            format!("{local_date}: recorded {snapshot_count} performance snapshots, {bet_count} paper singles, {coupon_count} paper coupons, {realized_count} realized paper results, and paper P/L {total_profit_loss:.2}.")
+            format!(
+                "{local_date}: complete paper performance. Recorded {snapshot_count} performance snapshots, {bet_count} paper singles, {coupon_count} paper coupons, {realized_count} realized paper results, and paper P/L {realized_profit_loss:.2}."
+            )
         };
         let evidence = json!({
             "reflection_date": local_date,
@@ -7823,6 +7862,7 @@ impl Store {
             "last_snapshot_at": last_snapshot_at,
             "performance_snapshot_count": snapshot_count,
             "latest_performance": latest_performance,
+            "daily_performance": daily_performance,
             "single_bets": {
                 "placed_count": bet_count,
                 "turnover": bet_turnover,
@@ -7842,16 +7882,23 @@ impl Store {
             "settlement_observation_count": settlement_count,
             "assessment": {
                 "has_realized_results": realized_count > 0,
-                "needs_result_review": realized_count == 0 && (bet_count + coupon_count) > 0,
+                "needs_result_review": open_count > 0 && (bet_count + coupon_count) > 0,
                 "open_or_awaiting_count": open_count,
                 "realized_count": realized_count,
-                "profit_loss": total_profit_loss,
-                "recommendation": if realized_count == 0 && (bet_count + coupon_count) > 0 {
+                "performance_state": performance_state,
+                "settlement_progress": settlement_progress,
+                "unresolved_exposure_ratio": unresolved_exposure_ratio,
+                "open_exposure": open_exposure,
+                "realized_profit_loss": realized_profit_loss,
+                "worst_case_profit_loss": worst_case_profit_loss,
+                "best_case_profit_loss": best_case_profit_loss,
+                "break_even_open_profit_required": break_even_open_profit_required,
+                "break_even_open_profit_coverage": break_even_open_profit_coverage,
+                "profit_loss": realized_profit_loss,
+                "recommendation": if open_count > 0 && (bet_count + coupon_count) > 0 {
                     "Keep positions in awaiting-result review; do not promote strategy based on unresolved paper exposure."
                 } else if bet_count + coupon_count == 0 {
                     "No paper results to evaluate for this date."
-                } else if open_count > 0 {
-                    "Evaluate realized rows, but keep strategy promotion blocked until all same-day paper exposure is settled or explicitly voided."
                 } else {
                     "Review realized P/L and calibration before considering any one-variable strategy promotion."
                 }

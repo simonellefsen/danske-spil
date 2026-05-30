@@ -46,6 +46,7 @@ Current POC status:
 - `GET /api/hermes` and `POST /api/hermes/run` include promotion gates for active experiments. These gates explain why promotion is blocked or eligible based on replay evidence, operator-reviewed status, settled paper sample size, unresolved exposure, and paper-only safety.
 - `POST /api/strategy/experiment/review` rejects `promote` actions unless the Hermes promotion gate for that experiment is clear.
 - The daily reflection is paper-only and summarizes scan/performance snapshots, simulated placements, settlement observations, and whether results are ready to evaluate.
+- Reflections include the same daily provisional-performance fields as the web UI: settlement progress, unresolved exposure ratio, realized P/L, worst/best-case P/L, and pending break-even coverage. Hermes should treat `performance_state=provisional` as a promotion blocker until same-day paper exposure is settled, voided, refunded, or otherwise closed.
 - Successful scanner runs refresh the previous-day reflection automatically, using the current ledger status of paper positions created that day so later settlements, voids, refunds, cancellations, and postponed items remain visible in the same daily record.
 - If paper placements are still awaiting result review, the reflection explicitly blocks strategy promotion based on unresolved exposure.
 - Strategy played summaries include paper performance by candidate risk flag, so exclusions such as `large_odds_movement` can be evaluated against realized simulated outcomes before promotion.

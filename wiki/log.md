@@ -383,3 +383,8 @@ Append-only timeline for project wiki maintenance. Use headings with the format 
 
 - Added provisional daily-performance fields for settlement progress, unresolved exposure ratio, pending upside, worst-case P/L, best-case P/L, and break-even pending-profit coverage.
 - Updated the web UI daily performance tables to render realized P/L with a worst/best range so days with many unsettled rows are not read as complete strategy performance.
+
+## [2026-05-30] implementation | Hermes provisional daily reflections
+
+- Fed the daily provisional-performance report into Hermes daily reflections so the reflection evidence includes settlement progress, unresolved exposure, worst/best-case P/L, and break-even coverage.
+- Updated the reflection summary and recommendation to keep strategy promotion blocked whenever same-day paper exposure remains open or awaiting result.
