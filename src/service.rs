@@ -3589,6 +3589,7 @@ fn result_agent_failure_summary(skipped: &[Value]) -> Value {
     let mut reason_counts: Vec<(String, usize)> = Vec::new();
     let mut diagnostic_reason_counts: Vec<(String, usize)> = Vec::new();
     let mut flashscore_examples = Vec::new();
+    let mut recommended_actions: Vec<(String, usize)> = Vec::new();
 
     for item in skipped {
         let reason = text(item, "reason").unwrap_or("unknown").to_string();
@@ -3600,6 +3601,10 @@ fn result_agent_failure_summary(skipped: &[Value]) -> Value {
         let diagnostics = item.get("diagnostics").unwrap_or(&Value::Null);
         let diagnostic_reason = text(diagnostics, "reason").unwrap_or("unknown").to_string();
         increment_count(&mut diagnostic_reason_counts, diagnostic_reason.clone());
+        increment_count(
+            &mut recommended_actions,
+            result_agent_recommended_action(&diagnostic_reason).to_string(),
+        );
         if flashscore_examples.len() >= 5 {
             continue;
         }
@@ -3643,9 +3648,25 @@ fn result_agent_failure_summary(skipped: &[Value]) -> Value {
         "flashscore_no_match": {
             "count": flashscore_no_match_count,
             "diagnostic_reasons": count_pairs_json(diagnostic_reason_counts),
+            "recommended_actions": count_pairs_json(recommended_actions),
             "examples": flashscore_examples
         }
     })
+}
+
+fn result_agent_recommended_action(diagnostic_reason: &str) -> &'static str {
+    match diagnostic_reason {
+        "home_participant_not_found" => "add_or_verify_home_alias",
+        "away_participant_not_found" => "add_or_verify_away_alias",
+        "home_participant_low_confidence" => "add_source_specific_home_alias_or_gender_scope",
+        "away_participant_low_confidence" => "add_source_specific_away_alias_or_gender_scope",
+        "no_feed_row_above_match_threshold" => "add_source_link_or_alternate_source_adapter",
+        "feed_sign_not_available" => "retry_later_or_use_browser_backed_source",
+        "unsupported_flashscore_sport" => "add_non_flashscore_source_adapter",
+        "unsupported_event_name_shape" => "normalize_event_name_or_source_link",
+        "missing_event_name" => "repair_selection_event_metadata",
+        _ => "inspect_no_match_diagnostics",
+    }
 }
 
 fn increment_count(counts: &mut Vec<(String, usize)>, key: String) {
@@ -4019,8 +4040,28 @@ mod tests {
             json!({"reason": "home_participant_not_found", "count": 2})
         );
         assert_eq!(
+            summary["flashscore_no_match"]["recommended_actions"][0],
+            json!({"reason": "add_or_verify_home_alias", "count": 2})
+        );
+        assert_eq!(
             summary["flashscore_no_match"]["examples"][0]["event_name"],
             json!("Team Fog Næstved - Bakken Bears")
+        );
+    }
+
+    #[test]
+    fn result_agent_recommended_actions_map_common_diagnostics() {
+        assert_eq!(
+            result_agent_recommended_action("home_participant_low_confidence"),
+            "add_source_specific_home_alias_or_gender_scope"
+        );
+        assert_eq!(
+            result_agent_recommended_action("no_feed_row_above_match_threshold"),
+            "add_source_link_or_alternate_source_adapter"
+        );
+        assert_eq!(
+            result_agent_recommended_action("unsupported_flashscore_sport"),
+            "add_non_flashscore_source_adapter"
         );
     }
 

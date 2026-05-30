@@ -413,3 +413,8 @@ Append-only timeline for project wiki maintenance. Use headings with the format 
 
 - Added compact failure summaries to result-agent cycle audits, including top skipped reasons, Flashscore no-match diagnostic reasons, and sanitized examples with search names and candidate counts.
 - Surfaced the summary in the latest-cycle and recent-cycle UI tables so source-discovery failures are visible without inspecting raw audit JSON.
+
+## [2026-05-30] implementation | Result-agent recommended actions
+
+- Added recommended next actions to Flashscore no-match summaries so failures now point toward alias fixes, gender/sport-scope checks, browser-backed evidence, or alternate source adapters.
+- Rendered those recommendations in the latest and recent result-agent cycle tables.

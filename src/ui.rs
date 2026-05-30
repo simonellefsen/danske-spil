@@ -947,6 +947,11 @@ function renderResultAgentFailureSummary(summary, compact = false) {
       .map((item) => `${item.reason || "unknown"} ${item.count ?? 0}`)
       .join(", ")
     : "";
+  const actions = Array.isArray(noMatch.recommended_actions)
+    ? noMatch.recommended_actions.slice(0, compact ? 1 : 2)
+      .map((item) => `${item.reason || "inspect"} ${item.count ?? 0}`)
+      .join(", ")
+    : "";
   const examples = Array.isArray(noMatch.examples) && !compact
     ? noMatch.examples.slice(0, 2)
       .map((item) => `${item.event_name || "-"}: ${item.diagnostic_reason || "unknown"}`)
@@ -955,6 +960,7 @@ function renderResultAgentFailureSummary(summary, compact = false) {
   return `
     <br><span class="label">reasons ${esc(reasons)}</span>
     ${diagnosticReasons ? `<br><span class="muted">Flashscore ${esc(diagnosticReasons)}</span>` : ""}
+    ${actions ? `<br><span class="muted">next ${esc(actions)}</span>` : ""}
     ${examples ? `<br><span class="muted">${esc(examples)}</span>` : ""}
   `;
 }

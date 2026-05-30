@@ -52,7 +52,10 @@ so operators can compare the current queue with scheduled and manual
 result-agent runs over time. Cycle summaries include a compact
 `failure_summary` with top skipped reasons, Flashscore no-match diagnostic
 reasons, and a few sanitized examples containing the search names and candidate
-counts used for discovery.
+counts used for discovery. Flashscore no-match summaries also include
+`recommended_actions`, such as adding or verifying a home/away alias, checking
+gender scope, retrying with browser-backed evidence, or adding a non-Flashscore
+source adapter.
 
 `GET /api/result-agent/account-requests` exposes a focused subset for a local
 read-only Danske Spil account-history browser agent. It is independent of
