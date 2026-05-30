@@ -795,6 +795,38 @@ impl GamblerService {
             let task_kind = text(&task, "task_kind").unwrap_or_default();
             let task_stake = number(&task, "hypothetical_stake");
             let task_priority = number(&task, "priority_score");
+            if task_kind == "public_result_evidence_check" {
+                task_attempted_count += 1;
+                task_attempted_exposure += task_stake;
+                match self.store.auto_settle_external_result_task(&task).await {
+                    Ok(result) => {
+                        settled_count += result
+                            .get("settled_count")
+                            .and_then(Value::as_u64)
+                            .unwrap_or_default() as usize;
+                        results.push(json!({
+                            "source": "configured_external_result_links",
+                            "action": "auto_settle_queued_configured_link_task",
+                            "task_kind": task_kind,
+                            "hypothetical_stake": task_stake,
+                            "priority_score": task_priority,
+                            "selection": task.get("selection").cloned().unwrap_or(Value::Null),
+                            "result": result
+                        }));
+                    }
+                    Err(error) => {
+                        skipped.push(json!({
+                            "task_kind": task_kind,
+                            "reason": "configured_external_result_task_failed",
+                            "hypothetical_stake": task_stake,
+                            "priority_score": task_priority,
+                            "selection": task.get("selection").cloned().unwrap_or(Value::Null),
+                            "error": error.to_string()
+                        }));
+                    }
+                }
+                continue;
+            }
             if task_kind != "public_result_source_discovery" {
                 task_skipped_exposure += task_stake;
                 skipped.push(json!({

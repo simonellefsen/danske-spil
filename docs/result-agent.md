@@ -37,6 +37,10 @@ scheduled worker: queued task count/exposure, selected task count/exposure,
 attempted discovery count/exposure, skipped exposure, and the highest selected
 priority. This makes a capped result-agent cycle auditable without inspecting
 raw database rows.
+When a selected row already has a direct, non-browser public result link, the
+cycle processes that `public_result_evidence_check` task immediately. The older
+global overdue sweep remains as a backstop, but queued configured-link tasks no
+longer wait for the 120-minute sweep before attempting direct evidence.
 
 `GET /api/result-agent/queue` also includes the latest compact
 `result_agent_cycle_completed` audit event as `latest_cycle` plus the most

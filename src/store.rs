@@ -3538,6 +3538,211 @@ impl Store {
         }))
     }
 
+    pub async fn auto_settle_external_result_task(&self, task: &Value) -> anyhow::Result<Value> {
+        let bet_id = task
+            .get("ids")
+            .and_then(|ids| ids.get("bet_id"))
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .ok_or_else(|| anyhow!("task ids.bet_id is required"))?;
+        let selection = task.get("selection").unwrap_or(&Value::Null);
+        let event_name = selection
+            .get("event_name")
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .ok_or_else(|| anyhow!("task selection.event_name is required"))?;
+        let outcome_name = selection
+            .get("outcome_name")
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .ok_or_else(|| anyhow!("task selection.outcome_name is required"))?;
+        let market_kind = selection.get("market_kind").and_then(Value::as_str);
+        let market_name = selection.get("market_name").and_then(Value::as_str);
+        let expected_result_check_after = task
+            .get("expected_result_check_after")
+            .and_then(Value::as_str)
+            .and_then(parse_rfc3339_utc);
+        let overdue_minutes = settlement_overdue_minutes(expected_result_check_after);
+        if !is_auto_settle_external_market(market_kind, market_name) {
+            return Ok(json!({
+                "enabled": true,
+                "paper_only": true,
+                "settled_count": 0,
+                "checked_count": 0,
+                "skipped_count": 1,
+                "skipped": [{
+                    "bet_id": bet_id,
+                    "event_name": event_name,
+                    "market_kind": market_kind,
+                    "market_name": market_name,
+                    "reason": "unsupported_market_for_auto_settlement"
+                }]
+            }));
+        }
+        let links = task
+            .get("source_links")
+            .and_then(Value::as_array)
+            .into_iter()
+            .flatten()
+            .filter_map(external_result_link_from_task_source)
+            .collect::<Vec<_>>();
+        if links.is_empty() {
+            return Ok(json!({
+                "enabled": true,
+                "paper_only": true,
+                "settled_count": 0,
+                "checked_count": 0,
+                "skipped_count": 1,
+                "skipped": [{
+                    "bet_id": bet_id,
+                    "event_name": event_name,
+                    "reason": "no_configured_external_result_link"
+                }]
+            }));
+        }
+
+        let http = external_result_http_client()?;
+        let mut link_attempts = Vec::new();
+        let mut evidence_pair = None;
+        for link in links {
+            if link.requires_browser_automation {
+                link_attempts.push(json!({
+                    "source_key": link.source_key,
+                    "source_url": link.url,
+                    "reason": "browser_automation_required_for_source",
+                    "direct_http_fetch": "blocked_in_local_testing",
+                    "manual_browser_verification": "agent-browser can access the page"
+                }));
+                continue;
+            }
+            match fetch_external_match_result(&http, &link).await {
+                Ok(evidence) => {
+                    evidence_pair = Some((link, evidence));
+                    break;
+                }
+                Err(error) => link_attempts.push(json!({
+                    "source_key": link.source_key,
+                    "source_url": link.url,
+                    "reason": "external_fetch_or_parse_failed",
+                    "error": error.to_string()
+                })),
+            }
+        }
+
+        let Some((link, evidence)) = evidence_pair else {
+            return Ok(json!({
+                "enabled": true,
+                "paper_only": true,
+                "settled_count": 0,
+                "checked_count": 0,
+                "skipped_count": 1,
+                "skipped": [{
+                    "bet_id": bet_id,
+                    "event_name": event_name,
+                    "reason": "no_direct_external_result_evidence",
+                    "attempts": link_attempts,
+                    "expected_event_finish_at": expected_result_check_after,
+                    "overdue_minutes": overdue_minutes
+                }]
+            }));
+        };
+        let evidence_id = self
+            .record_external_result_evidence_from_link(event_name, &link, &evidence)
+            .await?;
+        let checked = json!({
+            "bet_id": bet_id,
+            "event_name": event_name,
+            "external_result_evidence_id": evidence_id,
+            "source_key": evidence.source_key,
+            "source_url": evidence.url,
+            "source_title": evidence.title,
+            "attempts": link_attempts,
+            "expected_event_finish_at": expected_result_check_after,
+            "score": {"home": evidence.home_score, "away": evidence.away_score}
+        });
+        let Some(result) =
+            grade_external_outcome(outcome_name, market_kind, market_name, &link, &evidence)
+        else {
+            return Ok(json!({
+                "enabled": true,
+                "paper_only": true,
+                "settled_count": 0,
+                "checked_count": 1,
+                "checked": [checked],
+                "skipped_count": 1,
+                "skipped": [{
+                    "bet_id": bet_id,
+                    "event_name": event_name,
+                    "outcome_name": outcome_name,
+                    "source_key": evidence.source_key,
+                    "source_url": evidence.url,
+                    "source_title": evidence.title,
+                    "score": {"home": evidence.home_score, "away": evidence.away_score},
+                    "expected_event_finish_at": expected_result_check_after,
+                    "reason": "unable_to_map_outcome_to_external_result"
+                }]
+            }));
+        };
+        let notes = json!({
+            "mode": "queued_external_result_task_settlement",
+            "external_result_evidence_id": evidence_id,
+            "source_key": evidence.source_key,
+            "source_url": evidence.url,
+            "source_title": evidence.title,
+            "source_home_name": evidence.home_name,
+            "source_away_name": evidence.away_name,
+            "expected_event_finish_at": expected_result_check_after,
+            "home_score": evidence.home_score,
+            "away_score": evidence.away_score,
+            "outcome_name": outcome_name,
+            "overdue_minutes": overdue_minutes,
+            "paper_only": true
+        })
+        .to_string();
+        let item = self
+            .settle_simulated_bet(
+                bet_id,
+                result,
+                &evidence.source_key,
+                evidence.confidence,
+                &notes,
+            )
+            .await?;
+        let audit = json!({
+            "external_result_evidence_id": evidence_id,
+            "bet_id": item.id,
+            "event_name": event_name,
+            "outcome_name": outcome_name,
+            "result": result,
+            "status": item.status,
+            "source_key": evidence.source_key,
+            "source_url": evidence.url,
+            "source_title": evidence.title,
+            "score": {"home": evidence.home_score, "away": evidence.away_score},
+            "expected_event_finish_at": expected_result_check_after,
+            "overdue_minutes": overdue_minutes,
+            "paper_only": true
+        });
+        self.record_audit("paper_bet_auto_settled_external_task", audit.clone())
+            .await
+            .ok();
+        self.mark_external_result_evidence_used(&evidence_id)
+            .await
+            .ok();
+        Ok(json!({
+            "enabled": true,
+            "paper_only": true,
+            "settled_count": 1,
+            "checked_count": 1,
+            "skipped_count": 0,
+            "checked": [checked],
+            "settled": [audit]
+        }))
+    }
+
     async fn record_external_result_evidence_from_link(
         &self,
         event_name: &str,
@@ -9805,6 +10010,68 @@ fn dedup_strings(values: Vec<String>) -> Vec<String> {
         .collect()
 }
 
+fn external_result_http_client() -> anyhow::Result<HttpClient> {
+    let mut headers = HeaderMap::new();
+    headers.insert(
+        ACCEPT,
+        HeaderValue::from_static(
+            "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
+        ),
+    );
+    headers.insert(
+        ACCEPT_LANGUAGE,
+        HeaderValue::from_static("da-DK,da;q=0.9,en-US;q=0.8,en;q=0.7"),
+    );
+    headers.insert(CACHE_CONTROL, HeaderValue::from_static("no-cache"));
+    headers.insert(PRAGMA, HeaderValue::from_static("no-cache"));
+    headers.insert(
+        HeaderName::from_static("upgrade-insecure-requests"),
+        HeaderValue::from_static("1"),
+    );
+    Ok(HttpClient::builder()
+        .user_agent("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36")
+        .default_headers(headers)
+        .timeout(StdDuration::from_secs(12))
+        .build()?)
+}
+
+fn external_result_link_from_task_source(value: &Value) -> Option<ExternalResultLink> {
+    let source_key = value.get("source_key").and_then(Value::as_str)?.to_string();
+    let url = value
+        .get("source_url")
+        .or_else(|| value.get("url"))
+        .and_then(Value::as_str)?
+        .to_string();
+    let known_result = value.get("known_result").unwrap_or(&Value::Null);
+    Some(ExternalResultLink {
+        source_key,
+        url,
+        sport_key: value
+            .get("sport_key")
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .map(str::to_string),
+        gender_scope: payload_gender_scope(value).ok().flatten(),
+        home_aliases: json_string_array(value.get("home_aliases")),
+        away_aliases: json_string_array(value.get("away_aliases")),
+        requires_browser_automation: value
+            .get("requires_browser_automation")
+            .and_then(Value::as_bool)
+            .unwrap_or(false),
+        known_home_score: json_i32(known_result.get("home_score")),
+        known_away_score: json_i32(known_result.get("away_score")),
+        known_result_status: known_result
+            .get("status")
+            .and_then(Value::as_str)
+            .map(str::to_string),
+        known_result_notes: known_result
+            .get("notes")
+            .and_then(Value::as_str)
+            .map(str::to_string),
+    })
+}
+
 async fn fetch_external_match_result(
     http: &HttpClient,
     link: &ExternalResultLink,
@@ -10726,6 +10993,31 @@ mod tests {
             Some("basketball"),
             "Team A / Sponsor - Team B / Sponsor"
         ));
+    }
+
+    #[test]
+    fn parses_task_source_link_for_direct_evidence_check() {
+        let link = external_result_link_from_task_source(&json!({
+            "source_key": "flashscore_results",
+            "source_url": "https://www.flashscore.com/match/football/psg-CjhkPw0k/arsenal-hA1Zm19f/?mid=EJZRaQ15",
+            "sport_key": "football",
+            "home_aliases": ["Paris SG", "PSG", "Paris Saint-Germain"],
+            "away_aliases": ["Arsenal"],
+            "requires_browser_automation": false,
+            "known_result": {
+                "home_score": 2,
+                "away_score": 1,
+                "status": "finished",
+                "notes": "fixture"
+            }
+        }))
+        .expect("source link");
+
+        assert_eq!(link.source_key, "flashscore_results");
+        assert_eq!(link.known_home_score, Some(2));
+        assert_eq!(link.known_away_score, Some(1));
+        assert_eq!(link.known_result_status.as_deref(), Some("finished"));
+        assert!(link.home_aliases.contains(&"PSG".to_string()));
     }
 
     #[test]

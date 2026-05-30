@@ -351,3 +351,8 @@ Append-only timeline for project wiki maintenance. Use headings with the format 
 
 - Added PSG/Paris Saint-Germain aliases for football result discovery after the live queue exposed `Paris SG - Arsenal` as a provider-name mismatch.
 - Refreshed the already-discovered tennis doubles source links so the live UI now shows only matched player aliases for those rows.
+
+## [2026-05-30] implementation | Queued configured-link settlement
+
+- Added a direct result-agent path for selected `public_result_evidence_check` tasks, so rows with configured non-browser public result links can fetch evidence and settle during the selected cycle instead of waiting for the global 120-minute overdue sweep.
+- Kept the existing overdue sweep as a backstop and added a parser regression test for queued source-link payloads.
