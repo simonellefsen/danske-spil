@@ -312,3 +312,8 @@ Append-only timeline for project wiki maintenance. Use headings with the format 
 - Seeded public result links for Vasco da Gama women versus America Mineiro women, Dallas Wings versus Las Vegas Aces, Casper Ruud versus Tommy Paul, and Bosnien-Hercegovina versus Nordmakedonien.
 - Expanded result-agent aliases for Danish country names, women markers, and Brazilian women's team naming drift across Danske Spil, Flashscore, and Sofascore.
 - Updated settlement grading to treat surname-first tennis names such as `Paul Tommy` and `Ruud Casper` as aliases for `Tommy Paul` and `Casper Ruud`.
+
+## [2026-05-30] implementation | Neutral friendly known-result seeding
+
+- Added `Irak` to the Flashscore country-alias path so public source discovery can search for `Iraq` when Danske Spil uses Danish naming.
+- Seeded the Andorra versus Irak neutral friendly as a known Flashscore result, oriented to the Danske Spil event order while preserving the reversed provider URL for audit.

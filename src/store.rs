@@ -257,6 +257,18 @@ VALUES
           "sport_key": "football",
           "home_aliases": ["Bosnien-Hercegovina", "Bosnien Herzegovina", "Bosnia and Herzegovina"],
           "away_aliases": ["Nordmakedonien", "North Macedonia"]
+        },
+        {
+          "event_name": "Andorra - Irak",
+          "url": "https://www.flashscore.dk/kamp/fodbold/andorra-dnO5z404/irak-K8aAGt6r/",
+          "sport_key": "football",
+          "home_aliases": ["Andorra"],
+          "away_aliases": ["Irak", "Iraq"],
+          "home_score": 0,
+          "away_score": 1,
+          "result_status": "finished",
+          "result_observed_from": "user_supplied_flashscore_result",
+          "notes": "Flashscore listed the neutral friendly as Irak - Andorra, with Irak winning 1-0. Stored scores are oriented to the Danske Spil event order Andorra - Irak."
         }
       ]
     }'::jsonb
@@ -10648,7 +10660,10 @@ mod tests {
                                 "event_name": "Irak - Andorra",
                                 "url": "https://www.flashscore.dk/kamp/fodbold/andorra-dnO5z404/irak-K8aAGt6r/",
                                 "home_aliases": ["Irak", "Iraq"],
-                                "away_aliases": ["Andorra"]
+                                "away_aliases": ["Andorra"],
+                                "home_score": 1,
+                                "away_score": 0,
+                                "result_status": "finished"
                             }
                         ]
                     }
@@ -10661,6 +10676,38 @@ mod tests {
         assert_eq!(links.len(), 1);
         assert_eq!(links[0].home_aliases, vec!["Irak", "Iraq"]);
         assert_eq!(links[0].away_aliases, vec!["Andorra"]);
+        assert_eq!(links[0].known_home_score, Some(1));
+        assert_eq!(links[0].known_away_score, Some(0));
+    }
+
+    #[test]
+    fn known_neutral_friendly_result_can_be_oriented_to_event_order() {
+        let link = ExternalResultLink {
+            source_key: "flashscore_results".to_string(),
+            url: "https://www.flashscore.dk/kamp/fodbold/andorra-dnO5z404/irak-K8aAGt6r/"
+                .to_string(),
+            sport_key: Some("football".to_string()),
+            gender_scope: None,
+            home_aliases: vec!["Andorra".to_string()],
+            away_aliases: vec!["Irak".to_string(), "Iraq".to_string()],
+            requires_browser_automation: false,
+            known_home_score: Some(0),
+            known_away_score: Some(1),
+            known_result_status: Some("finished".to_string()),
+            known_result_notes: Some("test fixture".to_string()),
+        };
+        let evidence = known_external_match_result(&link).expect("known result");
+
+        assert_eq!(evidence.title, "Andorra - Irak 0:1");
+        assert_eq!(grade_winner_outcome("Irak", &link, &evidence), Some("won"));
+        assert_eq!(
+            grade_winner_outcome("Andorra", &link, &evidence),
+            Some("lost")
+        );
+        assert_eq!(
+            grade_winner_outcome("Uafgjort", &link, &evidence),
+            Some("lost")
+        );
     }
 
     #[test]

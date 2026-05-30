@@ -164,8 +164,11 @@ before applying the final score. This prevents a source-side `Irak - Andorra
 1:0` result from being graded as if it were event-side `Andorra - Irak 1:0`.
 The same alias path handles Danish/localized provider names and person-name
 order changes, for example `Bosnien-Hercegovina` versus `Bosnia and
-Herzegovina`, women markers such as `(k)`/`(W)`, and tennis source names such
-as `Paul Tommy` for `Tommy Paul`.
+Herzegovina`, `Irak` versus `Iraq`, women markers such as `(k)`/`(W)`, and
+tennis source names such as `Paul Tommy` for `Tommy Paul`.
+When a neutral-friendly source lists teams in the opposite order, a seeded
+known result stores the score in the Danske Spil event order and keeps the
+source URL in the audit payload so automatic settlement remains deterministic.
 If a row still returns `flashscore_discovery_no_match`, the next step is to add
 another source adapter or a sport-specific pagination path, not an operator
 prompt.

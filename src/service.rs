@@ -2218,6 +2218,7 @@ fn localized_country_alias(name: &str) -> Option<&'static str> {
         "holland" | "nederlandene" => Some("Netherlands"),
         "hviderusland" => Some("Belarus"),
         "indien" => Some("India"),
+        "irak" => Some("Iraq"),
         "irland" => Some("Ireland"),
         "island" => Some("Iceland"),
         "italien" => Some("Italy"),
@@ -2809,6 +2810,7 @@ mod tests {
         assert!(flashscore_name_variants("Indien", "football").contains(&"India".to_string()));
         assert!(flashscore_name_variants("Bosnien-Hercegovina", "football")
             .contains(&"Bosnia and Herzegovina".to_string()));
+        assert!(flashscore_name_variants("Irak", "football").contains(&"Iraq".to_string()));
         assert!(flashscore_name_variants("Nordmakedonien", "football")
             .contains(&"North Macedonia".to_string()));
         assert!(flashscore_name_variants("Derthona Basket", "basketball")
