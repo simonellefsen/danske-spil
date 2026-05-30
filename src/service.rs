@@ -563,6 +563,16 @@ impl GamblerService {
             .ok()
             .flatten()
             .map(compact_result_agent_cycle_event);
+        let recent_cycles = self
+            .store
+            .audit_events_by_type("result_agent_cycle_completed", 8)
+            .await
+            .ok()
+            .and_then(|events| events.get("items").and_then(Value::as_array).cloned())
+            .unwrap_or_default()
+            .into_iter()
+            .map(compact_result_agent_cycle_summary_event)
+            .collect::<Vec<_>>();
 
         json!({
             "enabled": true,
@@ -576,6 +586,7 @@ impl GamblerService {
             },
             "danskespil_account_agent": account_agent,
             "latest_cycle": latest_cycle,
+            "recent_cycles": recent_cycles,
             "review_count": items.len(),
             "task_count": tasks.len(),
             "task_exposure": task_exposure,
@@ -2618,6 +2629,32 @@ fn compact_result_agent_cycle_event(event: Value) -> Value {
             "skipped_count": details.get("skipped_count").cloned().unwrap_or(Value::Null),
             "results": details.get("results").cloned().unwrap_or_else(|| json!([])),
             "skipped": details.get("skipped").cloned().unwrap_or_else(|| json!([]))
+        }
+    })
+}
+
+fn compact_result_agent_cycle_summary_event(event: Value) -> Value {
+    let details = event.get("details").cloned().unwrap_or_else(|| json!({}));
+    json!({
+        "id": event.get("id").cloned().unwrap_or(Value::Null),
+        "created_at": event.get("created_at").cloned().unwrap_or(Value::Null),
+        "event_type": event.get("event_type").cloned().unwrap_or(Value::Null),
+        "details": {
+            "enabled": details.get("enabled").cloned().unwrap_or(Value::Null),
+            "paper_only": details.get("paper_only").cloned().unwrap_or(Value::Null),
+            "agent": details.get("agent").cloned().unwrap_or(Value::Null),
+            "cycle_limit": details.get("cycle_limit").cloned().unwrap_or(Value::Null),
+            "queued_task_count": details.get("queued_task_count").cloned().unwrap_or(Value::Null),
+            "queued_task_exposure": details.get("queued_task_exposure").cloned().unwrap_or(Value::Null),
+            "selected_task_count": details.get("selected_task_count").cloned().unwrap_or(Value::Null),
+            "selected_task_exposure": details.get("selected_task_exposure").cloned().unwrap_or(Value::Null),
+            "task_attempted_count": details.get("task_attempted_count").cloned().unwrap_or(Value::Null),
+            "task_attempted_exposure": details.get("task_attempted_exposure").cloned().unwrap_or(Value::Null),
+            "task_skipped_exposure": details.get("task_skipped_exposure").cloned().unwrap_or(Value::Null),
+            "max_selected_priority": details.get("max_selected_priority").cloned().unwrap_or(Value::Null),
+            "attempted_count": details.get("attempted_count").cloned().unwrap_or(Value::Null),
+            "settled_count": details.get("settled_count").cloned().unwrap_or(Value::Null),
+            "skipped_count": details.get("skipped_count").cloned().unwrap_or(Value::Null)
         }
     })
 }

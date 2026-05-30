@@ -29,6 +29,7 @@ The UI is not a marketing site. It is an operational dashboard for repeated revi
 - Settlement workload metrics should show both counts and paper exposure for due review items, lookup-stale items, and sport-level due rows.
 - Result-agent queue rows should show paper stake and priority score so the highest-impact stale result work is visible before an agent cycle runs.
 - The latest result-agent cycle should be rendered next to the queue with queued, selected, attempted, skipped, and settled exposure/count summaries.
+- Recent result-agent cycles should be rendered as a short history so operators can confirm the scheduled reconciliation loop is progressing and see whether cycles are settling or skipping backlog rows.
 - Browser-backed external result evidence, including source, event, score, confidence, and whether the evidence has driven a paper settlement.
 - Account-history coupon evidence shows preserved leg event names in the settlement observations and external evidence tables so coupon audit rows are readable without opening raw payload JSON.
 - All known external result links on settlement-review rows, with browser-evidence markers for sources such as Sofascore that block direct HTTP lookups.

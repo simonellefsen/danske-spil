@@ -39,9 +39,10 @@ priority. This makes a capped result-agent cycle auditable without inspecting
 raw database rows.
 
 `GET /api/result-agent/queue` also includes the latest compact
-`result_agent_cycle_completed` audit event as `latest_cycle`, and the web UI
-renders it beside the backlog so operators can compare the current queue with
-the most recent scheduled or manual run.
+`result_agent_cycle_completed` audit event as `latest_cycle` plus the most
+recent compact cycle summaries as `recent_cycles`. The web UI renders both
+beside the backlog so operators can compare the current queue with scheduled
+and manual result-agent runs over time.
 
 `GET /api/result-agent/account-requests` exposes a focused subset for a local
 read-only Danske Spil account-history browser agent. It is independent of
@@ -237,9 +238,11 @@ The current implementation creates the queue, supports configured public result
 links, and automatically discovers Flashscore result links for common stale
 football, basketball, and tennis rows from the scheduled Rust worker. Winner and
 over/under markets can be graded from external final-score evidence. The
-account-history request endpoint and dashboard table now define the sanitized
-worklist for a local read-only Danske Spil account-history agent, and the API
-can persist or apply status-only account-history evidence for cancellations,
-refunds, and markets that cannot be graded from a plain final score. The next
-implementation step is the local browser worker that consumes those requests
-and submits the sanitized payload automatically.
+account-history request endpoint and dashboard table define the sanitized
+worklist for a local read-only Danske Spil account-history agent, and the local
+Python worker can consume those requests and submit compact bookmaker-status
+evidence. The API can persist or apply status-only account-history evidence for
+cancellations, refunds, and markets that cannot be graded from a plain final
+score. The next implementation step is to keep expanding source adapters and
+operational observability so stale paper rows can be reconciled without
+operator URL prompts.

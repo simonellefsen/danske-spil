@@ -121,6 +121,15 @@ pub fn render_index(base_path: &str) -> String {
                         }
                     }
                     section {
+                        h2 { title: "Recent scheduled and manual result-agent runs. Use this to confirm the 15-minute reconciliation loop is progressing and whether cycles are settling or skipping backlog rows.", "Recent result-agent cycles" }
+                        table {
+                            thead { tr {
+                                th { "Completed" } th { "Queued" } th { "Selected" } th { "Attempted" } th { "Skipped" } th { "Settled" }
+                            } }
+                            tbody { id: "result-agent-cycle-history" }
+                        }
+                    }
+                    section {
                         h2 { title: "Focused worklist for a local read-only Danske Spil account-history browser agent. It lists settlement facts to inspect and forbids credentials, cookies, browser storage, and full account pages.", "Account-history requests" }
                         div { class: "operator-note", id: "account-history-agent-runbook", "Loading local account-history agent runbook..." }
                         table {
@@ -818,6 +827,7 @@ function renderResultAgentQueue(queue) {
   $("result-agent-tasks").textContent = `${queue.task_count ?? items.length} / ${money(queue.task_exposure)}`;
   $("result-agent-tasks").className = Number(queue.task_count || items.length || 0) > 0 ? "value danger" : "value ok";
   renderResultAgentCycle(queue.latest_cycle || null);
+  renderResultAgentCycleHistory(queue.recent_cycles || []);
   $("result-agent-queue").innerHTML = items.map((item) => {
     const selection = item.selection || {};
     const ids = item.ids || {};
@@ -864,6 +874,26 @@ function renderResultAgentCycle(cycle) {
       <td>settled ${esc(details.settled_count ?? 0)}<br><span class="label">results ${esc(details.attempted_count ?? 0)}, skipped ${esc(details.skipped_count ?? 0)}</span></td>
     </tr>
   `;
+}
+function renderResultAgentCycleHistory(cycles) {
+  const items = Array.isArray(cycles) ? cycles : [];
+  if (!items.length) {
+    $("result-agent-cycle-history").innerHTML = `<tr><td colspan="6" class="muted">No result-agent cycle history has been recorded yet.</td></tr>`;
+    return;
+  }
+  $("result-agent-cycle-history").innerHTML = items.map((cycle) => {
+    const details = cycle.details || {};
+    return `
+      <tr>
+        <td>${esc(cycle.created_at || "-")}<br><span class="label">${esc(cycle.id || "")}</span></td>
+        <td>${esc(details.queued_task_count ?? 0)}<br><span class="muted">${money(details.queued_task_exposure)}</span></td>
+        <td>${esc(details.selected_task_count ?? 0)} / ${esc(details.cycle_limit ?? "-")}<br><span class="muted">${money(details.selected_task_exposure)}</span></td>
+        <td>${esc(details.task_attempted_count ?? 0)}<br><span class="muted">${money(details.task_attempted_exposure)}</span></td>
+        <td>${esc(details.skipped_count ?? 0)}<br><span class="muted">${money(details.task_skipped_exposure)}</span></td>
+        <td>${esc(details.settled_count ?? 0)}<br><span class="label">results ${esc(details.attempted_count ?? 0)}</span></td>
+      </tr>
+    `;
+  }).join("");
 }
 function renderAccountHistoryRequests(requests) {
   const items = requests.items || [];

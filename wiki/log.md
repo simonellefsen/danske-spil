@@ -270,3 +270,8 @@ Append-only timeline for project wiki maintenance. Use headings with the format 
 
 - Added the latest compact `result_agent_cycle_completed` audit event to `GET /api/result-agent/queue`.
 - Added a result-agent cycle table to the web UI showing queued, selected, attempted, skipped, and settled cycle accounting beside the backlog.
+
+## [2026-05-30] implementation | Result-agent cycle history
+
+- Added compact recent `result_agent_cycle_completed` summaries to `GET /api/result-agent/queue`.
+- Added a recent result-agent cycles table to the web UI so scheduled/manual reconciliation progress can be reviewed over time.
