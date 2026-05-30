@@ -1095,22 +1095,17 @@ function renderPerformance(report) {
   const lookup = settlement.lookup_cadence || {};
   $("next-capacity").textContent = `${capacity.next_scan_capacity ?? 0}/${capacity.per_scan_limit ?? 0}`;
   $("next-capacity").className = capacity.blocked ? "value danger" : "value ok";
-  $("due-review").textContent = String(settlement.due_total || 0);
+  $("due-review").textContent = `${settlement.due_total || 0} / ${money(settlement.due_exposure)}`;
   $("due-review").className = Number(settlement.due_total || 0) > 0 ? "value danger" : "value ok";
-  $("lookup-due").textContent = `${lookup.due_without_recent_lookup_count ?? 0}/${lookup.due_lookup_item_count ?? 0}`;
+  $("lookup-due").textContent = `${lookup.due_without_recent_lookup_count ?? 0}/${lookup.due_lookup_item_count ?? 0} / ${money(lookup.due_without_recent_lookup_exposure)}`;
   $("lookup-due").className = Number(lookup.due_without_recent_lookup_count || 0) > 0 ? "value danger" : "value ok";
 
-  const dueBySport = {};
-  (settlement.stale_awaiting || []).forEach((item) => {
-    const sport = item.sport_key || "unknown";
-    dueBySport[sport] = (dueBySport[sport] || 0) + 1;
-  });
   $("performance").innerHTML = (report.by_sport || []).map((item) => `
     <tr>
       <td><span class="pill">${esc(item.sport_key)}</span><br><span class="label">avg @ ${item.average_odds ? num(item.average_odds) : "-"}</span></td>
       <td>${esc(item.played_count)}<br><span class="muted">${money(item.turnover)}</span></td>
       <td>${esc(item.open_count)}<br><span class="muted">${money(item.open_exposure)}</span><br><span class="label">awaiting ${esc(item.awaiting_result_count || 0)} / ${money(item.awaiting_result_exposure)}</span></td>
-      <td>${esc(dueBySport[item.sport_key] || 0)}</td>
+      <td>${esc(item.due_count || 0)}<br><span class="muted">${money(item.due_exposure)}</span></td>
       <td>${money(item.profit_loss)}</td>
       <td>${pct(item.hit_rate)}</td>
     </tr>
@@ -1132,7 +1127,7 @@ function renderPerformance(report) {
     return `
       <tr>
         <td><span class="pill">${esc(item.item_type)}</span> ${esc(label)}<br><span class="label">${esc(detail || "")}</span></td>
-        <td>${esc(item.expected_result_check_after || "-")}<br><span class="muted">${esc(item.sport_key || "")}</span></td>
+        <td>${esc(item.expected_result_check_after || "-")}<br><span class="muted">${esc(item.sport_key || "")} / ${money(item.hypothetical_stake)}</span></td>
         <td>${esc(item.last_lookup_at || "never")}</td>
         <td>${esc(item.status || "-")}</td>
       </tr>

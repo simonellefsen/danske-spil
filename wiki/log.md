@@ -246,3 +246,10 @@ Append-only timeline for project wiki maintenance. Use headings with the format 
 
 - Added awaiting-result exposure to all-time strategy, sport, and risk-flag performance aggregates.
 - Updated the web UI so unresolved settlement backlog is visible in both daily panels and all-time performance sections.
+
+## [2026-05-30] implementation | Due settlement exposure reporting
+
+- Added due settlement exposure to the performance settlement-work payload, including due singles, due coupons, and lookup-stale exposure.
+- Changed sport performance due counts to come from the full aggregate instead of the capped stale-preview list.
+- Updated the web UI to show exposure next to due review, lookup-stale, sport-level due rows, and lookup due queue items.
+- Kept explicit CloudNativePG CPU and memory requests/limits in the Kubernetes manifest so future deploys preserve the database resource envelope.

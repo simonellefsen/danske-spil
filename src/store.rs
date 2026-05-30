@@ -5136,6 +5136,10 @@ impl Store {
                     WHERE status IN ('awaiting_result', 'unresolved', 'postponed')
                       AND expected_result_check_after <= now()
                   )::int AS due_single_count,
+                  COALESCE(sum(hypothetical_stake) FILTER (
+                    WHERE status IN ('awaiting_result', 'unresolved', 'postponed')
+                      AND expected_result_check_after <= now()
+                  ), 0)::float8 AS due_single_exposure,
                   min(expected_result_check_after) FILTER (
                     WHERE status IN ('awaiting_result', 'unresolved', 'postponed')
                       AND expected_result_check_after <= now()
@@ -5153,6 +5157,10 @@ impl Store {
                     WHERE status IN ('awaiting_result', 'unresolved', 'postponed')
                       AND expected_result_check_after <= now()
                   )::int AS due_coupon_count,
+                  COALESCE(sum(hypothetical_stake) FILTER (
+                    WHERE status IN ('awaiting_result', 'unresolved', 'postponed')
+                      AND expected_result_check_after <= now()
+                  ), 0)::float8 AS due_coupon_exposure,
                   min(expected_result_check_after) FILTER (
                     WHERE status IN ('awaiting_result', 'unresolved', 'postponed')
                       AND expected_result_check_after <= now()
@@ -5169,7 +5177,8 @@ impl Store {
                   SELECT
                     'single'::text AS item_type,
                     id AS simulated_bet_id,
-                    NULL::text AS simulated_coupon_id
+                    NULL::text AS simulated_coupon_id,
+                    hypothetical_stake::float8 AS stake
                   FROM simulated_bets
                   WHERE status IN ('awaiting_result', 'unresolved', 'postponed')
                     AND expected_result_check_after <= now()
@@ -5177,7 +5186,8 @@ impl Store {
                   SELECT
                     'coupon'::text AS item_type,
                     NULL::text AS simulated_bet_id,
-                    id AS simulated_coupon_id
+                    id AS simulated_coupon_id,
+                    hypothetical_stake::float8 AS stake
                   FROM simulated_coupons
                   WHERE status IN ('awaiting_result', 'unresolved', 'postponed')
                     AND expected_result_check_after <= now()
@@ -5187,6 +5197,7 @@ impl Store {
                     due.item_type,
                     due.simulated_bet_id,
                     due.simulated_coupon_id,
+                    due.stake,
                     max(sla.created_at) AS last_lookup_at
                   FROM due
                   LEFT JOIN settlement_lookup_attempts sla
@@ -5194,7 +5205,7 @@ impl Store {
                      (due.simulated_bet_id IS NOT NULL AND sla.simulated_bet_id = due.simulated_bet_id)
                      OR (due.simulated_coupon_id IS NOT NULL AND sla.simulated_coupon_id = due.simulated_coupon_id)
                    )
-                  GROUP BY due.item_type, due.simulated_bet_id, due.simulated_coupon_id
+                  GROUP BY due.item_type, due.simulated_bet_id, due.simulated_coupon_id, due.stake
                 ),
                 attempt_window AS (
                   SELECT
@@ -5207,13 +5218,21 @@ impl Store {
                 )
                 SELECT
                   (SELECT count(*)::int FROM due_with_attempt) AS due_lookup_item_count,
+                  COALESCE(sum(stake), 0)::float8 AS due_lookup_exposure,
                   count(*) FILTER (
                     WHERE last_lookup_at >= now() - ($1::int * interval '1 minute')
                   )::int AS recently_checked_due_count,
+                  COALESCE(sum(stake) FILTER (
+                    WHERE last_lookup_at >= now() - ($1::int * interval '1 minute')
+                  ), 0)::float8 AS recently_checked_due_exposure,
                   count(*) FILTER (
                     WHERE last_lookup_at IS NULL
                        OR last_lookup_at < now() - ($1::int * interval '1 minute')
                   )::int AS due_without_recent_lookup_count,
+                  COALESCE(sum(stake) FILTER (
+                    WHERE last_lookup_at IS NULL
+                       OR last_lookup_at < now() - ($1::int * interval '1 minute')
+                  ), 0)::float8 AS due_without_recent_lookup_exposure,
                   max(last_lookup_at) AS newest_due_lookup_at,
                   min(last_lookup_at) AS oldest_due_lookup_at,
                   CASE
@@ -5254,6 +5273,7 @@ impl Store {
                     sb.status,
                     sb.hypothetical_stake,
                     sb.profit_loss,
+                    sb.expected_result_check_after,
                     sb.observed_decimal_odds AS observed_odds
                   FROM simulated_bets sb
                   LEFT JOIN candidate_bets cb ON cb.id = sb.candidate_id
@@ -5263,6 +5283,7 @@ impl Store {
                     sc.status,
                     sc.hypothetical_stake,
                     sc.profit_loss,
+                    sc.expected_result_check_after,
                     sc.observed_combined_decimal_odds AS observed_odds
                   FROM simulated_coupons sc
                   LEFT JOIN coupon_sports cs ON cs.id = sc.id
@@ -5272,11 +5293,19 @@ impl Store {
                   count(*) FILTER (WHERE status <> 'duplicate_void')::int AS played_count,
                   count(*) FILTER (WHERE status IN ('open', 'awaiting_result', 'unresolved', 'postponed'))::int AS open_count,
                   count(*) FILTER (WHERE status = 'awaiting_result')::int AS awaiting_result_count,
+                  count(*) FILTER (
+                    WHERE status IN ('awaiting_result', 'unresolved', 'postponed')
+                      AND expected_result_check_after <= now()
+                  )::int AS due_count,
                   count(*) FILTER (WHERE status IN ('settled_won', 'settled_lost'))::int AS decided_count,
                   count(*) FILTER (WHERE status = 'settled_won')::int AS won_count,
                   COALESCE(sum(hypothetical_stake) FILTER (WHERE status <> 'duplicate_void'), 0)::float8 AS turnover,
                   COALESCE(sum(hypothetical_stake) FILTER (WHERE status IN ('open', 'awaiting_result', 'unresolved', 'postponed')), 0)::float8 AS open_exposure,
                   COALESCE(sum(hypothetical_stake) FILTER (WHERE status = 'awaiting_result'), 0)::float8 AS awaiting_result_exposure,
+                  COALESCE(sum(hypothetical_stake) FILTER (
+                    WHERE status IN ('awaiting_result', 'unresolved', 'postponed')
+                      AND expected_result_check_after <= now()
+                  ), 0)::float8 AS due_exposure,
                   COALESCE(sum(profit_loss) FILTER (WHERE status <> 'duplicate_void'), 0)::float8 AS profit_loss,
                   avg(observed_odds) FILTER (WHERE status <> 'duplicate_void')::float8 AS average_odds
                 FROM positions
@@ -5316,6 +5345,7 @@ impl Store {
                     sb.id AS item_id,
                     sb.status,
                     sb.expected_result_check_after,
+                    sb.hypothetical_stake::float8 AS stake,
                     cb.sport_key,
                     cb.event_name,
                     cb.market_name,
@@ -5332,6 +5362,7 @@ impl Store {
                     sc.id AS item_id,
                     sc.status,
                     sc.expected_result_check_after,
+                    sc.hypothetical_stake::float8 AS stake,
                     COALESCE(min(cb.sport_key), 'mixed') AS sport_key,
                     cc.coupon_type || ' coupon' AS event_name,
                     NULL::text AS market_name,
@@ -5344,7 +5375,7 @@ impl Store {
                   LEFT JOIN candidate_bets cb ON cb.id = scl.candidate_id
                   WHERE sc.status IN ('awaiting_result', 'unresolved', 'postponed')
                     AND sc.expected_result_check_after <= now()
-                  GROUP BY sc.id, sc.status, sc.expected_result_check_after, cc.coupon_type, cc.leg_count
+                  GROUP BY sc.id, sc.status, sc.expected_result_check_after, sc.hypothetical_stake, cc.coupon_type, cc.leg_count
                 ),
                 latest_lookup AS (
                   SELECT
@@ -5361,6 +5392,7 @@ impl Store {
                     due_items.item_id,
                     due_items.status,
                     due_items.expected_result_check_after,
+                    due_items.stake,
                     due_items.sport_key,
                     due_items.event_name,
                     due_items.market_name,
@@ -5455,15 +5487,21 @@ impl Store {
             },
             "settlement_work": {
                 "due_single_count": due_single.get::<_, i32>("due_single_count"),
+                "due_single_exposure": due_single.get::<_, f64>("due_single_exposure"),
                 "due_coupon_count": due_coupon.get::<_, i32>("due_coupon_count"),
+                "due_coupon_exposure": due_coupon.get::<_, f64>("due_coupon_exposure"),
                 "due_total": due_single.get::<_, i32>("due_single_count") + due_coupon.get::<_, i32>("due_coupon_count"),
+                "due_exposure": due_single.get::<_, f64>("due_single_exposure") + due_coupon.get::<_, f64>("due_coupon_exposure"),
                 "oldest_due": oldest_due,
                 "lookup_cadence": {
                     "source_scope": "settlement_review_sources",
                     "cooldown_minutes": lookup_cooldown_minutes,
                     "due_lookup_item_count": lookup_cadence_row.get::<_, i32>("due_lookup_item_count"),
+                    "due_lookup_exposure": lookup_cadence_row.get::<_, f64>("due_lookup_exposure"),
                     "recently_checked_due_count": lookup_cadence_row.get::<_, i32>("recently_checked_due_count"),
+                    "recently_checked_due_exposure": lookup_cadence_row.get::<_, f64>("recently_checked_due_exposure"),
                     "due_without_recent_lookup_count": lookup_cadence_row.get::<_, i32>("due_without_recent_lookup_count"),
+                    "due_without_recent_lookup_exposure": lookup_cadence_row.get::<_, f64>("due_without_recent_lookup_exposure"),
                     "newest_due_lookup_at": newest_due_lookup_at,
                     "oldest_due_lookup_at": oldest_due_lookup_at,
                     "next_lookup_due_at": next_lookup_due_at,
@@ -5478,6 +5516,7 @@ impl Store {
                         "item_type": row.get::<_, String>("item_type"),
                         "id": row.get::<_, String>("item_id"),
                         "status": row.get::<_, String>("status"),
+                        "hypothetical_stake": row.get::<_, f64>("stake"),
                         "expected_result_check_after": expected,
                         "last_lookup_at": last_lookup_at,
                         "sport_key": row.get::<_, Option<String>>("sport_key"),
@@ -5509,12 +5548,14 @@ impl Store {
                     "played_count": row.get::<_, i32>("played_count"),
                     "open_count": row.get::<_, i32>("open_count"),
                     "awaiting_result_count": row.get::<_, i32>("awaiting_result_count"),
+                    "due_count": row.get::<_, i32>("due_count"),
                     "decided_count": decided_count,
                     "won_count": won_count,
                     "hit_rate": if decided_count > 0 { Some(won_count as f64 / decided_count as f64) } else { None },
                     "turnover": row.get::<_, f64>("turnover"),
                     "open_exposure": row.get::<_, f64>("open_exposure"),
                     "awaiting_result_exposure": row.get::<_, f64>("awaiting_result_exposure"),
+                    "due_exposure": row.get::<_, f64>("due_exposure"),
                     "profit_loss": row.get::<_, f64>("profit_loss"),
                     "average_odds": row.get::<_, Option<f64>>("average_odds")
                 })
