@@ -168,7 +168,11 @@ impl GamblerService {
             json!({"error": error.to_string()})
         });
         let ledger_summary = self.store.ledger_summary().await.ok();
-        let promotion_gates = hermes_promotion_gates(&strategy, ledger_summary.as_ref());
+        let promotion_gates = hermes_promotion_gates(
+            &strategy,
+            ledger_summary.as_ref(),
+            reflection_assessment(&reflection),
+        );
         let proposed_experiment_count = strategy
             .get("experiments")
             .and_then(Value::as_array)
@@ -215,7 +219,14 @@ impl GamblerService {
         let reflections = self.store.hermes_reflections(25).await?;
         let strategy = self.store.strategy_state().await?;
         let ledger_summary = self.store.ledger_summary().await.ok();
-        let promotion_gates = hermes_promotion_gates(&strategy, ledger_summary.as_ref());
+        let latest_reflection_assessment = reflections
+            .first()
+            .and_then(|reflection| reflection.evidence.get("assessment"));
+        let promotion_gates = hermes_promotion_gates(
+            &strategy,
+            ledger_summary.as_ref(),
+            latest_reflection_assessment,
+        );
         let latest_cycle = self
             .store
             .latest_audit_event("hermes_cycle_completed")
@@ -3210,13 +3221,35 @@ fn boolish(value: Option<&Value>) -> bool {
     value.and_then(Value::as_bool).unwrap_or(false)
 }
 
-fn hermes_promotion_gates(strategy: &Value, ledger_summary: Option<&LedgerSummary>) -> Vec<Value> {
+fn reflection_assessment(reflection: &Value) -> Option<&Value> {
+    reflection
+        .get("evidence")
+        .and_then(|evidence| evidence.get("assessment"))
+        .filter(|assessment| assessment.is_object())
+}
+
+fn hermes_promotion_gates(
+    strategy: &Value,
+    ledger_summary: Option<&LedgerSummary>,
+    latest_reflection_assessment: Option<&Value>,
+) -> Vec<Value> {
     let settled_count = ledger_summary
         .map(|summary| summary.settled_count)
         .unwrap_or_default();
     let open_count = ledger_summary
         .map(|summary| summary.open_count)
         .unwrap_or_default();
+    let latest_reflection_state = latest_reflection_assessment
+        .and_then(|assessment| text(assessment, "performance_state"))
+        .unwrap_or("unknown");
+    let latest_reflection_needs_review = latest_reflection_assessment
+        .map(|assessment| {
+            latest_reflection_state == "provisional"
+                || boolish(assessment.get("needs_result_review"))
+                || number(assessment, "open_or_awaiting_count") > 0.0
+                || number(assessment, "open_exposure") > 0.0
+        })
+        .unwrap_or(false);
     let Some(experiments) = strategy.get("experiments").and_then(Value::as_array) else {
         return Vec::new();
     };
@@ -3272,6 +3305,9 @@ fn hermes_promotion_gates(strategy: &Value, ledger_summary: Option<&LedgerSummar
             if open_count > 0 {
                 blockers.push("open_or_awaiting_paper_exposure");
             }
+            if latest_reflection_needs_review {
+                blockers.push("latest_reflection_provisional_or_unresolved");
+            }
             if !paper_only {
                 blockers.push("paper_only_safety_not_confirmed");
             }
@@ -3293,6 +3329,16 @@ fn hermes_promotion_gates(strategy: &Value, ledger_summary: Option<&LedgerSummar
                     "min_settled_paper_positions": HERMES_MIN_SETTLED_FOR_PROMOTION,
                     "settled_paper_positions": settled_count,
                     "open_or_awaiting_paper_positions": open_count,
+                    "latest_reflection": {
+                        "available": latest_reflection_assessment.is_some(),
+                        "performance_state": latest_reflection_state,
+                        "needs_result_review": latest_reflection_needs_review,
+                        "settlement_progress": latest_reflection_assessment.and_then(|assessment| assessment.get("settlement_progress")).cloned().unwrap_or(Value::Null),
+                        "unresolved_exposure_ratio": latest_reflection_assessment.and_then(|assessment| assessment.get("unresolved_exposure_ratio")).cloned().unwrap_or(Value::Null),
+                        "open_exposure": latest_reflection_assessment.and_then(|assessment| assessment.get("open_exposure")).cloned().unwrap_or(Value::Null),
+                        "worst_case_profit_loss": latest_reflection_assessment.and_then(|assessment| assessment.get("worst_case_profit_loss")).cloned().unwrap_or(Value::Null),
+                        "best_case_profit_loss": latest_reflection_assessment.and_then(|assessment| assessment.get("best_case_profit_loss")).cloned().unwrap_or(Value::Null)
+                    },
                     "replay_evidence_present": replay_evidence_present,
                     "one_variable_change": one_variable,
                     "paper_only": paper_only,
@@ -3310,6 +3356,11 @@ fn compact_hermes_cycle_event(event: Value) -> Value {
         .get("reflection")
         .cloned()
         .unwrap_or_else(|| json!({}));
+    let reflection_assessment = reflection
+        .get("evidence")
+        .and_then(|evidence| evidence.get("assessment"))
+        .cloned()
+        .unwrap_or(Value::Null);
     let replay_refresh = details
         .get("replay_refresh")
         .cloned()
@@ -3357,7 +3408,8 @@ fn compact_hermes_cycle_event(event: Value) -> Value {
                 "title": reflection.get("title").cloned().unwrap_or(Value::Null),
                 "status": reflection.get("status").cloned().unwrap_or(Value::Null),
                 "created_at": reflection.get("created_at").cloned().unwrap_or(Value::Null),
-                "summary": reflection.get("summary").cloned().unwrap_or(Value::Null)
+                "summary": reflection.get("summary").cloned().unwrap_or(Value::Null),
+                "assessment": reflection_assessment
             },
             "replay_refresh": {
                 "paper_only": replay_refresh.get("paper_only").cloned().unwrap_or(Value::Null),
@@ -3526,7 +3578,7 @@ mod tests {
         });
         let ledger = test_ledger_summary(27, 3);
 
-        let gates = hermes_promotion_gates(&strategy, Some(&ledger));
+        let gates = hermes_promotion_gates(&strategy, Some(&ledger), None);
 
         assert_eq!(gates.len(), 1);
         assert_eq!(gates[0]["eligible_for_promotion"], json!(false));
@@ -3551,11 +3603,58 @@ mod tests {
         });
         let ledger = test_ledger_summary(100, 0);
 
-        let gates = hermes_promotion_gates(&strategy, Some(&ledger));
+        let reflection = json!({
+            "performance_state": "complete",
+            "needs_result_review": false,
+            "open_or_awaiting_count": 0,
+            "open_exposure": 0.0
+        });
+
+        let gates = hermes_promotion_gates(&strategy, Some(&ledger), Some(&reflection));
 
         assert_eq!(gates.len(), 1);
         assert_eq!(gates[0]["eligible_for_promotion"], json!(true));
         assert!(gates[0]["blockers"].as_array().unwrap().is_empty());
+        assert_eq!(
+            gates[0]["policy"]["latest_reflection"]["performance_state"],
+            json!("complete")
+        );
+    }
+
+    #[test]
+    fn hermes_promotion_gate_blocks_provisional_latest_reflection() {
+        let strategy = json!({
+            "experiments": [{
+                "id": "experiment-1",
+                "title": "Example",
+                "status": "active_simulation",
+                "variable_name": "max_decimal_odds",
+                "baseline_value": 8.0,
+                "proposed_value": 6.0,
+                "evidence": {"safety": {"paper_only": true}},
+                "decision_payload": {"replay_evidence": {"paper_only": true}}
+            }]
+        });
+        let ledger = test_ledger_summary(100, 0);
+        let reflection = json!({
+            "performance_state": "provisional",
+            "needs_result_review": true,
+            "open_or_awaiting_count": 2,
+            "open_exposure": 20.0
+        });
+
+        let gates = hermes_promotion_gates(&strategy, Some(&ledger), Some(&reflection));
+
+        assert_eq!(gates.len(), 1);
+        assert_eq!(gates[0]["eligible_for_promotion"], json!(false));
+        assert!(gates[0]["blockers"]
+            .as_array()
+            .unwrap()
+            .contains(&json!("latest_reflection_provisional_or_unresolved")));
+        assert_eq!(
+            gates[0]["policy"]["latest_reflection"]["performance_state"],
+            json!("provisional")
+        );
     }
 
     #[test]

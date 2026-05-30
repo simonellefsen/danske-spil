@@ -81,6 +81,7 @@ The Hermes view should show:
 - Recent reflections with timestamps, evidence references, performance state, settlement progress, unresolved exposure, realized P/L, worst/best-case P/L, and promotion recommendation.
 - One-variable experiment proposals.
 - Experiment status: pending review, rejected, approved for replay, active simulation, failed, promoted, or rolled back.
+- Promotion gates should show both all-ledger open exposure and the latest reflection state so an operator can see whether a strategy is blocked by unresolved daily paper performance, not only by sample size.
 - Changed variable, baseline value, proposed value, expected effect, and measured result.
 - Approval history and operator notes.
 - Active baseline context when one exists.

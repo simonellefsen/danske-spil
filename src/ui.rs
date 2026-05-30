@@ -1548,14 +1548,19 @@ function renderAuditEvents(events) {
 function renderPromotionGates(gates) {
   $("hermes-promotion-gates").innerHTML = (gates || []).map((gate) => {
     const policy = gate.policy || {};
+    const reflection = policy.latest_reflection || {};
     const blockers = gate.blockers || [];
+    const reflectionState = reflection.available
+      ? `${reflection.performance_state || "unknown"} / unresolved ${pct(reflection.unresolved_exposure_ratio)}`
+      : "reflection unavailable";
     return `
       <tr>
         <td>${esc(gate.title || gate.experiment_id || "-")}<br><span class="label">${esc(gate.variable_name || "")}</span></td>
         <td><span class="pill ${gate.eligible_for_promotion ? "ok" : "danger"}">${gate.eligible_for_promotion ? "yes" : "no"}</span></td>
         <td>
           settled ${esc(policy.settled_paper_positions ?? 0)} / ${esc(policy.min_settled_paper_positions ?? "-")}<br>
-          <span class="label">open ${esc(policy.open_or_awaiting_paper_positions ?? 0)}, replay ${policy.replay_evidence_present ? "yes" : "no"}</span>
+          <span class="label">open ${esc(policy.open_or_awaiting_paper_positions ?? 0)}, replay ${policy.replay_evidence_present ? "yes" : "no"}</span><br>
+          <span class="label">reflection ${esc(reflectionState)}</span>
         </td>
         <td>${blockers.length ? blockers.map(esc).join("<br>") : "<span class=\"ok\">clear</span>"}</td>
         <td>${esc(gate.recommendation || "")}</td>

@@ -393,3 +393,8 @@ Append-only timeline for project wiki maintenance. Use headings with the format 
 
 - Added a compact Hermes reflections table to the web UI so operators can inspect provisional/complete state, settlement progress, unresolved exposure, realized P/L, worst/best-case P/L, and promotion recommendation without reading raw JSON.
 - Documented the reflection table expectations in the web UI and Hermes docs.
+
+## [2026-05-30] implementation | Reflection-aware Hermes promotion gates
+
+- Wired the latest Hermes reflection assessment into promotion gates so provisional or unresolved daily paper performance becomes an explicit promotion blocker.
+- Surfaced latest reflection state in the promotion gate policy evidence and compact Hermes cycle payload.
