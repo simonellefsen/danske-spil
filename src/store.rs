@@ -4524,6 +4524,7 @@ impl Store {
                     sb.observed_decimal_odds::float8 AS odds,
                     sb.status,
                     sb.profit_loss::float8 AS profit_loss,
+                    sb.expected_result_check_after,
                     '[]'::jsonb AS legs
                   FROM simulated_bets sb
                   LEFT JOIN candidate_bets cb ON cb.id = sb.candidate_id
@@ -4543,13 +4544,41 @@ impl Store {
                     sc.observed_combined_decimal_odds::float8 AS odds,
                     sc.status,
                     sc.profit_loss::float8 AS profit_loss,
+                    sc.expected_result_check_after,
                     COALESCE(cd.legs, '[]'::jsonb) AS legs
                   FROM simulated_coupons sc
                   LEFT JOIN coupon_details cd ON cd.id = sc.id
                   WHERE sc.created_at >= $1 AND sc.created_at < $2
+                ),
+                latest_lookup AS (
+                  SELECT
+                    positions.*,
+                    max(sla.created_at) AS last_lookup_at
+                  FROM positions
+                  LEFT JOIN settlement_lookup_attempts sla
+                    ON (
+                     (positions.item_type = 'single' AND sla.simulated_bet_id = positions.item_id)
+                     OR (positions.item_type = 'coupon' AND sla.simulated_coupon_id = positions.item_id)
+                   )
+                  GROUP BY
+                    positions.item_type,
+                    positions.item_id,
+                    positions.created_at,
+                    positions.sport_key,
+                    positions.event_name,
+                    positions.competition,
+                    positions.market_name,
+                    positions.market_kind,
+                    positions.outcome_name,
+                    positions.stake,
+                    positions.odds,
+                    positions.status,
+                    positions.profit_loss,
+                    positions.expected_result_check_after,
+                    positions.legs
                 )
                 SELECT *
-                FROM positions
+                FROM latest_lookup
                 WHERE status <> 'duplicate_void'
                 ORDER BY created_at DESC
                 LIMIT 25
@@ -4561,6 +4590,12 @@ impl Store {
             .iter()
             .map(|row| {
                 let created_at: DateTime<Utc> = row.get("created_at");
+                let expected_result_check_after: Option<DateTime<Utc>> =
+                    row.get("expected_result_check_after");
+                let last_lookup_at: Option<DateTime<Utc>> = row.get("last_lookup_at");
+                let overdue_minutes = expected_result_check_after
+                    .filter(|expected| Utc::now() > *expected)
+                    .map(|expected| (Utc::now() - expected).num_minutes());
                 json!({
                     "item_type": row.get::<_, String>("item_type"),
                     "item_id": row.get::<_, String>("item_id"),
@@ -4575,6 +4610,9 @@ impl Store {
                     "observed_odds": row.get::<_, Option<f64>>("odds"),
                     "status": row.get::<_, String>("status"),
                     "profit_loss": row.get::<_, Option<f64>>("profit_loss"),
+                    "expected_result_check_after": expected_result_check_after.map(|value| value.to_rfc3339()),
+                    "last_lookup_at": last_lookup_at.map(|value| value.to_rfc3339()),
+                    "overdue_minutes": overdue_minutes,
                     "legs": row.get::<_, Value>("legs")
                 })
             })

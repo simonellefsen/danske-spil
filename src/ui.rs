@@ -247,7 +247,7 @@ pub fn render_index(base_path: &str) -> String {
                         h2 { title: "Recent paper placements in the selected local-day report.", "Daily placements" }
                         table {
                             thead { tr {
-                                th { "Created" } th { "Type" } th { "Selection" } th { "Stake" } th { "Status" }
+                                th { "Created" } th { "Type" } th { "Selection" } th { "Stake" } th { "Result check" } th { "Status" }
                             } }
                             tbody { id: "daily-performance-recent" }
                         }
@@ -1217,18 +1217,24 @@ function renderDailyPerformanceRecent(items) {
       ? `${item.market_name || "coupon"} / ${item.outcome_name || ""}`
       : `${item.event_name || item.item_id || ""} / ${item.outcome_name || ""}`;
     const context = [item.sport_key, item.competition, item.market_kind].filter(Boolean).join(" / ");
+    const overdue = item.overdue_minutes === null || item.overdue_minutes === undefined ? null : Number(item.overdue_minutes);
+    const overdueLabel = overdue === null ? "" : overdue > 0 ? `${Math.round(overdue)}m overdue` : "not due";
+    const lookupLabel = item.last_lookup_at ? `last ${item.last_lookup_at}` : "no lookup yet";
+    const checkMeta = overdueLabel || lookupLabel;
+    const lookupMeta = overdueLabel ? lookupLabel : "";
     return `
       <tr>
         <td>${esc(item.created_at || "-")}</td>
         <td><span class="pill">${esc(item.item_type || "single")}</span></td>
         <td>${esc(selection)}<br><span class="label">${esc(context)}</span></td>
         <td>${money(item.stake)}<br><span class="muted">@ ${esc(item.observed_odds ?? "-")}</span></td>
+        <td>${esc(item.expected_result_check_after || "-")}<br><span class="${overdue && overdue > 120 ? "danger" : "muted"}">${esc(checkMeta)}</span>${lookupMeta ? `<br><span class="label">${esc(lookupMeta)}</span>` : ""}</td>
         <td>${esc(item.status || "-")}<br><span class="muted">P/L ${maybeMoney(item.profit_loss)}</span></td>
       </tr>
     `;
   }).join("");
   if (!items.length) {
-    $("daily-performance-recent").innerHTML = `<tr><td colspan="5" class="muted">No paper placements for the selected date.</td></tr>`;
+    $("daily-performance-recent").innerHTML = `<tr><td colspan="6" class="muted">No paper placements for the selected date.</td></tr>`;
   }
 }
 async function loadDailyPerformanceForDate(value) {
@@ -1236,7 +1242,7 @@ async function loadDailyPerformanceForDate(value) {
   if (!date) {
     $("daily-performance-window").textContent = "Select a date to load a daily report.";
     $("daily-performance").innerHTML = `<tr><td colspan="6" class="muted">No date selected.</td></tr>`;
-    $("daily-performance-recent").innerHTML = `<tr><td colspan="5" class="muted">No date selected.</td></tr>`;
+    $("daily-performance-recent").innerHTML = `<tr><td colspan="6" class="muted">No date selected.</td></tr>`;
     return;
   }
   $("daily-performance-window").textContent = `Loading ${date}...`;
