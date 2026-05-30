@@ -398,3 +398,8 @@ Append-only timeline for project wiki maintenance. Use headings with the format 
 
 - Wired the latest Hermes reflection assessment into promotion gates so provisional or unresolved daily paper performance becomes an explicit promotion blocker.
 - Surfaced latest reflection state in the promotion gate policy evidence and compact Hermes cycle payload.
+
+## [2026-05-30] documentation | System architecture diagrams
+
+- Added Mermaid architecture diagrams to the Kubernetes architecture doc and the wiki so future sessions can quickly understand how the UI, API, worker, result agent, Hermes, Postgres, gateway, and external sources interact.
+- Added explicit component-role and safety-boundary notes for the split result-agent and Hermes loops.

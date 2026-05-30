@@ -3,7 +3,7 @@ type: wiki-index
 tags:
   - danske-spil/wiki
   - maintained-by-llm
-updated: 2026-05-25
+updated: 2026-05-30
 ---
 
 # Danske Spil Knowledge Wiki
@@ -16,6 +16,7 @@ Future Codex and Hermes sessions should read this file first for project-history
 - [log](log.md) - Append-only timeline of wiki operations.
 - [concepts/llm-maintained-project-wiki](concepts/llm-maintained-project-wiki.md) - How this repo uses the LLM wiki pattern.
 - [concepts/hermes-gambler-loop](concepts/hermes-gambler-loop.md) - Safe learning loop for `gambler` and Hermes.
+- [concepts/system-architecture](concepts/system-architecture.md) - Component map for the API, worker, result agent, Hermes, Postgres, gateway, and external sources.
 - [concepts/gambler-web-ui](concepts/gambler-web-ui.md) - Operator dashboard for reasoning, candidate review, and Hermes state.
 - [concepts/simulation-ledger](concepts/simulation-ledger.md) - Paper placements, outcome lookup, settlement, and simulated performance.
 - [concepts/sports-data-intelligence](concepts/sports-data-intelligence.md) - Stats, trends, weather, news, seasonality, and feature snapshots.
