@@ -408,3 +408,8 @@ Append-only timeline for project wiki maintenance. Use headings with the format 
 
 - Wired the central participant alias registry into result-agent queue tasks so Flashscore source discovery searches learned home/away aliases before reporting `flashscore_discovery_no_match`.
 - Preserved those registry aliases in newly discovered source-link payloads and documented that aliases now help both discovery and settlement grading.
+
+## [2026-05-30] implementation | Result-agent failure summaries
+
+- Added compact failure summaries to result-agent cycle audits, including top skipped reasons, Flashscore no-match diagnostic reasons, and sanitized examples with search names and candidate counts.
+- Surfaced the summary in the latest-cycle and recent-cycle UI tables so source-discovery failures are visible without inspecting raw audit JSON.

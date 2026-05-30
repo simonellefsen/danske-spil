@@ -904,13 +904,14 @@ function renderResultAgentCycle(cycle) {
     return;
   }
   const details = cycle.details || {};
+  const failureSummary = renderResultAgentFailureSummary(details.failure_summary);
   $("result-agent-cycle").innerHTML = `
     <tr>
       <td>${esc(cycle.created_at || "-")}<br><span class="label">${esc(cycle.id || "")}</span></td>
       <td>${esc(details.queued_task_count ?? 0)}<br><span class="muted">${money(details.queued_task_exposure)}</span></td>
       <td>${esc(details.selected_task_count ?? 0)} / ${esc(details.cycle_limit ?? "-")}<br><span class="muted">${money(details.selected_task_exposure)}</span><br><span class="label">max priority ${num(details.max_selected_priority)}</span></td>
       <td>${esc(details.task_attempted_count ?? 0)}<br><span class="muted">${money(details.task_attempted_exposure)}</span><br><span class="label">skipped ${money(details.task_skipped_exposure)}</span></td>
-      <td>settled ${esc(details.settled_count ?? 0)}<br><span class="label">results ${esc(details.attempted_count ?? 0)}, skipped ${esc(details.skipped_count ?? 0)}</span></td>
+      <td>settled ${esc(details.settled_count ?? 0)}<br><span class="label">results ${esc(details.attempted_count ?? 0)}, skipped ${esc(details.skipped_count ?? 0)}</span>${failureSummary}</td>
     </tr>
   `;
 }
@@ -922,17 +923,40 @@ function renderResultAgentCycleHistory(cycles) {
   }
   $("result-agent-cycle-history").innerHTML = items.map((cycle) => {
     const details = cycle.details || {};
+    const failureSummary = renderResultAgentFailureSummary(details.failure_summary, true);
     return `
       <tr>
         <td>${esc(cycle.created_at || "-")}<br><span class="label">${esc(cycle.id || "")}</span></td>
         <td>${esc(details.queued_task_count ?? 0)}<br><span class="muted">${money(details.queued_task_exposure)}</span></td>
         <td>${esc(details.selected_task_count ?? 0)} / ${esc(details.cycle_limit ?? "-")}<br><span class="muted">${money(details.selected_task_exposure)}</span></td>
         <td>${esc(details.task_attempted_count ?? 0)}<br><span class="muted">${money(details.task_attempted_exposure)}</span></td>
-        <td>${esc(details.skipped_count ?? 0)}<br><span class="muted">${money(details.task_skipped_exposure)}</span></td>
+        <td>${esc(details.skipped_count ?? 0)}<br><span class="muted">${money(details.task_skipped_exposure)}</span>${failureSummary}</td>
         <td>${esc(details.settled_count ?? 0)}<br><span class="label">results ${esc(details.attempted_count ?? 0)}</span></td>
       </tr>
     `;
   }).join("");
+}
+function renderResultAgentFailureSummary(summary, compact = false) {
+  if (!summary || !Array.isArray(summary.reasons) || !summary.reasons.length) return "";
+  const reasons = summary.reasons.slice(0, compact ? 2 : 3)
+    .map((item) => `${item.reason || "unknown"} ${item.count ?? 0}`)
+    .join(", ");
+  const noMatch = summary.flashscore_no_match || {};
+  const diagnosticReasons = Array.isArray(noMatch.diagnostic_reasons)
+    ? noMatch.diagnostic_reasons.slice(0, compact ? 1 : 2)
+      .map((item) => `${item.reason || "unknown"} ${item.count ?? 0}`)
+      .join(", ")
+    : "";
+  const examples = Array.isArray(noMatch.examples) && !compact
+    ? noMatch.examples.slice(0, 2)
+      .map((item) => `${item.event_name || "-"}: ${item.diagnostic_reason || "unknown"}`)
+      .join("; ")
+    : "";
+  return `
+    <br><span class="label">reasons ${esc(reasons)}</span>
+    ${diagnosticReasons ? `<br><span class="muted">Flashscore ${esc(diagnosticReasons)}</span>` : ""}
+    ${examples ? `<br><span class="muted">${esc(examples)}</span>` : ""}
+  `;
 }
 function renderAccountHistoryRequests(requests) {
   const items = requests.items || [];

@@ -49,7 +49,10 @@ recent compact cycle summaries as `recent_cycles`. It also returns
 `GAMBLER_RESULT_AGENT_INTERVAL_SECONDS` and marks the loop `current`, `stale`,
 `no_cycle`, or `disabled`. The web UI renders these fields beside the backlog
 so operators can compare the current queue with scheduled and manual
-result-agent runs over time.
+result-agent runs over time. Cycle summaries include a compact
+`failure_summary` with top skipped reasons, Flashscore no-match diagnostic
+reasons, and a few sanitized examples containing the search names and candidate
+counts used for discovery.
 
 `GET /api/result-agent/account-requests` exposes a focused subset for a local
 read-only Danske Spil account-history browser agent. It is independent of

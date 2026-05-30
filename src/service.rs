@@ -1102,6 +1102,7 @@ impl GamblerService {
             "max_selected_priority": max_selected_priority,
             "settled_count": settled_count,
             "skipped_count": skipped.len(),
+            "failure_summary": result_agent_failure_summary(&skipped),
             "results": results,
             "skipped": skipped
         });
@@ -3550,6 +3551,7 @@ fn compact_result_agent_cycle_event(event: Value) -> Value {
             "attempted_count": details.get("attempted_count").cloned().unwrap_or(Value::Null),
             "settled_count": details.get("settled_count").cloned().unwrap_or(Value::Null),
             "skipped_count": details.get("skipped_count").cloned().unwrap_or(Value::Null),
+            "failure_summary": details.get("failure_summary").cloned().unwrap_or(Value::Null),
             "results": details.get("results").cloned().unwrap_or_else(|| json!([])),
             "skipped": details.get("skipped").cloned().unwrap_or_else(|| json!([]))
         }
@@ -3577,9 +3579,95 @@ fn compact_result_agent_cycle_summary_event(event: Value) -> Value {
             "max_selected_priority": details.get("max_selected_priority").cloned().unwrap_or(Value::Null),
             "attempted_count": details.get("attempted_count").cloned().unwrap_or(Value::Null),
             "settled_count": details.get("settled_count").cloned().unwrap_or(Value::Null),
-            "skipped_count": details.get("skipped_count").cloned().unwrap_or(Value::Null)
+            "skipped_count": details.get("skipped_count").cloned().unwrap_or(Value::Null),
+            "failure_summary": details.get("failure_summary").cloned().unwrap_or(Value::Null)
         }
     })
+}
+
+fn result_agent_failure_summary(skipped: &[Value]) -> Value {
+    let mut reason_counts: Vec<(String, usize)> = Vec::new();
+    let mut diagnostic_reason_counts: Vec<(String, usize)> = Vec::new();
+    let mut flashscore_examples = Vec::new();
+
+    for item in skipped {
+        let reason = text(item, "reason").unwrap_or("unknown").to_string();
+        increment_count(&mut reason_counts, reason.clone());
+        if reason != "flashscore_discovery_no_match" {
+            continue;
+        }
+
+        let diagnostics = item.get("diagnostics").unwrap_or(&Value::Null);
+        let diagnostic_reason = text(diagnostics, "reason").unwrap_or("unknown").to_string();
+        increment_count(&mut diagnostic_reason_counts, diagnostic_reason.clone());
+        if flashscore_examples.len() >= 5 {
+            continue;
+        }
+
+        let selection = item.get("selection").unwrap_or(&Value::Null);
+        let home_candidates = diagnostics
+            .get("home_participant_candidates")
+            .and_then(Value::as_array)
+            .map(Vec::len)
+            .unwrap_or_default();
+        let away_candidates = diagnostics
+            .get("away_participant_candidates")
+            .and_then(Value::as_array)
+            .map(Vec::len)
+            .unwrap_or_default();
+        flashscore_examples.push(json!({
+            "event_name": selection.get("event_name").cloned().unwrap_or(Value::Null),
+            "sport_key": selection.get("sport_key").cloned().unwrap_or(Value::Null),
+            "competition": selection.get("competition").cloned().unwrap_or(Value::Null),
+            "market_name": selection.get("market_name").cloned().unwrap_or(Value::Null),
+            "outcome_name": selection.get("outcome_name").cloned().unwrap_or(Value::Null),
+            "diagnostic_reason": diagnostic_reason,
+            "home_name": diagnostics.get("home_name").cloned().unwrap_or(Value::Null),
+            "away_name": diagnostics.get("away_name").cloned().unwrap_or(Value::Null),
+            "home_search_names": diagnostics.get("home_search_names").cloned().unwrap_or(Value::Null),
+            "away_search_names": diagnostics.get("away_search_names").cloned().unwrap_or(Value::Null),
+            "home_candidate_count": home_candidates,
+            "away_candidate_count": away_candidates,
+            "participant_match_threshold": diagnostics.get("participant_match_threshold").cloned().unwrap_or(Value::Null)
+        }));
+    }
+
+    let flashscore_no_match_count = diagnostic_reason_counts
+        .iter()
+        .map(|(_, count)| *count)
+        .sum::<usize>();
+
+    json!({
+        "skipped_count": skipped.len(),
+        "reasons": count_pairs_json(reason_counts),
+        "flashscore_no_match": {
+            "count": flashscore_no_match_count,
+            "diagnostic_reasons": count_pairs_json(diagnostic_reason_counts),
+            "examples": flashscore_examples
+        }
+    })
+}
+
+fn increment_count(counts: &mut Vec<(String, usize)>, key: String) {
+    if let Some((_, count)) = counts.iter_mut().find(|(existing, _)| existing == &key) {
+        *count += 1;
+    } else {
+        counts.push((key, 1));
+    }
+}
+
+fn count_pairs_json(mut counts: Vec<(String, usize)>) -> Value {
+    counts.sort_by(|(left_reason, left_count), (right_reason, right_count)| {
+        right_count
+            .cmp(left_count)
+            .then_with(|| left_reason.cmp(right_reason))
+    });
+    Value::Array(
+        counts
+            .into_iter()
+            .map(|(reason, count)| json!({"reason": reason, "count": count}))
+            .collect(),
+    )
 }
 
 fn result_agent_cycle_health(
@@ -3888,6 +3976,51 @@ mod tests {
                 .filter(|alias| alias.as_str() == "Team Fog Næstved")
                 .count(),
             1
+        );
+    }
+
+    #[test]
+    fn result_agent_failure_summary_groups_flashscore_no_match_reasons() {
+        let skipped = vec![
+            json!({
+                "reason": "flashscore_discovery_no_match",
+                "selection": {
+                    "event_name": "Team Fog Næstved - Bakken Bears",
+                    "sport_key": "basketball",
+                    "competition": "Basketligaen",
+                    "market_name": "Antal point O/U 180,5",
+                    "outcome_name": "Over"
+                },
+                "diagnostics": {
+                    "reason": "home_participant_not_found",
+                    "home_name": "Team Fog Næstved",
+                    "away_name": "Bakken Bears",
+                    "home_search_names": ["Team Fog Næstved", "Team FOG Naestved"],
+                    "away_search_names": ["Bakken Bears"],
+                    "home_participant_candidates": [],
+                    "away_participant_candidates": [{"title": "Bakken Bears"}],
+                    "participant_match_threshold": 0.75
+                }
+            }),
+            json!({
+                "reason": "flashscore_discovery_no_match",
+                "selection": {"event_name": "A - B", "sport_key": "football"},
+                "diagnostics": {"reason": "home_participant_not_found"}
+            }),
+            json!({"reason": "configured_external_result_task_failed"}),
+        ];
+
+        let summary = result_agent_failure_summary(&skipped);
+
+        assert_eq!(summary["skipped_count"], json!(3));
+        assert_eq!(summary["flashscore_no_match"]["count"], json!(2));
+        assert_eq!(
+            summary["flashscore_no_match"]["diagnostic_reasons"][0],
+            json!({"reason": "home_participant_not_found", "count": 2})
+        );
+        assert_eq!(
+            summary["flashscore_no_match"]["examples"][0]["event_name"],
+            json!("Team Fog Næstved - Bakken Bears")
         );
     }
 
