@@ -189,7 +189,7 @@ VALUES
     'Danske Spil account or coupon history',
     'operator_settlement',
     'Danske Spil authenticated account/coupon history',
-    ARRAY['football','tennis','basketball','formula1','golf','cycling'],
+    ARRAY['football','tennis','basketball','motorsports','golf','cycling'],
     0.95,
     true,
     true,
@@ -201,7 +201,7 @@ VALUES
     'Official league, tournament, or federation results',
     'official_result',
     'Official competition result pages',
-    ARRAY['football','tennis','basketball','formula1','golf','cycling'],
+    ARRAY['football','tennis','basketball','motorsports','golf','cycling'],
     0.90,
     true,
     true,
@@ -324,7 +324,7 @@ VALUES
     'Documented third-party result source',
     'third_party_result',
     'Configured third-party result provider',
-    ARRAY['football','tennis','basketball','formula1','golf','cycling'],
+    ARRAY['football','tennis','basketball','motorsports','golf','cycling'],
     0.70,
     true,
     true,
@@ -759,6 +759,30 @@ UPDATE strategy_baselines
 SET config = jsonb_set(config, '{excluded_risk_flags}', '[]'::jsonb, true)
 WHERE strategy_id = 'poc_ranker_v1'
   AND NOT (config ? 'excluded_risk_flags');
+
+INSERT INTO sports (sport_key, label, drilldown_id, sport_codes, payload)
+VALUES (
+  'motorsports',
+  'Motorsports',
+  '319',
+  ARRAY['MOTOR_RACING','MOTORSPORT'],
+  '{"renamed_from": "formula1", "paper_only": true}'::jsonb
+)
+ON CONFLICT (sport_key) DO UPDATE
+SET label = EXCLUDED.label,
+    drilldown_id = EXCLUDED.drilldown_id,
+    sport_codes = EXCLUDED.sport_codes,
+    payload = sports.payload || EXCLUDED.payload,
+    last_seen_at = now();
+
+UPDATE competitions SET sport_key = 'motorsports' WHERE sport_key = 'formula1';
+UPDATE sport_events SET sport_key = 'motorsports' WHERE sport_key = 'formula1';
+UPDATE coupon_rule_observations SET sport_key = 'motorsports' WHERE sport_key = 'formula1';
+UPDATE feature_snapshots SET sport_key = 'motorsports' WHERE sport_key = 'formula1';
+UPDATE candidate_bets SET sport_key = 'motorsports' WHERE sport_key = 'formula1';
+UPDATE source_registry SET sport_scope = array_replace(sport_scope, 'formula1', 'motorsports');
+UPDATE odds_snapshots SET sport_keys = array_replace(sport_keys, 'formula1', 'motorsports');
+UPDATE ingestion_runs SET sport_keys = array_replace(sport_keys, 'formula1', 'motorsports');
 
 CREATE INDEX IF NOT EXISTS idx_sport_events_sport_key ON sport_events(sport_key);
 CREATE INDEX IF NOT EXISTS idx_sport_events_start_time ON sport_events(start_time);
@@ -2341,7 +2365,7 @@ impl Store {
                         WHEN cb.sport_key = 'football' THEN COALESCE(sb.event_start_time, se.start_time, (cb.feature_snapshot->>'start_time')::timestamptz) + interval '130 minutes'
                         WHEN cb.sport_key = 'basketball' THEN COALESCE(sb.event_start_time, se.start_time, (cb.feature_snapshot->>'start_time')::timestamptz) + interval '150 minutes'
                         WHEN cb.sport_key = 'tennis' THEN COALESCE(sb.event_start_time, se.start_time, (cb.feature_snapshot->>'start_time')::timestamptz) + interval '240 minutes'
-                        WHEN cb.sport_key IN ('formula1', 'golf', 'cycling') THEN COALESCE(sb.event_start_time, se.start_time, (cb.feature_snapshot->>'start_time')::timestamptz) + interval '1 day'
+                        WHEN cb.sport_key IN ('motorsports', 'golf', 'cycling') THEN COALESCE(sb.event_start_time, se.start_time, (cb.feature_snapshot->>'start_time')::timestamptz) + interval '1 day'
                         ELSE COALESCE(sb.event_start_time, se.start_time, (cb.feature_snapshot->>'start_time')::timestamptz) + interval '4 hours'
                       END
                     ) AS expected_result_check_after,
@@ -2446,7 +2470,7 @@ impl Store {
                           WHEN cb.sport_key = 'football' THEN COALESCE(scl.event_start_time, se.start_time, (cb.feature_snapshot->>'start_time')::timestamptz) + interval '130 minutes'
                           WHEN cb.sport_key = 'basketball' THEN COALESCE(scl.event_start_time, se.start_time, (cb.feature_snapshot->>'start_time')::timestamptz) + interval '150 minutes'
                           WHEN cb.sport_key = 'tennis' THEN COALESCE(scl.event_start_time, se.start_time, (cb.feature_snapshot->>'start_time')::timestamptz) + interval '240 minutes'
-                          WHEN cb.sport_key IN ('formula1', 'golf', 'cycling') THEN COALESCE(scl.event_start_time, se.start_time, (cb.feature_snapshot->>'start_time')::timestamptz) + interval '1 day'
+                          WHEN cb.sport_key IN ('motorsports', 'golf', 'cycling') THEN COALESCE(scl.event_start_time, se.start_time, (cb.feature_snapshot->>'start_time')::timestamptz) + interval '1 day'
                           ELSE COALESCE(scl.event_start_time, se.start_time, (cb.feature_snapshot->>'start_time')::timestamptz) + interval '4 hours'
                         END
                       )
@@ -2487,7 +2511,7 @@ impl Store {
                             WHEN cb.sport_key = 'football' THEN COALESCE(scl.event_start_time, se.start_time, (cb.feature_snapshot->>'start_time')::timestamptz) + interval '130 minutes'
                             WHEN cb.sport_key = 'basketball' THEN COALESCE(scl.event_start_time, se.start_time, (cb.feature_snapshot->>'start_time')::timestamptz) + interval '150 minutes'
                             WHEN cb.sport_key = 'tennis' THEN COALESCE(scl.event_start_time, se.start_time, (cb.feature_snapshot->>'start_time')::timestamptz) + interval '240 minutes'
-                            WHEN cb.sport_key IN ('formula1', 'golf', 'cycling') THEN COALESCE(scl.event_start_time, se.start_time, (cb.feature_snapshot->>'start_time')::timestamptz) + interval '1 day'
+                            WHEN cb.sport_key IN ('motorsports', 'golf', 'cycling') THEN COALESCE(scl.event_start_time, se.start_time, (cb.feature_snapshot->>'start_time')::timestamptz) + interval '1 day'
                             ELSE COALESCE(scl.event_start_time, se.start_time, (cb.feature_snapshot->>'start_time')::timestamptz) + interval '4 hours'
                           END
                         ),
@@ -2683,7 +2707,7 @@ impl Store {
                         WHEN cb.sport_key = 'football' THEN COALESCE(sb.event_start_time, se.start_time) + interval '130 minutes'
                         WHEN cb.sport_key = 'basketball' THEN COALESCE(sb.event_start_time, se.start_time) + interval '150 minutes'
                         WHEN cb.sport_key = 'tennis' THEN COALESCE(sb.event_start_time, se.start_time) + interval '240 minutes'
-                        WHEN cb.sport_key IN ('formula1', 'golf', 'cycling') THEN COALESCE(sb.event_start_time, se.start_time) + interval '1 day'
+                        WHEN cb.sport_key IN ('motorsports', 'golf', 'cycling') THEN COALESCE(sb.event_start_time, se.start_time) + interval '1 day'
                         ELSE COALESCE(sb.event_start_time, se.start_time) + interval '4 hours'
                       END
                     ) AS expected_result_check_after
@@ -2832,7 +2856,7 @@ impl Store {
                         WHEN cb.sport_key = 'football' THEN COALESCE(scl.event_start_time, se.start_time) + interval '130 minutes'
                         WHEN cb.sport_key = 'basketball' THEN COALESCE(scl.event_start_time, se.start_time) + interval '150 minutes'
                         WHEN cb.sport_key = 'tennis' THEN COALESCE(scl.event_start_time, se.start_time) + interval '240 minutes'
-                        WHEN cb.sport_key IN ('formula1', 'golf', 'cycling') THEN COALESCE(scl.event_start_time, se.start_time) + interval '1 day'
+                        WHEN cb.sport_key IN ('motorsports', 'golf', 'cycling') THEN COALESCE(scl.event_start_time, se.start_time) + interval '1 day'
                         ELSE COALESCE(scl.event_start_time, se.start_time) + interval '4 hours'
                       END
                     ) AS expected_result_check_after
@@ -3157,7 +3181,7 @@ impl Store {
                         WHEN sport_key = 'football' THEN event_start_time + interval '130 minutes'
                         WHEN sport_key = 'basketball' THEN event_start_time + interval '150 minutes'
                         WHEN sport_key = 'tennis' THEN event_start_time + interval '240 minutes'
-                        WHEN sport_key IN ('formula1', 'golf', 'cycling') THEN event_start_time + interval '1 day'
+                        WHEN sport_key IN ('motorsports', 'golf', 'cycling') THEN event_start_time + interval '1 day'
                         ELSE event_start_time + interval '4 hours'
                       END,
                       stored_expected_result_check_after
@@ -8714,7 +8738,7 @@ fn event_feature_snapshot(sport_key: &str, event: &Value) -> Value {
     if event.get("start_time").unwrap_or(&Value::Null).is_null() {
         missing.push("start_time");
     }
-    if teams.is_empty() && !matches!(sport_key, "formula1" | "golf" | "cycling") {
+    if teams.is_empty() && !matches!(sport_key, "motorsports" | "golf" | "cycling") {
         missing.push("participants");
     }
     if external_ids.is_empty() {
@@ -10664,7 +10688,7 @@ fn expected_event_finish_after_for_sport(
         "football" => Duration::minutes(130),
         "basketball" => Duration::minutes(150),
         "tennis" => Duration::minutes(240),
-        "formula1" | "golf" | "cycling" => Duration::days(1),
+        "motorsports" | "golf" | "cycling" => Duration::days(1),
         _ => Duration::hours(4),
     };
     Some(start + duration)

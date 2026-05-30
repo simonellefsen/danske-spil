@@ -37,9 +37,9 @@ const SPORTS: &[SportConfig] = &[
         outright_drilldown_id: None,
     },
     SportConfig {
-        key: "formula1",
+        key: "motorsports",
         drilldown_id: "319",
-        label: "Formula 1 / motorsport",
+        label: "Motorsports",
         sport_codes: &["MOTOR_RACING", "MOTORSPORT"],
         outright_drilldown_id: Some("17711"),
     },

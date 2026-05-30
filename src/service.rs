@@ -119,7 +119,7 @@ impl GamblerService {
                 "real_money_placement": false
             },
             "runtime": "rust-dioxus",
-            "sports_scope": ["football", "tennis", "basketball", "formula1", "golf", "cycling"]
+            "sports_scope": ["football", "tennis", "basketball", "motorsports", "golf", "cycling"]
         })
     }
 
@@ -2171,7 +2171,7 @@ fn flashscore_participant_score(
 }
 
 fn sport_uses_individual_participants(sport_key: &str) -> bool {
-    matches!(sport_key, "tennis" | "formula1" | "golf" | "cycling")
+    matches!(sport_key, "tennis" | "motorsports" | "golf" | "cycling")
 }
 
 fn flashscore_title_gender(title: &str) -> Option<String> {

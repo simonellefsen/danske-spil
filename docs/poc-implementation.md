@@ -40,7 +40,7 @@ The script normalizes:
 - Outcome names and decimal odds.
 - Handicap and over/under line fields.
 - Live scoreboard facts such as score, cards, and corners when available.
-- Formula 1 outright markets from the Formula 1 competition feed.
+- Motorsports outright markets, currently observed through the Formula 1 competition feed.
 
 By default the probe filters out started/live events and obvious virtual/eSports spillover. Add `--include-live` when the monitoring POC needs live clocks, scores, corners, cards, or in-play prices. Add `--date-days N` only when a specific upcoming date band is needed; the site may otherwise expose useful near-term events without a date band.
 
@@ -51,7 +51,7 @@ Initial anonymous navigation exposed these useful sport entry points:
 - Football/soccer: `/oddset/sport/12/fodbold/matches`
 - Tennis: `/oddset/sport/854/tennis/matches`
 - Basketball: `/oddset/sport/465/basketball/matches`
-- Motorsport/Formula 1: `/oddset/sport/319/motorsport/matches`
+- Motorsports: `/oddset/sport/319/motorsport/matches`
 - Golf: `/oddset/sport/561/golf/matches`
 - Cycling: `/oddset/sport/660/cykling/matches`
 
@@ -80,7 +80,7 @@ The rendered page also exposes market selector chips such as:
 - Tennis set/game market labels where available
 - Basketball period/quarter lines where available
 - Over/under buttons using `O` and `U`
-- Formula 1 season outrights and head-to-head driver/team markets
+- Motorsports season outrights and head-to-head driver/team markets
 - Cycling stage head-to-head markets
 
 Golf currently returns no anonymous match or outright events from the observed feeds when probed on 2026-05-25. Keep it in scope, but treat it as a feed-discovery item for the next browser pass.

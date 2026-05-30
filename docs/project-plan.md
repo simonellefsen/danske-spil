@@ -73,7 +73,7 @@ Scope:
 - Persist odds snapshots, Tips coupons, event metadata, candidate selections, browser-session metadata, and audit events.
 - Persist simulated bet placements and coupon placements as immutable paper-ledger records.
 - Persist settlement lookups and final win/loss grading for each simulated bet.
-- Persist sports intelligence inputs for the initial focus sports: football/soccer, tennis, basketball, Formula 1, golf, and cycling.
+- Persist sports intelligence inputs for the initial focus sports: football/soccer, tennis, basketball, motorsports, golf, and cycling.
 - Add deduplication and timestamps so strategy learning can replay observations.
 - Store no credentials, cookies, MitID data, or raw personally identifying account payloads in Postgres.
 - Store structured decision traces that explain candidate selection without storing private model scratchpads or secrets.

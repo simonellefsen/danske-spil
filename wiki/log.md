@@ -33,7 +33,7 @@ Append-only timeline for project wiki maintenance. Use headings with the format 
 ## [2026-05-25] planning | Sports data intelligence
 
 - Added the sports intelligence layer for stats, trends, weather, seasonality, news, and availability signals.
-- Set the initial sport scope to football/soccer, tennis, basketball, Formula 1, golf, and cycling.
+- Set the initial sport scope to football/soccer, tennis, basketball, motorsports, golf, and cycling.
 - Documented Postgres as the durable state store for normalized entities, source provenance, feature snapshots, and ingestion audit state.
 
 ## [2026-05-25] implementation | Agent-browser and content-service POC
@@ -280,3 +280,8 @@ Append-only timeline for project wiki maintenance. Use headings with the format 
 
 - Added `cycle_health` to `GET /api/result-agent/queue`, derived from the latest completed cycle and configured result-agent interval.
 - Added top-level and cycle-panel web UI indicators for current, stale, no-cycle, and disabled result-agent loop states.
+
+## [2026-05-30] implementation | Motorsports category rename
+
+- Renamed the broad racing sport key from `formula1` to `motorsports` across scanner config, service scope, and docs.
+- Added schema normalization so existing `formula1` sport-key rows are moved to `motorsports` where the local database stores sport keys directly.

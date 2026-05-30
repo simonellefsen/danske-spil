@@ -19,7 +19,7 @@ sources:
 - Football/soccer.
 - Tennis.
 - Basketball.
-- Formula 1.
+- Motorsports, including Formula 1, IndyCar, NASCAR, endurance racing such as Le Mans, and motorbike racing.
 - Golf.
 - Cycling.
 

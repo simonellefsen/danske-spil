@@ -7,7 +7,7 @@ Initial sports scope:
 - Football/soccer.
 - Tennis.
 - Basketball.
-- Formula 1.
+- Motorsports, including Formula 1, IndyCar, NASCAR, endurance racing such as Le Mans, and motorbike racing.
 - Golf.
 - Cycling.
 
@@ -46,7 +46,7 @@ Sport-specific notes:
 - Football/soccer: teams, players, injuries, suspensions, lineups, rest days, travel, venue, weather, table position, expected goals, scoring/conceding trends, set-piece trends.
 - Tennis: player rankings, surface, draw, fatigue, head-to-head, recent form, injury/retirement signals, travel, indoor/outdoor and weather where relevant.
 - Basketball: teams, players, injuries, rotations, pace, offensive/defensive ratings, schedule density, back-to-backs, travel, home/away splits.
-- Formula 1: drivers, constructors, circuits, practice/qualifying/race sessions, weather, tire degradation, grid position, penalties, safety-car history.
+- Motorsports: series, drivers/riders, teams/constructors, circuits, practice/qualifying/race sessions, weather, tire degradation, grid position, penalties, safety-car history, and series-specific race format.
 - Golf: players, course fit, weather/wind, strokes-gained categories, recent form, tournament history, tee-time wave effects.
 - Cycling: riders, teams, race profile, stage type, route, weather/wind, climbing/time-trial ability, fatigue, injuries, team tactics, general-classification context.
 

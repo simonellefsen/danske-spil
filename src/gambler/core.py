@@ -196,7 +196,7 @@ class GamblerService:
             "recent_simulated_bet_count": len(ledger),
             "ledger_summary": self.store.ledger_summary(),
             "strategy_id": "poc_ranker_v1",
-            "sports_scope": ["football", "tennis", "basketball", "formula1", "golf", "cycling"],
+            "sports_scope": ["football", "tennis", "basketball", "motorsports", "golf", "cycling"],
         }
 
     def scan(self, include_live: bool = False) -> dict[str, Any]:

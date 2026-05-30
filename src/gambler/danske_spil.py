@@ -13,9 +13,9 @@ SPORTS: dict[str, dict[str, Any]] = {
     "football": {"drilldown_id": "12", "label": "Football/soccer", "sport_codes": {"FOOTBALL"}},
     "tennis": {"drilldown_id": "854", "label": "Tennis", "sport_codes": {"TENNIS"}},
     "basketball": {"drilldown_id": "465", "label": "Basketball", "sport_codes": {"BASKETBALL"}},
-    "formula1": {
+    "motorsports": {
         "drilldown_id": "319",
-        "label": "Formula 1 / motorsport",
+        "label": "Motorsports",
         "sport_codes": {"MOTOR_RACING", "MOTORSPORT"},
         "outright_drilldown_id": "17711",
     },

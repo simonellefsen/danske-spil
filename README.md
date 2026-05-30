@@ -26,7 +26,7 @@ These topics are the durable map for the project:
 - [Compliance and safety](docs/compliance-and-safety.md) - Hard guardrails for regulated gambling, credentials, responsible-gambling controls, and the current no-real-money automation posture.
 - [Browser investigation](docs/browser-investigation.md) - Runbook for using `agent-browser` or an equivalent browser engine to learn Oddset and Tips without mutating account state.
 - [Gambler web UI](docs/web-ui.md) - Operator dashboard requirements for observed odds, candidate reasoning, coupon review, Hermes state, audit events, and safety gates.
-- [Sports data intelligence](docs/data-intelligence.md) - Data-ingestion plan for football/soccer, tennis, basketball, Formula 1, golf, and cycling using stats, trends, weather, seasonality, and news.
+- [Sports data intelligence](docs/data-intelligence.md) - Data-ingestion plan for football/soccer, tennis, basketball, motorsports, golf, and cycling using stats, trends, weather, seasonality, and news.
 - [Simulation ledger](docs/simulation-ledger.md) - Paper-betting model for simulated placements, immutable entry odds, settlement lookup, and simulated performance metrics.
 - [Result agent](docs/result-agent.md) - Automated read-only result discovery queue, source precedence, public browser evidence agent, and account-history boundary.
 - [POC implementation notes](docs/poc-implementation.md) - Current Rust/Dioxus service shape, scanner behavior, storage model, API endpoints, and implementation boundaries.
