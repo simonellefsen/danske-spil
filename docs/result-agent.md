@@ -122,6 +122,9 @@ participant match than a single shared token. This prevents rows such as a
 city-name-only match from being resolved through an unrelated club and records
 `home_participant_low_confidence` or `away_participant_low_confidence` in the
 cycle diagnostics instead of probing irrelevant feeds.
+The queue also respects the settlement lookup cooldown. Rows whose latest lookup
+attempt is still fresh remain visible in settlement review, but they are not
+emitted as result-agent or account-history tasks until `lookup_stale=true`.
 
 ```text
 POST /api/result-agent/run

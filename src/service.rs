@@ -1107,6 +1107,9 @@ impl GamblerService {
 }
 
 fn result_agent_task(item: &Value, account_agent: &Value) -> Option<Value> {
+    if !lookup_stale(item) {
+        return None;
+    }
     let recommendation = item
         .get("recommendation")
         .and_then(Value::as_str)
@@ -1226,6 +1229,9 @@ fn result_agent_task(item: &Value, account_agent: &Value) -> Option<Value> {
 }
 
 fn account_history_request(item: &Value) -> Option<Value> {
+    if !lookup_stale(item) {
+        return None;
+    }
     let recommendation = item
         .get("recommendation")
         .and_then(Value::as_str)
@@ -3371,6 +3377,12 @@ fn compact_hermes_cycle_event(event: Value) -> Value {
     })
 }
 
+fn lookup_stale(item: &Value) -> bool {
+    item.get("lookup_stale")
+        .and_then(Value::as_bool)
+        .unwrap_or(true)
+}
+
 fn compact_result_agent_cycle_event(event: Value) -> Value {
     let details = event.get("details").cloned().unwrap_or_else(|| json!({}));
     json!({
@@ -3544,6 +3556,46 @@ mod tests {
         assert_eq!(gates.len(), 1);
         assert_eq!(gates[0]["eligible_for_promotion"], json!(true));
         assert!(gates[0]["blockers"].as_array().unwrap().is_empty());
+    }
+
+    #[test]
+    fn result_agent_and_account_requests_respect_lookup_cooldown() {
+        let stale_item = json!({
+            "item_type": "single",
+            "bet_id": "bet-1",
+            "recommendation": "external_result_required",
+            "lookup_stale": true,
+            "hypothetical_stake": 10.0,
+            "overdue_minutes": 30,
+            "event_name": "Toronto Tempo - Seattle Storm",
+            "sport_key": "basketball",
+            "competition": "WNBA",
+            "market_name": "Kampvinder (Inkl. OT)",
+            "market_kind": "handicap",
+            "outcome_name": "Seattle Storm",
+            "external_result_links": []
+        });
+        let cooling_item = json!({
+            "item_type": "single",
+            "bet_id": "bet-1",
+            "recommendation": "external_result_required",
+            "lookup_stale": false,
+            "hypothetical_stake": 10.0,
+            "overdue_minutes": 30,
+            "event_name": "Toronto Tempo - Seattle Storm",
+            "sport_key": "basketball",
+            "competition": "WNBA",
+            "market_name": "Kampvinder (Inkl. OT)",
+            "market_kind": "handicap",
+            "outcome_name": "Seattle Storm",
+            "external_result_links": []
+        });
+        let account_agent = json!({"available": false});
+
+        assert!(result_agent_task(&stale_item, &account_agent).is_some());
+        assert!(result_agent_task(&cooling_item, &account_agent).is_none());
+        assert!(account_history_request(&stale_item).is_some());
+        assert!(account_history_request(&cooling_item).is_none());
     }
 
     #[test]

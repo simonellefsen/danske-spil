@@ -373,3 +373,8 @@ Append-only timeline for project wiki maintenance. Use headings with the format 
 
 - Added a stricter Flashscore selected-participant threshold for team sports so one-token overlaps such as city-only matches do not send the result agent into unrelated team feeds.
 - Added diagnostics for low-confidence home/away participant selections and a regression test covering the Toronto Tempo/Seattle Storm failure shape.
+
+## [2026-05-30] implementation | Result-agent lookup cooldown enforcement
+
+- Changed result-agent and local account-history task generation to respect `lookup_stale=false`, so deterministic no-match rows do not monopolize every scheduled cycle during the configured cooldown window.
+- Added regression coverage proving stale items produce tasks while cooling-down items remain visible in review but are not emitted to agents.
