@@ -97,7 +97,7 @@ Current POC status:
 - `GET /api/odds/movement` derives latest-vs-previous odds drift from `outcome_observations` for decision-time monitoring.
 - Candidate feature snapshots embed `odds_movement` when the same event, market, and outcome had a prior observation before the current scan, and movement-derived risk flags are persisted for replay.
 - Weather, news, rankings, form, and injury/availability are explicitly marked missing until separate sources are configured and reviewed.
-- Coverage is exposed through `GET /api/intelligence/coverage` and shown in the web UI.
+- Coverage is exposed through `GET /api/intelligence/coverage` and shown in the web UI. The same endpoint includes `motorsports_series`, a series-family coverage summary for the broad motorsports category.
 
 ## Decision-Time Features
 

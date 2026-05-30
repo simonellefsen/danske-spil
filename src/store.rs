@@ -6006,6 +6006,25 @@ impl Store {
                 &[],
             )
             .await?;
+        let motorsports_series = client
+            .query(
+                r#"
+                SELECT
+                  COALESCE(NULLIF(features #>> '{sport_context,series_family}', ''), 'unknown') AS series_family,
+                  COALESCE(NULLIF(features #>> '{sport_context,vehicle_type}', ''), 'unknown') AS vehicle_type,
+                  count(*)::int AS feature_count,
+                  count(DISTINCT event_id)::int AS event_count,
+                  avg(confidence)::float8 AS average_confidence,
+                  count(*) FILTER (WHERE missing_signals ? 'motorsports_series')::int AS missing_series_count,
+                  max(created_at) AS last_created_at
+                FROM feature_snapshots
+                WHERE sport_key = 'motorsports'
+                GROUP BY series_family, vehicle_type
+                ORDER BY feature_count DESC, series_family
+                "#,
+                &[],
+            )
+            .await?;
         let runs = client
             .query(
                 r#"
@@ -6041,6 +6060,18 @@ impl Store {
                     "missing_news_count": row.get::<_, i32>("missing_news_count"),
                     "missing_rankings_count": row.get::<_, i32>("missing_rankings_count"),
                     "missing_form_count": row.get::<_, i32>("missing_form_count"),
+                    "last_created_at": last_created_at
+                })
+            }).collect::<Vec<_>>(),
+            "motorsports_series": motorsports_series.iter().map(|row| {
+                let last_created_at: DateTime<Utc> = row.get("last_created_at");
+                json!({
+                    "series_family": row.get::<_, String>("series_family"),
+                    "vehicle_type": row.get::<_, String>("vehicle_type"),
+                    "feature_count": row.get::<_, i32>("feature_count"),
+                    "event_count": row.get::<_, i32>("event_count"),
+                    "average_confidence": row.get::<_, Option<f64>>("average_confidence"),
+                    "missing_series_count": row.get::<_, i32>("missing_series_count"),
                     "last_created_at": last_created_at
                 })
             }).collect::<Vec<_>>(),

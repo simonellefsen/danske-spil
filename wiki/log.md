@@ -290,3 +290,8 @@ Append-only timeline for project wiki maintenance. Use headings with the format 
 
 - Added a motorsports `sport_context` feature snapshot classifier for Formula 1, IndyCar, NASCAR, endurance, motorbike, rally, and unknown racing rows.
 - Added a `motorsports_series` missing-signal marker when feed text does not identify the series family.
+
+## [2026-05-30] implementation | Motorsports series coverage
+
+- Added `motorsports_series` to `GET /api/intelligence/coverage`, grouped by series family and vehicle type.
+- Added a Motorsports series table to the web UI so unknown racing rows are visible without querying Postgres.

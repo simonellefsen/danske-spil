@@ -126,6 +126,10 @@ Coverage is available at:
 GET /api/intelligence/coverage
 ```
 
+The coverage payload includes `motorsports_series`, a series-family summary for
+the broad motorsports category so the dashboard can distinguish Formula 1,
+IndyCar, NASCAR, endurance, motorbike, rally, and unknown feed rows.
+
 ## Strategy Baseline And Experiment POC
 
 The service persists a paper-only `poc_ranker_v1` baseline and one-variable strategy experiment proposals:

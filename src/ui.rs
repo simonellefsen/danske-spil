@@ -336,6 +336,15 @@ pub fn render_index(base_path: &str) -> String {
                         }
                     }
                     section {
+                        h2 { title: "Series-family coverage for the broad motorsports category. Unknown rows indicate feed text did not identify the racing series and need better source adapters.", "Motorsports series" }
+                        table {
+                            thead { tr {
+                                th { "Series" } th { "Vehicle" } th { "Events" } th { "Features" } th { "Confidence" } th { "Missing" }
+                            } }
+                            tbody { id: "motorsports-series" }
+                        }
+                    }
+                    section {
                         h2 { "Ingestion runs" }
                         table {
                             thead { tr {
@@ -1454,6 +1463,20 @@ function renderIntelligence(coverage) {
   }).join("");
   if (!features.length) {
     $("intelligence").innerHTML = `<tr><td colspan="5" class="muted">No feature snapshots yet. Run a scan.</td></tr>`;
+  }
+  const series = coverage.motorsports_series || [];
+  $("motorsports-series").innerHTML = series.map((item) => `
+    <tr>
+      <td><span class="pill">${esc(item.series_family || "unknown")}</span></td>
+      <td>${esc(item.vehicle_type || "-")}</td>
+      <td>${esc(item.event_count ?? 0)}</td>
+      <td>${esc(item.feature_count ?? 0)}</td>
+      <td>${pct(item.average_confidence)}</td>
+      <td>${item.missing_series_count ? `<span class="danger">${esc(item.missing_series_count)} unknown</span>` : "-"}</td>
+    </tr>
+  `).join("");
+  if (!series.length) {
+    $("motorsports-series").innerHTML = `<tr><td colspan="6" class="muted">No motorsports feature snapshots yet.</td></tr>`;
   }
   const runs = coverage.recent_runs || [];
   $("ingestion-runs").innerHTML = runs.map((item) => `
