@@ -38,6 +38,7 @@ pub fn render_index(base_path: &str) -> String {
                     div { class: "metric", div { class: "label", "Due review" } div { class: "value", id: "due-review", "-" } }
                     div { class: "metric", div { class: "label", "Lookup due" } div { class: "value", id: "lookup-due", "-" } }
                     div { class: "metric", div { class: "label", "Result agent" } div { class: "value", id: "result-agent-tasks", "-" } }
+                    div { class: "metric", div { class: "label", "Result loop" } div { class: "value", id: "result-agent-loop", "-" } }
                     div { class: "metric", div { class: "label", "Hermes loop" } div { class: "value", id: "hermes-loop", "-" } }
                     div { class: "metric", div { class: "label", "Open exposure" } div { class: "value", id: "exposure", "-" } }
                     div { class: "metric", div { class: "label", "Paper P/L" } div { class: "value", id: "profit", "-" } }
@@ -113,6 +114,7 @@ pub fn render_index(base_path: &str) -> String {
                     }
                     section {
                         h2 { title: "Latest scheduled or manual read-only result-agent cycle, including queue priority and paper-exposure accounting.", "Result-agent cycle" }
+                        div { class: "operator-note", id: "result-agent-cycle-health", "Loading result-agent cycle health..." }
                         table {
                             thead { tr {
                                 th { "Completed" } th { "Queued" } th { "Selected" } th { "Attempted" } th { "Outcome" }
@@ -826,6 +828,7 @@ function renderResultAgentQueue(queue) {
   const items = queue.items || [];
   $("result-agent-tasks").textContent = `${queue.task_count ?? items.length} / ${money(queue.task_exposure)}`;
   $("result-agent-tasks").className = Number(queue.task_count || items.length || 0) > 0 ? "value danger" : "value ok";
+  renderResultAgentHealth(queue.cycle_health || null);
   renderResultAgentCycle(queue.latest_cycle || null);
   renderResultAgentCycleHistory(queue.recent_cycles || []);
   $("result-agent-queue").innerHTML = items.map((item) => {
@@ -858,6 +861,27 @@ function renderResultAgentQueue(queue) {
   if (!items.length) {
     $("result-agent-queue").innerHTML = `<tr><td colspan="4" class="muted">No result-agent tasks are due.</td></tr>`;
   }
+}
+function renderResultAgentHealth(health) {
+  if (!health) {
+    $("result-agent-loop").textContent = "-";
+    $("result-agent-loop").className = "value muted";
+    $("result-agent-cycle-health").innerHTML = `<span class="muted">Result-agent cycle health is unavailable.</span>`;
+    return;
+  }
+  const status = health.status || "unknown";
+  const latest = health.latest_completed_at || "-";
+  const age = health.latest_age_seconds === null || health.latest_age_seconds === undefined
+    ? "-"
+    : mins(health.latest_age_seconds);
+  $("result-agent-loop").textContent = health.enabled
+    ? `${status} / ${age}`
+    : "off";
+  $("result-agent-loop").className = health.enabled && health.healthy ? "value ok" : health.enabled ? "value danger" : "value muted";
+  $("result-agent-cycle-health").innerHTML = `
+    <div><span class="label">Status</span> ${esc(status)} / <span class="label">interval</span> ${mins(health.interval_seconds)} / <span class="label">stale after</span> ${mins(health.stale_after_seconds)}</div>
+    <div><span class="label">Latest completed</span> ${esc(latest)} / <span class="label">age</span> ${esc(age)} / <span class="label">next due</span> ${esc(health.next_due_at || "-")}</div>
+  `;
 }
 function renderResultAgentCycle(cycle) {
   if (!cycle || !cycle.details) {

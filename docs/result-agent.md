@@ -40,9 +40,12 @@ raw database rows.
 
 `GET /api/result-agent/queue` also includes the latest compact
 `result_agent_cycle_completed` audit event as `latest_cycle` plus the most
-recent compact cycle summaries as `recent_cycles`. The web UI renders both
-beside the backlog so operators can compare the current queue with scheduled
-and manual result-agent runs over time.
+recent compact cycle summaries as `recent_cycles`. It also returns
+`cycle_health`, which compares the latest completed cycle with
+`GAMBLER_RESULT_AGENT_INTERVAL_SECONDS` and marks the loop `current`, `stale`,
+`no_cycle`, or `disabled`. The web UI renders these fields beside the backlog
+so operators can compare the current queue with scheduled and manual
+result-agent runs over time.
 
 `GET /api/result-agent/account-requests` exposes a focused subset for a local
 read-only Danske Spil account-history browser agent. It is independent of

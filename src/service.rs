@@ -556,13 +556,20 @@ impl GamblerService {
             .iter()
             .map(|task| number(task, "hypothetical_stake"))
             .sum::<f64>();
-        let latest_cycle = self
+        let latest_cycle_event = self
             .store
             .latest_audit_event("result_agent_cycle_completed")
             .await
             .ok()
-            .flatten()
+            .flatten();
+        let latest_cycle = latest_cycle_event
+            .clone()
             .map(compact_result_agent_cycle_event);
+        let cycle_health = result_agent_cycle_health(
+            latest_cycle_event.as_ref(),
+            self.settings.result_agent_enabled,
+            self.settings.result_agent_interval_seconds,
+        );
         let recent_cycles = self
             .store
             .audit_events_by_type("result_agent_cycle_completed", 8)
@@ -586,6 +593,7 @@ impl GamblerService {
             },
             "danskespil_account_agent": account_agent,
             "latest_cycle": latest_cycle,
+            "cycle_health": cycle_health,
             "recent_cycles": recent_cycles,
             "review_count": items.len(),
             "task_count": tasks.len(),
@@ -2657,6 +2665,59 @@ fn compact_result_agent_cycle_summary_event(event: Value) -> Value {
             "skipped_count": details.get("skipped_count").cloned().unwrap_or(Value::Null)
         }
     })
+}
+
+fn result_agent_cycle_health(
+    latest_cycle: Option<&Value>,
+    enabled: bool,
+    interval_seconds: u64,
+) -> Value {
+    if !enabled {
+        return json!({
+            "enabled": false,
+            "status": "disabled",
+            "healthy": true,
+            "interval_seconds": interval_seconds,
+            "stale_after_seconds": 0
+        });
+    }
+
+    let stale_after_seconds = interval_seconds.saturating_mul(2).max(60) as i64;
+    let latest_completed_at = latest_cycle
+        .and_then(|event| event.get("created_at"))
+        .and_then(value_datetime_utc);
+    let age_seconds =
+        latest_completed_at.map(|completed_at| (Utc::now() - completed_at).num_seconds().max(0));
+    let stale = age_seconds
+        .map(|age| age > stale_after_seconds)
+        .unwrap_or(true);
+    let next_due_at = latest_completed_at
+        .map(|completed_at| completed_at + Duration::seconds(interval_seconds as i64));
+
+    json!({
+        "enabled": true,
+        "status": if latest_completed_at.is_none() {
+            "no_cycle"
+        } else if stale {
+            "stale"
+        } else {
+            "current"
+        },
+        "healthy": !stale,
+        "interval_seconds": interval_seconds,
+        "stale_after_seconds": stale_after_seconds,
+        "latest_completed_at": latest_completed_at,
+        "latest_age_seconds": age_seconds,
+        "next_due_at": next_due_at,
+        "overdue_seconds": age_seconds.map(|age| (age - stale_after_seconds).max(0))
+    })
+}
+
+fn value_datetime_utc(value: &Value) -> Option<DateTime<Utc>> {
+    value
+        .as_str()
+        .and_then(|text| DateTime::parse_from_rfc3339(text).ok())
+        .map(|value| value.with_timezone(&Utc))
 }
 
 #[cfg(test)]

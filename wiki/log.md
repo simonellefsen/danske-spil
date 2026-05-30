@@ -275,3 +275,8 @@ Append-only timeline for project wiki maintenance. Use headings with the format 
 
 - Added compact recent `result_agent_cycle_completed` summaries to `GET /api/result-agent/queue`.
 - Added a recent result-agent cycles table to the web UI so scheduled/manual reconciliation progress can be reviewed over time.
+
+## [2026-05-30] implementation | Result-agent loop health
+
+- Added `cycle_health` to `GET /api/result-agent/queue`, derived from the latest completed cycle and configured result-agent interval.
+- Added top-level and cycle-panel web UI indicators for current, stale, no-cycle, and disabled result-agent loop states.
