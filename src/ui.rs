@@ -236,7 +236,7 @@ pub fn render_index(base_path: &str) -> String {
                         div { class: "operator-note", id: "today-window", "Loading today..." }
                         table {
                             thead { tr {
-                                th { "Scope" } th { "Played" } th { "Settled" } th { "Open" } th { "P/L" } th { "Hit rate" }
+                                th { "Scope" } th { "Played" } th { "Settled" } th { "Open" } th { "P/L range" } th { "Hit rate" }
                             } }
                             tbody { id: "today-performance" }
                         }
@@ -246,7 +246,7 @@ pub fn render_index(base_path: &str) -> String {
                         div { class: "operator-note", id: "yesterday-window", "Loading yesterday..." }
                         table {
                             thead { tr {
-                                th { "Scope" } th { "Played" } th { "Settled" } th { "Open" } th { "P/L" } th { "Hit rate" }
+                                th { "Scope" } th { "Played" } th { "Settled" } th { "Open" } th { "P/L range" } th { "Hit rate" }
                             } }
                             tbody { id: "yesterday-performance" }
                         }
@@ -260,7 +260,7 @@ pub fn render_index(base_path: &str) -> String {
                         div { class: "operator-note", id: "daily-performance-window", "Select a date to load a daily report." }
                         table {
                             thead { tr {
-                                th { "Scope" } th { "Played" } th { "Settled" } th { "Open" } th { "P/L" } th { "Hit rate" }
+                                th { "Scope" } th { "Played" } th { "Settled" } th { "Open" } th { "P/L range" } th { "Hit rate" }
                             } }
                             tbody { id: "daily-performance" }
                         }
@@ -1255,7 +1255,14 @@ function renderDailyPerformance(report, windowId, tableId, label) {
   const observationLabel = observations.length
     ? observations.map((item) => `${item.observed_result}: ${item.count}`).join(" / ")
     : `no settlement observations ${label}`;
-  $(windowId).textContent = `${report.local_date || "-"} (${report.timezone || "local"}), ${report.window?.start || "-"} to ${report.window?.end || "-"}; ${observationLabel}`;
+  const state = summary.performance_state || (Number(summary.open_exposure || 0) > 0 ? "provisional" : "complete");
+  const progressLabel = summary.settlement_progress === null || summary.settlement_progress === undefined
+    ? "settlement -"
+    : `settlement ${pct(summary.settlement_progress)}`;
+  const unresolvedLabel = summary.unresolved_exposure_ratio === null || summary.unresolved_exposure_ratio === undefined
+    ? "unresolved exposure -"
+    : `unresolved exposure ${pct(summary.unresolved_exposure_ratio)}`;
+  $(windowId).textContent = `${report.local_date || "-"} (${report.timezone || "local"}), ${report.window?.start || "-"} to ${report.window?.end || "-"}; ${state}; ${progressLabel}; ${unresolvedLabel}; ${observationLabel}`;
 
   const rows = [{
     scope: "all",
@@ -1269,6 +1276,13 @@ function renderDailyPerformance(report, windowId, tableId, label) {
     open_exposure: summary.open_exposure || 0,
     awaiting_result_exposure: summary.awaiting_result_exposure || 0,
     profit_loss: summary.realized_profit_loss || 0,
+    worst_case_profit_loss: summary.worst_case_profit_loss,
+    best_case_profit_loss: summary.best_case_profit_loss,
+    break_even_open_profit_required: summary.break_even_open_profit_required,
+    break_even_open_profit_coverage: summary.break_even_open_profit_coverage,
+    settlement_progress: summary.settlement_progress,
+    unresolved_exposure_ratio: summary.unresolved_exposure_ratio,
+    performance_state: summary.performance_state,
     hit_rate: summary.hit_rate,
     average_odds: summary.average_odds
   }].concat((report.by_sport || []).map((item) => ({
@@ -1283,20 +1297,39 @@ function renderDailyPerformance(report, windowId, tableId, label) {
     open_exposure: item.open_exposure || 0,
     awaiting_result_exposure: item.awaiting_result_exposure || 0,
     profit_loss: item.realized_profit_loss || 0,
+    worst_case_profit_loss: item.worst_case_profit_loss,
+    best_case_profit_loss: item.best_case_profit_loss,
+    break_even_open_profit_required: item.break_even_open_profit_required,
+    break_even_open_profit_coverage: item.break_even_open_profit_coverage,
+    settlement_progress: item.settlement_progress,
+    unresolved_exposure_ratio: item.unresolved_exposure_ratio,
+    performance_state: item.performance_state,
     hit_rate: item.hit_rate,
     average_odds: item.average_odds
   })));
 
-  $(tableId).innerHTML = rows.map((item) => `
-    <tr>
-      <td><span class="pill">${esc(item.scope)}</span><br><span class="label">${esc(item.label)} / avg @ ${item.average_odds ? num(item.average_odds) : "-"}</span></td>
-      <td>${esc(item.played_count)}<br><span class="muted">${money(item.turnover)}</span></td>
-      <td>${esc(item.settled_count)}<br><span class="muted">truth ${esc(item.truth_observation_count || 0)}</span></td>
-      <td>${esc(item.open_count)}<br><span class="muted">${money(item.open_exposure)}</span><br><span class="label">awaiting ${esc(item.awaiting_result_count || 0)} / ${money(item.awaiting_result_exposure)}</span></td>
-      <td>${money(item.profit_loss)}</td>
-      <td>${pct(item.hit_rate)}</td>
-    </tr>
-  `).join("");
+  $(tableId).innerHTML = rows.map((item) => {
+    const rangeReady = item.worst_case_profit_loss !== null && item.worst_case_profit_loss !== undefined
+      && item.best_case_profit_loss !== null && item.best_case_profit_loss !== undefined;
+    const rangeLabel = rangeReady
+      ? `${money(item.worst_case_profit_loss)} to ${money(item.best_case_profit_loss)}`
+      : "-";
+    const breakEvenRequired = Number(item.break_even_open_profit_required || 0);
+    const breakEvenLabel = breakEvenRequired > 0
+      ? `needs ${money(breakEvenRequired)} pending profit / coverage ${pct(item.break_even_open_profit_coverage)}`
+      : "break-even already covered by realized P/L";
+    const stateClass = item.performance_state === "provisional" ? "danger" : "ok";
+    return `
+      <tr>
+        <td><span class="pill">${esc(item.scope)}</span><br><span class="label">${esc(item.label)} / avg @ ${item.average_odds ? num(item.average_odds) : "-"}</span><br><span class="${stateClass}">${esc(item.performance_state || "complete")}</span></td>
+        <td>${esc(item.played_count)}<br><span class="muted">${money(item.turnover)}</span></td>
+        <td>${esc(item.settled_count)}<br><span class="muted">truth ${esc(item.truth_observation_count || 0)}</span><br><span class="label">${pct(item.settlement_progress)}</span></td>
+        <td>${esc(item.open_count)}<br><span class="muted">${money(item.open_exposure)}</span><br><span class="label">awaiting ${esc(item.awaiting_result_count || 0)} / ${money(item.awaiting_result_exposure)}</span><br><span class="label">unresolved ${pct(item.unresolved_exposure_ratio)}</span></td>
+        <td>${money(item.profit_loss)}<br><span class="muted">worst/best ${esc(rangeLabel)}</span><br><span class="label">${esc(breakEvenLabel)}</span></td>
+        <td>${pct(item.hit_rate)}</td>
+      </tr>
+    `;
+  }).join("");
   if (!Number(summary.placed_count || 0) && !(report.by_sport || []).length) {
     $(tableId).innerHTML = `<tr><td colspan="6" class="muted">No paper placements recorded for ${esc(label)}.</td></tr>`;
   }

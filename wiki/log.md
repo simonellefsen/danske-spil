@@ -378,3 +378,8 @@ Append-only timeline for project wiki maintenance. Use headings with the format 
 
 - Changed result-agent and local account-history task generation to respect `lookup_stale=false`, so deterministic no-match rows do not monopolize every scheduled cycle during the configured cooldown window.
 - Added regression coverage proving stale items produce tasks while cooling-down items remain visible in review but are not emitted to agents.
+
+## [2026-05-30] implementation | Provisional daily performance ranges
+
+- Added provisional daily-performance fields for settlement progress, unresolved exposure ratio, pending upside, worst-case P/L, best-case P/L, and break-even pending-profit coverage.
+- Updated the web UI daily performance tables to render realized P/L with a worst/best range so days with many unsettled rows are not read as complete strategy performance.

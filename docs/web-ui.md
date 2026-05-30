@@ -25,6 +25,7 @@ The UI is not a marketing site. It is an operational dashboard for repeated revi
 - Daily paper-placement rows should show expected result-check time, latest lookup time, lookup source/recommendation, latest settlement observation, and overdue age so unresolved rows can be reconciled without opening raw database state.
 - Daily performance aggregate rows should show settlement-truth coverage counts next to settled counts so operators can see whether daily P/L is backed by recorded evidence.
 - Daily performance aggregate rows should split out awaiting-result counts and exposure under open exposure so operators can distinguish active unsettled settlement work from other open states.
+- Daily performance aggregate rows should mark incomplete days as provisional, show settlement progress and unresolved exposure ratio, and show worst/best-case P/L for remaining open paper positions.
 - All-time strategy, sport, and risk-flag performance rows should also split out awaiting-result exposure so unresolved settlement backlog is visible outside the daily panels.
 - Settlement workload metrics should show both counts and paper exposure for due review items, lookup-stale items, and sport-level due rows.
 - Result-agent queue rows should show paper stake and priority score so the highest-impact stale result work is visible before an agent cycle runs.

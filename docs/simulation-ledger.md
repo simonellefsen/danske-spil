@@ -232,12 +232,16 @@ scan cycles instead of relying only on the current state.
 `/api/performance/today`, `/api/performance/yesterday`, and
 `/api/performance/day?date=YYYY-MM-DD` expose Europe/Copenhagen local-day paper
 performance slices. They include single and coupon counts, turnover, open
-exposure, realized P/L, hit rate, by-sport aggregates, the latest paper
-placements, and settlement observation counts for the same local-day window.
+exposure, realized P/L, provisional worst/best-case P/L for still-open rows,
+settlement progress, unresolved exposure ratio, hit rate, by-sport aggregates,
+the latest paper placements, and settlement observation counts for the same
+local-day window.
 The web UI renders current and previous local-day panels so operators can answer
 daily performance questions without querying Postgres directly. It also exposes
 a date picker backed by `/api/performance/day` for ad hoc local-day review,
 including the recent paper placements behind the selected day's aggregate P/L.
+Daily rows are marked `provisional` while any open or awaiting-result exposure
+remains, so realized results are not mistaken for complete strategy performance.
 
 Auto-paper placement walks a wider ranked selection window than the per-scan
 placement limit. This lets it skip opportunities already represented by

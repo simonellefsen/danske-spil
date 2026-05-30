@@ -4813,6 +4813,7 @@ impl Store {
                   COALESCE(sum(stake) FILTER (WHERE status <> 'duplicate_void'), 0)::float8 AS turnover,
                   COALESCE(sum(stake) FILTER (WHERE status IN ('open', 'awaiting_result', 'unresolved', 'postponed')), 0)::float8 AS open_exposure,
                   COALESCE(sum(stake) FILTER (WHERE status = 'awaiting_result'), 0)::float8 AS awaiting_result_exposure,
+                  COALESCE(sum(stake * GREATEST(COALESCE(odds, 1) - 1, 0)) FILTER (WHERE status IN ('open', 'awaiting_result', 'unresolved', 'postponed')), 0)::float8 AS open_potential_profit,
                   COALESCE(sum(profit_loss) FILTER (WHERE status <> 'duplicate_void'), 0)::float8 AS realized_profit_loss,
                   avg(odds) FILTER (WHERE status <> 'duplicate_void')::float8 AS average_odds
                 FROM positions_with_truth
@@ -4820,6 +4821,8 @@ impl Store {
                 &[&window_start, &window_end],
             )
             .await?;
+        let placed_count: i32 = summary_row.get("placed_count");
+        let settled_count: i32 = summary_row.get("settled_count");
         let won_count: i32 = summary_row.get("won_count");
         let lost_count: i32 = summary_row.get("lost_count");
         let decided_count = won_count + lost_count;
@@ -4828,6 +4831,11 @@ impl Store {
         } else {
             None
         };
+        let summary_turnover: f64 = summary_row.get("turnover");
+        let summary_open_exposure: f64 = summary_row.get("open_exposure");
+        let summary_open_potential_profit: f64 = summary_row.get("open_potential_profit");
+        let summary_realized_profit_loss: f64 = summary_row.get("realized_profit_loss");
+        let summary_break_even_required = (-summary_realized_profit_loss).max(0.0);
 
         let sport_rows = client
             .query(
@@ -4898,6 +4906,7 @@ impl Store {
                   COALESCE(sum(stake) FILTER (WHERE status <> 'duplicate_void'), 0)::float8 AS turnover,
                   COALESCE(sum(stake) FILTER (WHERE status IN ('open', 'awaiting_result', 'unresolved', 'postponed')), 0)::float8 AS open_exposure,
                   COALESCE(sum(stake) FILTER (WHERE status = 'awaiting_result'), 0)::float8 AS awaiting_result_exposure,
+                  COALESCE(sum(stake * GREATEST(COALESCE(odds, 1) - 1, 0)) FILTER (WHERE status IN ('open', 'awaiting_result', 'unresolved', 'postponed')), 0)::float8 AS open_potential_profit,
                   COALESCE(sum(profit_loss) FILTER (WHERE status <> 'duplicate_void'), 0)::float8 AS realized_profit_loss,
                   avg(odds) FILTER (WHERE status <> 'duplicate_void')::float8 AS average_odds
                 FROM positions_with_truth
@@ -4913,21 +4922,40 @@ impl Store {
                 let won: i32 = row.get("won_count");
                 let lost: i32 = row.get("lost_count");
                 let decided = won + lost;
+                let placed: i32 = row.get("placed_count");
+                let settled: i32 = row.get("settled_count");
+                let turnover: f64 = row.get("turnover");
+                let open_exposure: f64 = row.get("open_exposure");
+                let open_potential_profit: f64 = row.get("open_potential_profit");
+                let realized_profit_loss: f64 = row.get("realized_profit_loss");
+                let break_even_required = (-realized_profit_loss).max(0.0);
                 json!({
                     "sport_key": row.get::<_, String>("sport_key"),
-                    "placed_count": row.get::<_, i32>("placed_count"),
+                    "placed_count": placed,
                     "single_count": row.get::<_, i32>("single_count"),
                     "coupon_count": row.get::<_, i32>("coupon_count"),
-                    "settled_count": row.get::<_, i32>("settled_count"),
+                    "settled_count": settled,
                     "won_count": won,
                     "lost_count": lost,
                     "open_count": row.get::<_, i32>("open_count"),
                     "awaiting_result_count": row.get::<_, i32>("awaiting_result_count"),
                     "truth_observation_count": row.get::<_, i32>("truth_observation_count"),
-                    "turnover": row.get::<_, f64>("turnover"),
-                    "open_exposure": row.get::<_, f64>("open_exposure"),
+                    "turnover": turnover,
+                    "open_exposure": open_exposure,
                     "awaiting_result_exposure": row.get::<_, f64>("awaiting_result_exposure"),
-                    "realized_profit_loss": row.get::<_, f64>("realized_profit_loss"),
+                    "open_potential_profit": open_potential_profit,
+                    "realized_profit_loss": realized_profit_loss,
+                    "worst_case_profit_loss": realized_profit_loss - open_exposure,
+                    "best_case_profit_loss": realized_profit_loss + open_potential_profit,
+                    "break_even_open_profit_required": break_even_required,
+                    "break_even_open_profit_coverage": if break_even_required > 0.0 && open_potential_profit > 0.0 {
+                        Some(open_potential_profit / break_even_required)
+                    } else {
+                        None
+                    },
+                    "settlement_progress": if placed > 0 { Some(settled as f64 / placed as f64) } else { None },
+                    "unresolved_exposure_ratio": if turnover > 0.0 { Some(open_exposure / turnover) } else { None },
+                    "performance_state": if open_exposure > 0.0 { "provisional" } else { "complete" },
                     "hit_rate": if decided > 0 { Some(won as f64 / decided as f64) } else { None },
                     "average_odds": row.get::<_, Option<f64>>("average_odds")
                 })
@@ -5132,19 +5160,31 @@ impl Store {
                 "end": window_end.to_rfc3339()
             },
             "summary": {
-                "placed_count": summary_row.get::<_, i32>("placed_count"),
+                "placed_count": placed_count,
                 "single_count": summary_row.get::<_, i32>("single_count"),
                 "coupon_count": summary_row.get::<_, i32>("coupon_count"),
-                "settled_count": summary_row.get::<_, i32>("settled_count"),
+                "settled_count": settled_count,
                 "won_count": won_count,
                 "lost_count": lost_count,
                 "open_count": summary_row.get::<_, i32>("open_count"),
                 "awaiting_result_count": summary_row.get::<_, i32>("awaiting_result_count"),
                 "truth_observation_count": summary_row.get::<_, i32>("truth_observation_count"),
-                "turnover": summary_row.get::<_, f64>("turnover"),
-                "open_exposure": summary_row.get::<_, f64>("open_exposure"),
+                "turnover": summary_turnover,
+                "open_exposure": summary_open_exposure,
                 "awaiting_result_exposure": summary_row.get::<_, f64>("awaiting_result_exposure"),
-                "realized_profit_loss": summary_row.get::<_, f64>("realized_profit_loss"),
+                "open_potential_profit": summary_open_potential_profit,
+                "realized_profit_loss": summary_realized_profit_loss,
+                "worst_case_profit_loss": summary_realized_profit_loss - summary_open_exposure,
+                "best_case_profit_loss": summary_realized_profit_loss + summary_open_potential_profit,
+                "break_even_open_profit_required": summary_break_even_required,
+                "break_even_open_profit_coverage": if summary_break_even_required > 0.0 && summary_open_potential_profit > 0.0 {
+                    Some(summary_open_potential_profit / summary_break_even_required)
+                } else {
+                    None
+                },
+                "settlement_progress": if placed_count > 0 { Some(settled_count as f64 / placed_count as f64) } else { None },
+                "unresolved_exposure_ratio": if summary_turnover > 0.0 { Some(summary_open_exposure / summary_turnover) } else { None },
+                "performance_state": if summary_open_exposure > 0.0 { "provisional" } else { "complete" },
                 "hit_rate": hit_rate,
                 "average_odds": summary_row.get::<_, Option<f64>>("average_odds")
             },
