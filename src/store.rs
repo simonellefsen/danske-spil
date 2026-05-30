@@ -4773,6 +4773,7 @@ impl Store {
                   count(*) FILTER (WHERE status = 'awaiting_result')::int AS awaiting_result_count,
                   count(*) FILTER (WHERE status = 'duplicate_void')::int AS duplicate_void_count,
                   COALESCE(sum(hypothetical_stake) FILTER (WHERE status IN ('open', 'awaiting_result', 'unresolved', 'postponed')), 0)::float8 AS open_exposure,
+                  COALESCE(sum(hypothetical_stake) FILTER (WHERE status = 'awaiting_result'), 0)::float8 AS awaiting_result_exposure,
                   COALESCE(sum(profit_loss) FILTER (WHERE status <> 'duplicate_void'), 0)::float8 AS profit_loss
                 FROM positions
                 GROUP BY strategy_id
@@ -4882,10 +4883,12 @@ impl Store {
                   count(*) FILTER (WHERE item_type = 'single' AND status <> 'duplicate_void')::int AS single_count,
                   count(*) FILTER (WHERE item_type = 'coupon' AND status <> 'duplicate_void')::int AS coupon_count,
                   count(*) FILTER (WHERE status IN ('open', 'awaiting_result', 'unresolved', 'postponed'))::int AS open_count,
+                  count(*) FILTER (WHERE status = 'awaiting_result')::int AS awaiting_result_count,
                   count(*) FILTER (WHERE status IN ('settled_won', 'settled_lost'))::int AS decided_count,
                   count(*) FILTER (WHERE status = 'settled_won')::int AS won_count,
                   COALESCE(sum(hypothetical_stake) FILTER (WHERE status <> 'duplicate_void'), 0)::float8 AS turnover,
                   COALESCE(sum(hypothetical_stake) FILTER (WHERE status IN ('open', 'awaiting_result', 'unresolved', 'postponed')), 0)::float8 AS open_exposure,
+                  COALESCE(sum(hypothetical_stake) FILTER (WHERE status = 'awaiting_result'), 0)::float8 AS awaiting_result_exposure,
                   COALESCE(sum(profit_loss) FILTER (WHERE status <> 'duplicate_void'), 0)::float8 AS profit_loss
                 FROM positions
                 GROUP BY risk_flag
@@ -4984,6 +4987,7 @@ impl Store {
                 "awaiting_result_count": row.get::<_, i32>("awaiting_result_count"),
                 "duplicate_void_count": row.get::<_, i32>("duplicate_void_count"),
                 "open_exposure": row.get::<_, f64>("open_exposure"),
+                "awaiting_result_exposure": row.get::<_, f64>("awaiting_result_exposure"),
                 "profit_loss": row.get::<_, f64>("profit_loss")
             })).collect::<Vec<_>>(),
             "by_sport_status": by_sport.iter().map(|row| json!({
@@ -5001,11 +5005,13 @@ impl Store {
                     "single_count": row.get::<_, i32>("single_count"),
                     "coupon_count": row.get::<_, i32>("coupon_count"),
                     "open_count": row.get::<_, i32>("open_count"),
+                    "awaiting_result_count": row.get::<_, i32>("awaiting_result_count"),
                     "decided_count": decided_count,
                     "won_count": won_count,
                     "hit_rate": if decided_count > 0 { Some(won_count as f64 / decided_count as f64) } else { None },
                     "turnover": row.get::<_, f64>("turnover"),
                     "open_exposure": row.get::<_, f64>("open_exposure"),
+                    "awaiting_result_exposure": row.get::<_, f64>("awaiting_result_exposure"),
                     "profit_loss": row.get::<_, f64>("profit_loss")
                 })
             }).collect::<Vec<_>>(),
@@ -5270,6 +5276,7 @@ impl Store {
                   count(*) FILTER (WHERE status = 'settled_won')::int AS won_count,
                   COALESCE(sum(hypothetical_stake) FILTER (WHERE status <> 'duplicate_void'), 0)::float8 AS turnover,
                   COALESCE(sum(hypothetical_stake) FILTER (WHERE status IN ('open', 'awaiting_result', 'unresolved', 'postponed')), 0)::float8 AS open_exposure,
+                  COALESCE(sum(hypothetical_stake) FILTER (WHERE status = 'awaiting_result'), 0)::float8 AS awaiting_result_exposure,
                   COALESCE(sum(profit_loss) FILTER (WHERE status <> 'duplicate_void'), 0)::float8 AS profit_loss,
                   avg(observed_odds) FILTER (WHERE status <> 'duplicate_void')::float8 AS average_odds
                 FROM positions
@@ -5507,6 +5514,7 @@ impl Store {
                     "hit_rate": if decided_count > 0 { Some(won_count as f64 / decided_count as f64) } else { None },
                     "turnover": row.get::<_, f64>("turnover"),
                     "open_exposure": row.get::<_, f64>("open_exposure"),
+                    "awaiting_result_exposure": row.get::<_, f64>("awaiting_result_exposure"),
                     "profit_loss": row.get::<_, f64>("profit_loss"),
                     "average_odds": row.get::<_, Option<f64>>("average_odds")
                 })

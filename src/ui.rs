@@ -1049,7 +1049,7 @@ function renderPlayed(summary) {
       <td>${esc(item.strategy_id)}<br><span class="label">singles ${esc(item.single_count || 0)} / coupons ${esc(item.coupon_count || 0)} / duplicates ${esc(item.duplicate_void_count || 0)}</span></td>
       <td>${esc(item.played_count)}</td>
       <td>${esc(item.open_count)}<br><span class="muted">${money(item.open_exposure)}</span></td>
-      <td>${esc(item.awaiting_result_count)}</td>
+      <td>${esc(item.awaiting_result_count)}<br><span class="muted">${money(item.awaiting_result_exposure)}</span></td>
       <td>${money(item.profit_loss)}</td>
     </tr>
   `).join("");
@@ -1061,7 +1061,7 @@ function renderPlayed(summary) {
     <tr>
       <td><span class="pill">${esc(item.risk_flag || "none")}</span><br><span class="label">singles ${esc(item.single_count || 0)} / coupons ${esc(item.coupon_count || 0)}</span></td>
       <td>${esc(item.played_count)}<br><span class="muted">${money(item.turnover)}</span></td>
-      <td>${esc(item.open_count)}<br><span class="muted">${money(item.open_exposure)}</span></td>
+      <td>${esc(item.open_count)}<br><span class="muted">${money(item.open_exposure)}</span><br><span class="label">awaiting ${esc(item.awaiting_result_count || 0)} / ${money(item.awaiting_result_exposure)}</span></td>
       <td>${money(item.profit_loss)}</td>
       <td>${pct(item.hit_rate)}<br><span class="muted">${esc(item.decided_count || 0)} decided</span></td>
     </tr>
@@ -1109,7 +1109,7 @@ function renderPerformance(report) {
     <tr>
       <td><span class="pill">${esc(item.sport_key)}</span><br><span class="label">avg @ ${item.average_odds ? num(item.average_odds) : "-"}</span></td>
       <td>${esc(item.played_count)}<br><span class="muted">${money(item.turnover)}</span></td>
-      <td>${esc(item.open_count)}<br><span class="muted">${money(item.open_exposure)}</span></td>
+      <td>${esc(item.open_count)}<br><span class="muted">${money(item.open_exposure)}</span><br><span class="label">awaiting ${esc(item.awaiting_result_count || 0)} / ${money(item.awaiting_result_exposure)}</span></td>
       <td>${esc(dueBySport[item.sport_key] || 0)}</td>
       <td>${money(item.profit_loss)}</td>
       <td>${pct(item.hit_rate)}</td>

@@ -3,7 +3,7 @@ type: wiki-log
 tags:
   - danske-spil/wiki
   - maintained-by-llm
-updated: 2026-05-25
+updated: 2026-05-30
 ---
 
 # Wiki Log
@@ -241,3 +241,8 @@ Append-only timeline for project wiki maintenance. Use headings with the format 
 - Replaced absolute local README links with repository-relative links that work on GitHub.
 - Expanded the README Start Here section with short topic descriptions.
 - Updated wiki link conventions to avoid local-machine paths in Markdown links.
+
+## [2026-05-30] implementation | Awaiting settlement exposure reporting
+
+- Added awaiting-result exposure to all-time strategy, sport, and risk-flag performance aggregates.
+- Updated the web UI so unresolved settlement backlog is visible in both daily panels and all-time performance sections.
