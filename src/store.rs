@@ -6009,16 +6009,49 @@ impl Store {
         let motorsports_series = client
             .query(
                 r#"
+                WITH base AS (
+                  SELECT
+                    event_id,
+                    confidence,
+                    created_at,
+                    COALESCE(NULLIF(features #>> '{sport_context,series_family}', ''), 'unknown') AS stored_series_family,
+                    lower(concat_ws(' ', features->>'competition', features->>'class_name', features->>'event_name')) AS haystack
+                  FROM feature_snapshots
+                  WHERE sport_key = 'motorsports'
+                ),
+                effective AS (
+                  SELECT
+                    event_id,
+                    confidence,
+                    created_at,
+                    stored_series_family,
+                    CASE
+                      WHEN stored_series_family != 'unknown' THEN stored_series_family
+                      WHEN haystack LIKE '%indycar%' OR haystack LIKE '%indy car%' THEN 'indycar'
+                      WHEN haystack LIKE '%nascar%' THEN 'nascar'
+                      WHEN haystack LIKE '%le mans%' OR haystack LIKE '%wec%' OR haystack LIKE '%endurance%' OR haystack LIKE '%imsa%' THEN 'endurance'
+                      WHEN haystack LIKE '%motogp%' OR haystack LIKE '%moto gp%' OR haystack LIKE '%superbike%' OR haystack LIKE '%motorbike%' OR haystack LIKE '%motorcycle%' THEN 'motorbike'
+                      WHEN haystack LIKE '%formula 1%' OR haystack LIKE '%formel 1%' OR haystack ~ '(^|[^a-z0-9])f1([^a-z0-9]|$)' THEN 'formula_1'
+                      WHEN haystack LIKE '%rally%' OR haystack LIKE '%wrc%' THEN 'rally'
+                      ELSE 'unknown'
+                    END AS series_family
+                  FROM base
+                )
                 SELECT
-                  COALESCE(NULLIF(features #>> '{sport_context,series_family}', ''), 'unknown') AS series_family,
-                  COALESCE(NULLIF(features #>> '{sport_context,vehicle_type}', ''), 'unknown') AS vehicle_type,
+                  series_family,
+                  CASE
+                    WHEN series_family = 'motorbike' THEN 'motorbike'
+                    WHEN series_family = 'unknown' THEN 'unknown'
+                    ELSE 'car'
+                  END AS vehicle_type,
                   count(*)::int AS feature_count,
                   count(DISTINCT event_id)::int AS event_count,
                   avg(confidence)::float8 AS average_confidence,
-                  count(*) FILTER (WHERE missing_signals ? 'motorsports_series')::int AS missing_series_count,
+                  count(*) FILTER (WHERE series_family = 'unknown')::int AS missing_series_count,
+                  count(*) FILTER (WHERE stored_series_family = 'unknown')::int AS stored_unknown_count,
+                  count(*) FILTER (WHERE stored_series_family = 'unknown' AND series_family != 'unknown')::int AS recovered_series_count,
                   max(created_at) AS last_created_at
-                FROM feature_snapshots
-                WHERE sport_key = 'motorsports'
+                FROM effective
                 GROUP BY series_family, vehicle_type
                 ORDER BY feature_count DESC, series_family
                 "#,
@@ -6072,6 +6105,8 @@ impl Store {
                     "event_count": row.get::<_, i32>("event_count"),
                     "average_confidence": row.get::<_, Option<f64>>("average_confidence"),
                     "missing_series_count": row.get::<_, i32>("missing_series_count"),
+                    "stored_unknown_count": row.get::<_, i32>("stored_unknown_count"),
+                    "recovered_series_count": row.get::<_, i32>("recovered_series_count"),
                     "last_created_at": last_created_at
                 })
             }).collect::<Vec<_>>(),

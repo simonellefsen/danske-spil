@@ -295,3 +295,8 @@ Append-only timeline for project wiki maintenance. Use headings with the format 
 
 - Added `motorsports_series` to `GET /api/intelligence/coverage`, grouped by series family and vehicle type.
 - Added a Motorsports series table to the web UI so unknown racing rows are visible without querying Postgres.
+
+## [2026-05-30] implementation | Motorsports series recovery
+
+- Updated motorsports coverage to derive an effective series from stored competition, class, and event names when older snapshots still have `unknown` series context.
+- Added recovered versus missing series counts to the web UI so real adapter gaps are separated from legacy classification gaps.

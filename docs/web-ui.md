@@ -15,7 +15,7 @@ The UI is not a marketing site. It is an operational dashboard for repeated revi
 - Browser observation health.
 - Last successful Oddset and Tips snapshots.
 - Scanner cadence, latest snapshot age, and whether the next worker scan is due.
-- Sports intelligence ingestion health by sport and source, including motorsports series-family coverage for the broad motorsports category.
+- Sports intelligence ingestion health by sport and source, including motorsports series-family coverage for the broad motorsports category and a recovered count for older snapshots whose series can be inferred from stored feed text.
 - Recent ingestion runs with source, status, covered sports, event count, and snapshot id.
 - Provider coupon-rule observations, including observed accumulator bounds and restriction scope.
 - Latest odds movements between repeated observations of the same event, market, and outcome.

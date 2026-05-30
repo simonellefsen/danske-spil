@@ -129,6 +129,11 @@ GET /api/intelligence/coverage
 The coverage payload includes `motorsports_series`, a series-family summary for
 the broad motorsports category so the dashboard can distinguish Formula 1,
 IndyCar, NASCAR, endurance, motorbike, rally, and unknown feed rows.
+For older feature snapshots that stored `unknown` before the motorsports
+classifier existed, the coverage read model derives an effective series from
+the stored competition, class, and event names and reports
+`recovered_series_count` separately from rows that are still genuinely missing
+series context.
 
 ## Strategy Baseline And Experiment POC
 
