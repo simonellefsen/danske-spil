@@ -391,6 +391,12 @@ pub fn render_index(base_path: &str) -> String {
                     }
                     section {
                         h2 { "Hermes view" }
+                        table {
+                            thead { tr {
+                                th { "Reflection" } th { "State" } th { "Settlement" } th { "P/L range" } th { "Recommendation" }
+                            } }
+                            tbody { id: "hermes-reflections" }
+                        }
                         pre { id: "hermes", "No reflections yet." }
                     }
                 }
@@ -1591,6 +1597,36 @@ function renderHermesCycle(hermes) {
     </tr>
   `;
 }
+function renderHermesReflections(reflections) {
+  const items = Array.isArray(reflections) ? reflections : [];
+  $("hermes-reflections").innerHTML = items.slice(0, 10).map((item) => {
+    const evidence = item.evidence || {};
+    const assessment = evidence.assessment || {};
+    const state = assessment.performance_state || "-";
+    const stateClass = state === "provisional" ? "danger" : state === "complete" ? "ok" : "muted";
+    const rangeReady = assessment.worst_case_profit_loss !== null && assessment.worst_case_profit_loss !== undefined
+      && assessment.best_case_profit_loss !== null && assessment.best_case_profit_loss !== undefined;
+    const rangeLabel = rangeReady
+      ? `${money(assessment.worst_case_profit_loss)} to ${money(assessment.best_case_profit_loss)}`
+      : "-";
+    const breakEvenRequired = Number(assessment.break_even_open_profit_required || 0);
+    const breakEvenLabel = breakEvenRequired > 0
+      ? `needs ${money(breakEvenRequired)} / coverage ${pct(assessment.break_even_open_profit_coverage)}`
+      : "break-even covered";
+    return `
+      <tr>
+        <td>${esc(item.created_at || "-")}<br><span class="label">${esc(item.title || item.id || "-")}</span></td>
+        <td><span class="${stateClass}">${esc(state)}</span><br><span class="label">${esc(item.status || "-")}</span></td>
+        <td>${pct(assessment.settlement_progress)}<br><span class="muted">open ${esc(assessment.open_or_awaiting_count ?? 0)} / ${money(assessment.open_exposure)}</span><br><span class="label">unresolved ${pct(assessment.unresolved_exposure_ratio)}</span></td>
+        <td>${money(assessment.realized_profit_loss)}<br><span class="muted">${esc(rangeLabel)}</span><br><span class="label">${esc(breakEvenLabel)}</span></td>
+        <td>${esc(assessment.recommendation || item.summary || "")}</td>
+      </tr>
+    `;
+  }).join("");
+  if (!items.length) {
+    $("hermes-reflections").innerHTML = `<tr><td colspan="5" class="muted">No Hermes reflections yet.</td></tr>`;
+  }
+}
 function renderStrategy(strategy, gates) {
   const experiments = strategy.experiments || [];
   const gateByExperiment = new Map((gates || []).map((gate) => [gate.experiment_id, gate]));
@@ -1740,6 +1776,7 @@ async function load() {
   renderStrategy(hermes.strategy || {}, hermes.promotion_gates || []);
   renderHermesCycle(hermes);
   renderPromotionGates(hermes.promotion_gates || []);
+  renderHermesReflections(hermes.reflections || []);
   $("hermes").textContent = JSON.stringify(hermes, null, 2);
 }
 $("scan").addEventListener("click", async () => {

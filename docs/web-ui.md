@@ -78,7 +78,7 @@ The coupon builder should be read-only or simulation-only by default:
 The Hermes view should show:
 
 - Latest reflection summary.
-- Recent reflections with timestamps and evidence references.
+- Recent reflections with timestamps, evidence references, performance state, settlement progress, unresolved exposure, realized P/L, worst/best-case P/L, and promotion recommendation.
 - One-variable experiment proposals.
 - Experiment status: pending review, rejected, approved for replay, active simulation, failed, promoted, or rolled back.
 - Changed variable, baseline value, proposed value, expected effect, and measured result.

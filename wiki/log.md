@@ -388,3 +388,8 @@ Append-only timeline for project wiki maintenance. Use headings with the format 
 
 - Fed the daily provisional-performance report into Hermes daily reflections so the reflection evidence includes settlement progress, unresolved exposure, worst/best-case P/L, and break-even coverage.
 - Updated the reflection summary and recommendation to keep strategy promotion blocked whenever same-day paper exposure remains open or awaiting result.
+
+## [2026-05-30] implementation | Hermes reflection assessment table
+
+- Added a compact Hermes reflections table to the web UI so operators can inspect provisional/complete state, settlement progress, unresolved exposure, realized P/L, worst/best-case P/L, and promotion recommendation without reading raw JSON.
+- Documented the reflection table expectations in the web UI and Hermes docs.
