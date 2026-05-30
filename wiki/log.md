@@ -253,3 +253,9 @@ Append-only timeline for project wiki maintenance. Use headings with the format 
 - Changed sport performance due counts to come from the full aggregate instead of the capped stale-preview list.
 - Updated the web UI to show exposure next to due review, lookup-stale, sport-level due rows, and lookup due queue items.
 - Kept explicit CloudNativePG CPU and memory requests/limits in the Kubernetes manifest so future deploys preserve the database resource envelope.
+
+## [2026-05-30] implementation | Result-agent task prioritization
+
+- Added paper stake and priority score to result-agent queue tasks and account-history requests.
+- Ordered result-agent tasks by stake weighted with overdue age so capped cycles attempt higher-impact stale rows first.
+- Ordered account-history requests by the same priority and updated the web UI result-agent/account-history surfaces to show exposure and per-row priority.

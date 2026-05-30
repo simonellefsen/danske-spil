@@ -19,6 +19,7 @@ grade, or require cancellation/refund review. Each task includes:
 
 - Paper bet or coupon ids.
 - Event, sport, competition, market, outcome, and coupon-leg context.
+- Paper stake and priority score, so per-cycle work can focus on the highest exposure and oldest overdue rows first.
 - Expected result-check timestamp and overdue minutes.
 - Known public result links, when configured.
 - Deterministic search terms for a result-source discovery worker.
@@ -27,12 +28,17 @@ grade, or require cancellation/refund review. Each task includes:
 The queue deliberately avoids raw cookies, credentials, browser storage, and
 account payloads.
 
+Tasks are ordered by priority score. The score is paper stake weighted by
+overdue age, which keeps the agent deterministic while making stale,
+higher-exposure rows run before low-impact backlog entries.
+
 `GET /api/result-agent/account-requests` exposes a focused subset for a local
 read-only Danske Spil account-history browser agent. It is independent of
 whether the Kubernetes API pod has credentials, because the intended worker is
 operator-controlled and local. Each request includes paper bet/coupon ids,
-selection context, expected truth to inspect, and an evidence template for
-`POST /api/settlement/external-evidence`.
+selection context, paper stake, priority score, expected truth to inspect, and
+an evidence template for `POST /api/settlement/external-evidence`. Requests use
+the same priority order as the public result-agent queue.
 
 The account-history request contract explicitly forbids storing credentials,
 cookies, browser storage, payment data, Spil-ID/MitID payloads, or full account

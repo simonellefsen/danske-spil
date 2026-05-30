@@ -268,7 +268,7 @@ The planned automated settlement worker should handle normal final results plus 
 Current result-review status:
 
 - `GET/POST /api/settlement/review` refreshes review evidence for `awaiting_result`, `unresolved`, and `postponed` paper bets.
-- `GET /api/result-agent/queue` turns due or stale settlement-review rows into read-only result-agent tasks, including source precedence, known result links, search terms, expected finish timing, and whether a local Danske Spil account-history browser agent is available from environment presence checks.
+- `GET /api/result-agent/queue` turns due or stale settlement-review rows into read-only result-agent tasks, including source precedence, known result links, search terms, expected finish timing, paper stake, priority score, and whether a local Danske Spil account-history browser agent is available from environment presence checks. The queue is ordered by priority so the scheduled result-agent cycle spends its capped attempts on higher-exposure, older overdue rows first.
 - `GET /api/settlement/sources` lists approved settlement-capable source classes from `source_registry`.
 - `GET /api/settlement/source-links` lists operator-managed public result URLs that have been added for stale event review.
 - `GET /api/settlement/observations` lists recent manual settlement observations for audit and Hermes-safe review.

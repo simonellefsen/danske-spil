@@ -89,7 +89,7 @@ GET  /api/settlement/source-links
 `GET /api/result-agent/queue` is the normal automation entry point for stale
 paper positions. It converts due settlement-review rows into read-only result
 tasks with event context, expected finish timing, source links, deterministic
-search terms, and the recommended next agent action. It does not expose
+search terms, paper stake, priority score, and the recommended next agent action. It does not expose
 credential values, cookies, account payloads, or browser storage.
 
 The POST endpoint stores source URL, match names, final score, confidence, and a short browser text excerpt in `external_result_evidence`. When `settle` is true, it settles only matching open single-leg winner markets whose selected outcome maps deterministically to home, away, or draw.

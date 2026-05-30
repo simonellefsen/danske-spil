@@ -2648,6 +2648,7 @@ impl Store {
                   SELECT
                     sb.id AS bet_id,
                     sb.status AS bet_status,
+                    sb.hypothetical_stake::float8 AS hypothetical_stake,
                     cb.id AS candidate_id,
                     cb.sport_key,
                     cb.event_id,
@@ -2759,6 +2760,7 @@ impl Store {
                 RETURNING
                   sb.id,
                   review.bet_status,
+                  review.hypothetical_stake,
                   review.candidate_id,
                   review.sport_key,
                   review.event_id,
@@ -2794,6 +2796,7 @@ impl Store {
                     sc.id AS simulated_coupon_id,
                     sc.status AS coupon_status,
                     sc.coupon_id,
+                    sc.hypothetical_stake::float8 AS hypothetical_stake,
                     sc.observed_combined_decimal_odds::float8 AS combined_decimal_odds,
                     sc.strategy_id,
                     cc.coupon_type,
@@ -2866,6 +2869,7 @@ impl Store {
                     simulated_coupon_id,
                     coupon_status,
                     coupon_id,
+                    hypothetical_stake,
                     combined_decimal_odds,
                     strategy_id,
                     coupon_type,
@@ -2904,7 +2908,7 @@ impl Store {
                     ) AS legs
                   FROM leg_review
                   GROUP BY simulated_coupon_id, coupon_status, coupon_id,
-                           combined_decimal_odds, strategy_id, coupon_type, leg_count
+                           hypothetical_stake, combined_decimal_odds, strategy_id, coupon_type, leg_count
                   ORDER BY max(expected_result_check_after) ASC NULLS LAST
                   LIMIT $1
                 )
@@ -2930,6 +2934,7 @@ impl Store {
                     'coupon_id', review.coupon_id,
                     'coupon_type', review.coupon_type,
                     'leg_count', review.leg_count,
+                    'hypothetical_stake', review.hypothetical_stake,
                     'combined_decimal_odds', review.combined_decimal_odds,
                     'expected_result_check_after', review.expected_result_check_after,
                     'last_lookup_at', review.last_lookup_at,
@@ -2944,6 +2949,7 @@ impl Store {
                   review.coupon_id,
                   review.coupon_type,
                   review.leg_count,
+                  review.hypothetical_stake,
                   review.combined_decimal_odds,
                   review.strategy_id,
                   review.expected_result_check_after,
@@ -2991,6 +2997,7 @@ impl Store {
                     "item_type": "single",
                     "bet_id": row.get::<_, String>("id"),
                     "bet_status": row.get::<_, String>("bet_status"),
+                    "hypothetical_stake": row.get::<_, f64>("hypothetical_stake"),
                     "candidate_id": row.get::<_, String>("candidate_id"),
                     "sport_key": row.get::<_, String>("sport_key"),
                     "event_id": row.get::<_, Option<String>>("event_id"),
@@ -3055,6 +3062,7 @@ impl Store {
                 "coupon_id": row.get::<_, Option<String>>("coupon_id"),
                 "coupon_type": row.get::<_, String>("coupon_type"),
                 "leg_count": row.get::<_, i32>("leg_count"),
+                "hypothetical_stake": row.get::<_, f64>("hypothetical_stake"),
                 "combined_decimal_odds": row.get::<_, Option<f64>>("combined_decimal_odds"),
                 "strategy_id": row.get::<_, String>("strategy_id"),
                 "expected_result_check_after": expected_result_check_after,

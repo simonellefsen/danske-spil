@@ -543,10 +543,19 @@ impl GamblerService {
             .cloned()
             .unwrap_or_default();
         let account_agent = danskespil_account_agent_status();
-        let tasks: Vec<Value> = items
+        let mut tasks: Vec<Value> = items
             .iter()
             .filter_map(|item| result_agent_task(item, &account_agent))
             .collect();
+        tasks.sort_by(|left, right| {
+            number(right, "priority_score")
+                .partial_cmp(&number(left, "priority_score"))
+                .unwrap_or(std::cmp::Ordering::Equal)
+        });
+        let task_exposure = tasks
+            .iter()
+            .map(|task| number(task, "hypothetical_stake"))
+            .sum::<f64>();
 
         json!({
             "enabled": true,
@@ -561,6 +570,7 @@ impl GamblerService {
             "danskespil_account_agent": account_agent,
             "review_count": items.len(),
             "task_count": tasks.len(),
+            "task_exposure": task_exposure,
             "items": tasks,
             "source_precedence": [
                 "danskespil_account_history",
@@ -591,10 +601,19 @@ impl GamblerService {
             .cloned()
             .unwrap_or_default();
         let account_agent = danskespil_account_agent_status();
-        let requests = items
+        let mut requests = items
             .iter()
             .filter_map(|item| account_history_request(item))
             .collect::<Vec<_>>();
+        requests.sort_by(|left, right| {
+            number(right, "priority_score")
+                .partial_cmp(&number(left, "priority_score"))
+                .unwrap_or(std::cmp::Ordering::Equal)
+        });
+        let request_exposure = requests
+            .iter()
+            .map(|request| number(request, "hypothetical_stake"))
+            .sum::<f64>();
 
         json!({
             "enabled": true,
@@ -625,6 +644,7 @@ impl GamblerService {
             },
             "review_count": items.len(),
             "request_count": requests.len(),
+            "request_exposure": request_exposure,
             "items": requests,
             "evidence_endpoint": "/api/settlement/external-evidence",
             "allowed_evidence_fields": [
@@ -941,6 +961,13 @@ fn result_agent_task(item: &Value, account_agent: &Value) -> Option<Value> {
 
     let event_names = result_agent_event_names(item);
     let search_terms = result_agent_search_terms(item, &event_names);
+    let hypothetical_stake = number(item, "hypothetical_stake");
+    let overdue_minutes = item
+        .get("overdue_minutes")
+        .and_then(Value::as_i64)
+        .unwrap_or_default()
+        .max(0) as f64;
+    let priority_score = hypothetical_stake * (1.0 + overdue_minutes / 120.0);
     let legs = if item_type == "coupon" {
         item.get("legs").cloned().unwrap_or_else(|| json!([]))
     } else {
@@ -953,6 +980,8 @@ fn result_agent_task(item: &Value, account_agent: &Value) -> Option<Value> {
         "automation_status": automation_status,
         "agent_action": agent_action,
         "recommendation": recommendation,
+        "hypothetical_stake": hypothetical_stake,
+        "priority_score": priority_score,
         "overdue_minutes": item.get("overdue_minutes").cloned().unwrap_or(Value::Null),
         "expected_result_check_after": item.get("expected_result_check_after").cloned().unwrap_or(Value::Null),
         "last_lookup_at": item.get("last_lookup_at").cloned().unwrap_or(Value::Null),
@@ -1023,6 +1052,13 @@ fn account_history_request(item: &Value) -> Option<Value> {
     } else {
         json!([])
     };
+    let hypothetical_stake = number(item, "hypothetical_stake");
+    let overdue_minutes = item
+        .get("overdue_minutes")
+        .and_then(Value::as_i64)
+        .unwrap_or_default()
+        .max(0) as f64;
+    let priority_score = hypothetical_stake * (1.0 + overdue_minutes / 120.0);
     let selection = json!({
         "event_name": item.get("event_name").cloned().unwrap_or(Value::Null),
         "event_names": event_names,
@@ -1046,6 +1082,8 @@ fn account_history_request(item: &Value) -> Option<Value> {
         "request_kind": request_kind,
         "recommendation": recommendation,
         "expected_truth": expected_truth,
+        "hypothetical_stake": hypothetical_stake,
+        "priority_score": priority_score,
         "overdue_minutes": item.get("overdue_minutes").cloned().unwrap_or(Value::Null),
         "expected_result_check_after": item.get("expected_result_check_after").cloned().unwrap_or(Value::Null),
         "last_lookup_at": item.get("last_lookup_at").cloned().unwrap_or(Value::Null),
@@ -2326,6 +2364,10 @@ fn dedup_texts(values: Vec<String>) -> Vec<String> {
 
 fn text<'a>(value: &'a Value, key: &str) -> Option<&'a str> {
     value.get(key).and_then(Value::as_str)
+}
+
+fn number(value: &Value, key: &str) -> f64 {
+    value.get(key).and_then(Value::as_f64).unwrap_or_default()
 }
 
 fn boolish(value: Option<&Value>) -> bool {

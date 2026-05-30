@@ -806,7 +806,7 @@ function renderSettlementReview(summary) {
 }
 function renderResultAgentQueue(queue) {
   const items = queue.items || [];
-  $("result-agent-tasks").textContent = `${queue.task_count ?? items.length}`;
+  $("result-agent-tasks").textContent = `${queue.task_count ?? items.length} / ${money(queue.task_exposure)}`;
   $("result-agent-tasks").className = Number(queue.task_count || items.length || 0) > 0 ? "value danger" : "value ok";
   $("result-agent-queue").innerHTML = items.map((item) => {
     const selection = item.selection || {};
@@ -828,7 +828,7 @@ function renderResultAgentQueue(queue) {
       : "No configured result link yet. A source-discovery/account-history agent should find evidence automatically; operators should not need to paste URLs.";
     return `
       <tr title="${esc(taskTitle)}">
-        <td><span class="pill">${esc(item.task_kind || "result_task")}</span><br><span class="label">${esc(item.automation_status || "")}</span>${overdueText}</td>
+        <td><span class="pill">${esc(item.task_kind || "result_task")}</span><br><span class="label">${esc(item.automation_status || "")}</span>${overdueText}<br><span class="muted">stake ${money(item.hypothetical_stake)} / priority ${num(item.priority_score)}</span></td>
         <td>${Array.isArray(selection.event_names) && selection.event_names.length ? eventNames : esc(eventNames)}<br><span class="label">${esc([selection.sport_key, selection.competition, selection.market_name, selection.outcome_name].filter(Boolean).join(" / "))}</span></td>
         <td title="${esc(sourceTitle)}">${linkText}${terms ? `<br><span class="label">terms</span><br><span class="muted">${terms}</span>` : ""}</td>
         <td>${esc(item.agent_action || "")}<br><span class="label">evidence: ${esc(item.evidence_endpoint || "")}</span></td>
@@ -846,7 +846,7 @@ function renderAccountHistoryRequests(requests) {
   const dryRunCommand = runbook.make_dry_run_target || runbook.dry_run_command || "";
   $("account-history-agent-runbook").innerHTML = `
     <div><span class="label">Local account-history agent</span></div>
-    <div>${esc(items.length)} request${items.length === 1 ? "" : "s"} pending. Run locally with an operator-controlled browser session; the cluster cannot access account history.</div>
+    <div>${esc(items.length)} request${items.length === 1 ? "" : "s"} / ${money(requests.request_exposure)} pending. Run locally with an operator-controlled browser session; the cluster cannot access account history.</div>
     <div class="muted">First port-forward: <code>${esc(runbook.port_forward_command || "-")}</code></div>
     <div class="muted">Then dry-run: <code>${esc(dryRunCommand || "-")}</code></div>
     <div class="${agent.available ? "ok" : "muted"}">${esc(agent.available ? "Local credential env vars are present in this process context." : "Credential values are not exposed here; sign in only in the local browser session.")}</div>
@@ -868,7 +868,7 @@ function renderAccountHistoryRequests(requests) {
     ].filter(Boolean).map(esc).join("<br>");
     return `
       <tr title="${esc("Use a local operator browser session. Do not submit bets or store credentials, cookies, browser storage, full account pages, payment data, Spil-ID, or MitID payloads.")}">
-        <td><span class="pill">${esc(item.request_kind || "account_history_request")}</span><br><span class="label">${esc(item.recommendation || "")}</span>${overdueText}</td>
+        <td><span class="pill">${esc(item.request_kind || "account_history_request")}</span><br><span class="label">${esc(item.recommendation || "")}</span>${overdueText}<br><span class="muted">stake ${money(item.hypothetical_stake)} / priority ${num(item.priority_score)}</span></td>
         <td>${Array.isArray(selection.event_names) && selection.event_names.length ? eventNames : eventNames}<br><span class="label">${esc([selection.sport_key, selection.competition, selection.market_name, selection.outcome_name].filter(Boolean).join(" / "))}</span></td>
         <td>${esc(item.expected_truth || "")}<br><span class="label">${esc(item.lookup_stale ? "lookup stale" : "recent lookup")}</span></td>
         <td>${contract}<br><span class="label">paper-only sanitized facts</span></td>

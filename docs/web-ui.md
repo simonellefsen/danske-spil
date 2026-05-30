@@ -27,6 +27,7 @@ The UI is not a marketing site. It is an operational dashboard for repeated revi
 - Daily performance aggregate rows should split out awaiting-result counts and exposure under open exposure so operators can distinguish active unsettled settlement work from other open states.
 - All-time strategy, sport, and risk-flag performance rows should also split out awaiting-result exposure so unresolved settlement backlog is visible outside the daily panels.
 - Settlement workload metrics should show both counts and paper exposure for due review items, lookup-stale items, and sport-level due rows.
+- Result-agent queue rows should show paper stake and priority score so the highest-impact stale result work is visible before an agent cycle runs.
 - Browser-backed external result evidence, including source, event, score, confidence, and whether the evidence has driven a paper settlement.
 - Account-history coupon evidence shows preserved leg event names in the settlement observations and external evidence tables so coupon audit rows are readable without opening raw payload JSON.
 - All known external result links on settlement-review rows, with browser-evidence markers for sources such as Sofascore that block direct HTTP lookups.
