@@ -4352,6 +4352,7 @@ impl Store {
                 positions AS (
                   SELECT
                     'single'::text AS item_type,
+                    sb.id::text AS item_id,
                     sb.status,
                     sb.hypothetical_stake::float8 AS stake,
                     sb.observed_decimal_odds::float8 AS odds,
@@ -4361,6 +4362,7 @@ impl Store {
                   UNION ALL
                   SELECT
                     'coupon'::text AS item_type,
+                    sc.id::text AS item_id,
                     sc.status,
                     sc.hypothetical_stake::float8 AS stake,
                     sc.observed_combined_decimal_odds::float8 AS odds,
@@ -4368,6 +4370,21 @@ impl Store {
                   FROM simulated_coupons sc
                   LEFT JOIN coupon_sports cs ON cs.id = sc.id
                   WHERE sc.created_at >= $1 AND sc.created_at < $2
+                ),
+                positions_with_truth AS (
+                  SELECT
+                    positions.*,
+                    observation.id AS latest_observation_id
+                  FROM positions
+                  LEFT JOIN LATERAL (
+                    SELECT so.id
+                    FROM settlement_observations so
+                    WHERE
+                      (positions.item_type = 'single' AND so.simulated_bet_id = positions.item_id)
+                      OR (positions.item_type = 'coupon' AND so.simulated_coupon_id = positions.item_id)
+                    ORDER BY so.created_at DESC
+                    LIMIT 1
+                  ) observation ON true
                 )
                 SELECT
                   count(*) FILTER (WHERE status <> 'duplicate_void')::int AS placed_count,
@@ -4378,11 +4395,12 @@ impl Store {
                   count(*) FILTER (WHERE status = 'settled_lost')::int AS lost_count,
                   count(*) FILTER (WHERE status IN ('open', 'awaiting_result', 'unresolved', 'postponed'))::int AS open_count,
                   count(*) FILTER (WHERE status = 'awaiting_result')::int AS awaiting_result_count,
+                  count(*) FILTER (WHERE status <> 'duplicate_void' AND latest_observation_id IS NOT NULL)::int AS truth_observation_count,
                   COALESCE(sum(stake) FILTER (WHERE status <> 'duplicate_void'), 0)::float8 AS turnover,
                   COALESCE(sum(stake) FILTER (WHERE status IN ('open', 'awaiting_result', 'unresolved', 'postponed')), 0)::float8 AS open_exposure,
                   COALESCE(sum(profit_loss) FILTER (WHERE status <> 'duplicate_void'), 0)::float8 AS realized_profit_loss,
                   avg(odds) FILTER (WHERE status <> 'duplicate_void')::float8 AS average_odds
-                FROM positions
+                FROM positions_with_truth
                 "#,
                 &[&window_start, &window_end],
             )
@@ -4415,6 +4433,7 @@ impl Store {
                   SELECT
                     COALESCE(cb.sport_key, 'unknown') AS sport_key,
                     'single'::text AS item_type,
+                    sb.id::text AS item_id,
                     sb.status,
                     sb.hypothetical_stake::float8 AS stake,
                     sb.observed_decimal_odds::float8 AS odds,
@@ -4426,6 +4445,7 @@ impl Store {
                   SELECT
                     COALESCE(cs.sport_key, 'unknown') AS sport_key,
                     'coupon'::text AS item_type,
+                    sc.id::text AS item_id,
                     sc.status,
                     sc.hypothetical_stake::float8 AS stake,
                     sc.observed_combined_decimal_odds::float8 AS odds,
@@ -4433,6 +4453,21 @@ impl Store {
                   FROM simulated_coupons sc
                   LEFT JOIN coupon_sports cs ON cs.id = sc.id
                   WHERE sc.created_at >= $1 AND sc.created_at < $2
+                ),
+                positions_with_truth AS (
+                  SELECT
+                    positions.*,
+                    observation.id AS latest_observation_id
+                  FROM positions
+                  LEFT JOIN LATERAL (
+                    SELECT so.id
+                    FROM settlement_observations so
+                    WHERE
+                      (positions.item_type = 'single' AND so.simulated_bet_id = positions.item_id)
+                      OR (positions.item_type = 'coupon' AND so.simulated_coupon_id = positions.item_id)
+                    ORDER BY so.created_at DESC
+                    LIMIT 1
+                  ) observation ON true
                 )
                 SELECT
                   sport_key,
@@ -4443,11 +4478,12 @@ impl Store {
                   count(*) FILTER (WHERE status = 'settled_won')::int AS won_count,
                   count(*) FILTER (WHERE status = 'settled_lost')::int AS lost_count,
                   count(*) FILTER (WHERE status IN ('open', 'awaiting_result', 'unresolved', 'postponed'))::int AS open_count,
+                  count(*) FILTER (WHERE status <> 'duplicate_void' AND latest_observation_id IS NOT NULL)::int AS truth_observation_count,
                   COALESCE(sum(stake) FILTER (WHERE status <> 'duplicate_void'), 0)::float8 AS turnover,
                   COALESCE(sum(stake) FILTER (WHERE status IN ('open', 'awaiting_result', 'unresolved', 'postponed')), 0)::float8 AS open_exposure,
                   COALESCE(sum(profit_loss) FILTER (WHERE status <> 'duplicate_void'), 0)::float8 AS realized_profit_loss,
                   avg(odds) FILTER (WHERE status <> 'duplicate_void')::float8 AS average_odds
-                FROM positions
+                FROM positions_with_truth
                 GROUP BY sport_key
                 ORDER BY placed_count DESC, sport_key
                 "#,
@@ -4469,6 +4505,7 @@ impl Store {
                     "won_count": won,
                     "lost_count": lost,
                     "open_count": row.get::<_, i32>("open_count"),
+                    "truth_observation_count": row.get::<_, i32>("truth_observation_count"),
                     "turnover": row.get::<_, f64>("turnover"),
                     "open_exposure": row.get::<_, f64>("open_exposure"),
                     "realized_profit_loss": row.get::<_, f64>("realized_profit_loss"),
@@ -4684,6 +4721,7 @@ impl Store {
                 "lost_count": lost_count,
                 "open_count": summary_row.get::<_, i32>("open_count"),
                 "awaiting_result_count": summary_row.get::<_, i32>("awaiting_result_count"),
+                "truth_observation_count": summary_row.get::<_, i32>("truth_observation_count"),
                 "turnover": summary_row.get::<_, f64>("turnover"),
                 "open_exposure": summary_row.get::<_, f64>("open_exposure"),
                 "realized_profit_loss": summary_row.get::<_, f64>("realized_profit_loss"),
