@@ -4555,7 +4555,11 @@ impl Store {
                     positions.*,
                     lookup.created_at AS last_lookup_at,
                     lookup.source_key AS last_lookup_source_key,
-                    lookup.recommendation AS last_lookup_recommendation
+                    lookup.recommendation AS last_lookup_recommendation,
+                    observation.created_at AS latest_observation_at,
+                    observation.source AS latest_observation_source,
+                    observation.observed_result AS latest_observation_result,
+                    observation.confidence::float8 AS latest_observation_confidence
                   FROM positions
                   LEFT JOIN LATERAL (
                     SELECT
@@ -4569,6 +4573,19 @@ impl Store {
                     ORDER BY sla.created_at DESC
                     LIMIT 1
                   ) lookup ON true
+                  LEFT JOIN LATERAL (
+                    SELECT
+                      so.created_at,
+                      so.source,
+                      so.observed_result,
+                      so.confidence
+                    FROM settlement_observations so
+                    WHERE
+                      (positions.item_type = 'single' AND so.simulated_bet_id = positions.item_id)
+                      OR (positions.item_type = 'coupon' AND so.simulated_coupon_id = positions.item_id)
+                    ORDER BY so.created_at DESC
+                    LIMIT 1
+                  ) observation ON true
                 )
                 SELECT *
                 FROM latest_lookup
@@ -4589,6 +4606,14 @@ impl Store {
                 let last_lookup_source_key: Option<String> = row.get("last_lookup_source_key");
                 let last_lookup_recommendation: Option<String> =
                     row.get("last_lookup_recommendation");
+                let latest_observation_at: Option<DateTime<Utc>> =
+                    row.get("latest_observation_at");
+                let latest_observation_source: Option<String> =
+                    row.get("latest_observation_source");
+                let latest_observation_result: Option<String> =
+                    row.get("latest_observation_result");
+                let latest_observation_confidence: Option<f64> =
+                    row.get("latest_observation_confidence");
                 let overdue_minutes = expected_result_check_after
                     .filter(|expected| Utc::now() > *expected)
                     .map(|expected| (Utc::now() - expected).num_minutes());
@@ -4610,6 +4635,10 @@ impl Store {
                     "last_lookup_at": last_lookup_at.map(|value| value.to_rfc3339()),
                     "last_lookup_source_key": last_lookup_source_key,
                     "last_lookup_recommendation": last_lookup_recommendation,
+                    "latest_observation_at": latest_observation_at.map(|value| value.to_rfc3339()),
+                    "latest_observation_source": latest_observation_source,
+                    "latest_observation_result": latest_observation_result,
+                    "latest_observation_confidence": latest_observation_confidence,
                     "overdue_minutes": overdue_minutes,
                     "legs": row.get::<_, Value>("legs")
                 })

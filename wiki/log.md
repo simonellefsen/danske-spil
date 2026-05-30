@@ -219,6 +219,7 @@ Append-only timeline for project wiki maintenance. Use headings with the format 
 - Rendered unsettled daily-placement P/L as `-` instead of `0.00` so open positions are not confused with void/refund zero-P/L outcomes.
 - Added expected result-check, latest lookup, and overdue-age fields to selected-day placement rows so stale paper positions are easier to reconcile.
 - Added latest lookup source and recommendation to selected-day placement rows to explain what settlement path was last attempted.
+- Added latest settlement observation result, source, confidence, and timestamp to selected-day placement rows so the daily report shows the recorded truth next to ledger status.
 
 ## [2026-05-25] implementation | Candidate ranking and paper settlement POC
 

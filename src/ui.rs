@@ -1223,6 +1223,10 @@ function renderDailyPerformanceRecent(items) {
     const lookupSource = [item.last_lookup_source_key, item.last_lookup_recommendation].filter(Boolean).join(" / ");
     const checkMeta = overdueLabel || lookupLabel;
     const lookupMeta = [overdueLabel ? lookupLabel : "", lookupSource].filter(Boolean).join(" / ");
+    const observation = [item.latest_observation_result, item.latest_observation_source].filter(Boolean).join(" / ");
+    const observationMeta = item.latest_observation_at
+      ? `${observation}${item.latest_observation_confidence === null || item.latest_observation_confidence === undefined ? "" : ` / ${pct(item.latest_observation_confidence)}`} / ${item.latest_observation_at}`
+      : observation;
     return `
       <tr>
         <td>${esc(item.created_at || "-")}</td>
@@ -1230,7 +1234,7 @@ function renderDailyPerformanceRecent(items) {
         <td>${esc(selection)}<br><span class="label">${esc(context)}</span></td>
         <td>${money(item.stake)}<br><span class="muted">@ ${esc(item.observed_odds ?? "-")}</span></td>
         <td>${esc(item.expected_result_check_after || "-")}<br><span class="${overdue && overdue > 120 ? "danger" : "muted"}">${esc(checkMeta)}</span>${lookupMeta ? `<br><span class="label">${esc(lookupMeta)}</span>` : ""}</td>
-        <td>${esc(item.status || "-")}<br><span class="muted">P/L ${maybeMoney(item.profit_loss)}</span></td>
+        <td>${esc(item.status || "-")}<br><span class="muted">P/L ${maybeMoney(item.profit_loss)}</span>${observationMeta ? `<br><span class="label">truth ${esc(observationMeta)}</span>` : ""}</td>
       </tr>
     `;
   }).join("");
