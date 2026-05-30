@@ -6401,27 +6401,40 @@ impl Store {
                 .filter(|value| !value.is_empty())
                 .map(str::to_string);
             let gender_scope = payload_gender_scope(&payload).ok().flatten();
-            let home_aliases = expand_aliases_from_registry(
-                &client,
-                "participant",
-                sport_scope.as_deref(),
-                gender_scope.as_deref(),
-                row.get::<_, Vec<String>>("home_aliases"),
-            )
-            .await?;
-            let away_aliases = expand_aliases_from_registry(
-                &client,
-                "participant",
-                sport_scope.as_deref(),
-                gender_scope.as_deref(),
-                row.get::<_, Vec<String>>("away_aliases"),
-            )
-            .await?;
+            let event_name = row.get::<_, String>("event_name");
+            let home_aliases = row.get::<_, Vec<String>>("home_aliases");
+            let away_aliases = row.get::<_, Vec<String>>("away_aliases");
+            let use_alias_registry =
+                use_external_result_alias_registry(sport_scope.as_deref(), &event_name);
+            let home_aliases = if use_alias_registry {
+                expand_aliases_from_registry(
+                    &client,
+                    "participant",
+                    sport_scope.as_deref(),
+                    gender_scope.as_deref(),
+                    home_aliases,
+                )
+                .await?
+            } else {
+                home_aliases
+            };
+            let away_aliases = if use_alias_registry {
+                expand_aliases_from_registry(
+                    &client,
+                    "participant",
+                    sport_scope.as_deref(),
+                    gender_scope.as_deref(),
+                    away_aliases,
+                )
+                .await?
+            } else {
+                away_aliases
+            };
             links_by_source
                 .entry(row.get::<_, String>("source_key"))
                 .or_default()
                 .push(json!({
-                    "event_name": row.get::<_, String>("event_name"),
+                    "event_name": event_name,
                     "url": row.get::<_, String>("source_url"),
                     "home_aliases": home_aliases,
                     "away_aliases": away_aliases,
@@ -6567,53 +6580,70 @@ impl Store {
             "method": "external_result_link",
             "paper_only": true
         });
-        let recorded_home_aliases = record_entity_aliases(
-            &client,
-            "participant",
-            sport_key,
-            gender_scope.as_deref(),
-            &home_canonical,
-            home_aliases.clone(),
-            Some(source_key),
-            None,
-            0.82,
-            alias_notes.clone(),
-        )
-        .await?;
-        let recorded_away_aliases = record_entity_aliases(
-            &client,
-            "participant",
-            sport_key,
-            gender_scope.as_deref(),
-            &away_canonical,
-            away_aliases.clone(),
-            Some(source_key),
-            None,
-            0.82,
-            alias_notes,
-        )
-        .await?;
+        let use_alias_registry = use_external_result_alias_registry(sport_key, event_name);
+        let (recorded_home_aliases, recorded_away_aliases) = if use_alias_registry {
+            (
+                record_entity_aliases(
+                    &client,
+                    "participant",
+                    sport_key,
+                    gender_scope.as_deref(),
+                    &home_canonical,
+                    home_aliases.clone(),
+                    Some(source_key),
+                    None,
+                    0.82,
+                    alias_notes.clone(),
+                )
+                .await?,
+                record_entity_aliases(
+                    &client,
+                    "participant",
+                    sport_key,
+                    gender_scope.as_deref(),
+                    &away_canonical,
+                    away_aliases.clone(),
+                    Some(source_key),
+                    None,
+                    0.82,
+                    alias_notes,
+                )
+                .await?,
+            )
+        } else {
+            (Vec::new(), Vec::new())
+        };
+        let expanded_home_aliases = if use_alias_registry {
+            expand_aliases_from_registry(
+                &client,
+                "participant",
+                sport_key,
+                gender_scope.as_deref(),
+                home_aliases.clone(),
+            )
+            .await?
+        } else {
+            home_aliases.clone()
+        };
+        let expanded_away_aliases = if use_alias_registry {
+            expand_aliases_from_registry(
+                &client,
+                "participant",
+                sport_key,
+                gender_scope.as_deref(),
+                away_aliases.clone(),
+            )
+            .await?
+        } else {
+            away_aliases.clone()
+        };
         let link = ExternalResultLink {
             source_key: source_key.to_string(),
             url: source_url.to_string(),
             sport_key: sport_key.map(str::to_string),
             gender_scope: gender_scope.clone(),
-            home_aliases: expand_aliases_from_registry(
-                &client,
-                "participant",
-                sport_key,
-                gender_scope.as_deref(),
-                home_aliases,
-            )
-            .await?,
-            away_aliases: expand_aliases_from_registry(
-                &client,
-                "participant",
-                sport_key,
-                gender_scope.as_deref(),
-                away_aliases,
-            )
-            .await?,
+            home_aliases: expanded_home_aliases,
+            away_aliases: expanded_away_aliases,
             requires_browser_automation,
             known_home_score: json_i32(payload.get("home_score")),
             known_away_score: json_i32(payload.get("away_score")),
@@ -6677,27 +6707,40 @@ impl Store {
                 .filter(|value| !value.is_empty())
                 .map(str::to_string);
             let gender_scope = payload_gender_scope(&payload).ok().flatten();
-            let home_aliases = expand_aliases_from_registry(
-                &client,
-                "participant",
-                sport_scope.as_deref(),
-                gender_scope.as_deref(),
-                row.get::<_, Vec<String>>("home_aliases"),
-            )
-            .await?;
-            let away_aliases = expand_aliases_from_registry(
-                &client,
-                "participant",
-                sport_scope.as_deref(),
-                gender_scope.as_deref(),
-                row.get::<_, Vec<String>>("away_aliases"),
-            )
-            .await?;
+            let event_name = row.get::<_, String>("event_name");
+            let home_aliases = row.get::<_, Vec<String>>("home_aliases");
+            let away_aliases = row.get::<_, Vec<String>>("away_aliases");
+            let use_alias_registry =
+                use_external_result_alias_registry(sport_scope.as_deref(), &event_name);
+            let home_aliases = if use_alias_registry {
+                expand_aliases_from_registry(
+                    &client,
+                    "participant",
+                    sport_scope.as_deref(),
+                    gender_scope.as_deref(),
+                    home_aliases,
+                )
+                .await?
+            } else {
+                home_aliases
+            };
+            let away_aliases = if use_alias_registry {
+                expand_aliases_from_registry(
+                    &client,
+                    "participant",
+                    sport_scope.as_deref(),
+                    gender_scope.as_deref(),
+                    away_aliases,
+                )
+                .await?
+            } else {
+                away_aliases
+            };
             items.push(json!({
                 "id": row.get::<_, String>("id"),
                 "source_key": row.get::<_, String>("source_key"),
                 "source_name": row.get::<_, String>("source_name"),
-                "event_name": row.get::<_, String>("event_name"),
+                "event_name": event_name,
                 "source_url": row.get::<_, String>("source_url"),
                 "sport_key": sport_scope,
                 "gender_scope": gender_scope,
@@ -9647,6 +9690,18 @@ fn is_external_result_source(source_key: &str) -> bool {
     )
 }
 
+fn use_external_result_alias_registry(sport_key: Option<&str>, event_name: &str) -> bool {
+    !is_tennis_doubles_event_name(sport_key, event_name)
+}
+
+fn is_tennis_doubles_event_name(sport_key: Option<&str>, event_name: &str) -> bool {
+    sport_key == Some("tennis")
+        && event_name
+            .split_once(" - ")
+            .map(|(home, away)| home.contains('/') && away.contains('/'))
+            .unwrap_or(false)
+}
+
 fn validate_entity_kind(entity_kind: &str) -> anyhow::Result<()> {
     match entity_kind {
         "participant" | "team" | "player" | "league" | "competition" | "driver" | "golfer"
@@ -10655,6 +10710,22 @@ mod tests {
         assert!(!links[0].requires_browser_automation);
         assert_eq!(links[1].source_key, "sofascore_results");
         assert!(links[1].requires_browser_automation);
+    }
+
+    #[test]
+    fn tennis_doubles_result_links_do_not_use_global_alias_registry() {
+        assert!(!use_external_result_alias_registry(
+            Some("tennis"),
+            "Shimizu Y / Watanabe S - Basel V / Oliveira B"
+        ));
+        assert!(use_external_result_alias_registry(
+            Some("tennis"),
+            "Casper Ruud - Tommy Paul"
+        ));
+        assert!(use_external_result_alias_registry(
+            Some("basketball"),
+            "Team A / Sponsor - Team B / Sponsor"
+        ));
     }
 
     #[test]

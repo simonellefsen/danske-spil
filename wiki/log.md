@@ -341,3 +341,13 @@ Append-only timeline for project wiki maintenance. Use headings with the format 
 
 - Tightened doubles source-link generation so aliases and source URLs use the player ids present in the matched Flashscore row instead of every high-ranked same-surname search candidate.
 - Added a regression test covering the Shimizu/Watanabe style ambiguity where Flashscore search can return unrelated same-surname players.
+
+## [2026-05-30] implementation | Tennis doubles alias registry guard
+
+- Stopped tennis doubles external-result links from recording or expanding through the global participant alias registry, keeping temporary pair aliases local to the matched source link.
+- Added a regression test so ordinary tennis singles and non-tennis events still use the central alias registry while tennis doubles bypass it.
+
+## [2026-05-30] implementation | Paris SG Flashscore alias
+
+- Added PSG/Paris Saint-Germain aliases for football result discovery after the live queue exposed `Paris SG - Arsenal` as a provider-name mismatch.
+- Refreshed the already-discovered tennis doubles source links so the live UI now shows only matched player aliases for those rows.

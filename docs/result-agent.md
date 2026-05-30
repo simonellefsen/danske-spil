@@ -179,7 +179,8 @@ Basketball and football aliases also normalize sponsor-heavy or abbreviated
 names such as `Rinascita Basket Rimini` to `Rimini`, `Ueb Cividale` to
 `Cividale`, `Baskonia Vitoria-Gasteiz` to `Baskonia`, `Cb Malaga` to
 `Malaga`, `Næstved BK` to `Naestved`, and `Fortaleza C.E.I.F. FC` to
-`Fortaleza`. Women-team aliases also account for Flashscore naming such as
+`Fortaleza`. Football aliases also normalize `Paris SG`, `PSG`, and
+`Paris Saint-Germain`. Women-team aliases also account for Flashscore naming such as
 `Vasco W`, `America Mineiro W`, `America de Cali W`, and `Inter Palmira W`.
 If a row still returns `flashscore_discovery_no_match`, the next step is to add
 another source adapter or a sport-specific pagination path, not an operator
@@ -189,7 +190,9 @@ individual players on each side, matches both player ids in the participant
 feed row, and accepts provider-reversed pair order when the player-id sets are
 otherwise exact. Source URLs and aliases are built from the player ids that
 actually appeared in the matched feed row, so same-surname search candidates do
-not pollute later alias matching. When Flashscore has a matched doubles row
+not pollute later alias matching. Tennis doubles links also bypass the central
+participant-alias registry on read and write, because temporary pair aliases are
+not stable enough to share globally. When Flashscore has a matched doubles row
 with no final score but a terminal no-play/status marker, the paper ledger is
 settled as `refunded` and the audit payload records the source URL, event id,
 stage, raw row preview, and `paper_only=true`.

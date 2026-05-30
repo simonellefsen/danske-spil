@@ -2890,6 +2890,11 @@ fn flashscore_known_name_aliases(name: &str) -> Vec<String> {
         }
         "naestved bk" | "naestved if" => vec!["Naestved".to_string()],
         "ab" | "akademisk boldklub" => vec!["AB Copenhagen".to_string(), "AB".to_string()],
+        "paris sg" | "paris saint germain" | "paris saint germain fc" | "psg" => vec![
+            "PSG".to_string(),
+            "Paris Saint-Germain".to_string(),
+            "Paris SG".to_string(),
+        ],
         "america de cali sa k" | "america de cali w" | "america de cali women" => {
             vec![
                 "America de Cali W".to_string(),
@@ -3514,6 +3519,9 @@ mod tests {
             .contains(&"Vasco W".to_string()));
         assert!(flashscore_name_variants("America MG (k)", "football")
             .contains(&"America Mineiro W".to_string()));
+        assert!(flashscore_name_variants("Paris SG", "football").contains(&"PSG".to_string()));
+        assert!(flashscore_name_variants("Paris Saint-Germain", "football")
+            .contains(&"Paris SG".to_string()));
     }
 
     #[test]
