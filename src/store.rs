@@ -234,6 +234,29 @@ VALUES
           "url": "https://www.flashscore.com/match/football/notts-county-EwJVdqzn/salford-W4AadhN3/?mid=E3uvsQPP",
           "home_aliases": ["Notts Co", "Notts County"],
           "away_aliases": ["Salford", "Salford City", "Salford City FC"]
+        },
+        {
+          "event_name": "Dallas Wings - Las Vegas Aces",
+          "url": "https://www.flashscore.dk/kamp/basketball/dallas-wings-WlAAvRyL/las-vegas-aces-nZjYLTCd/?mid=88ogphkR",
+          "sport_key": "basketball",
+          "gender_scope": "women",
+          "home_aliases": ["Dallas Wings"],
+          "away_aliases": ["Las Vegas Aces"]
+        },
+        {
+          "event_name": "Casper Ruud - Tommy Paul",
+          "url": "https://www.flashscore.dk/kamp/tennis/paul-tommy-pd3ye1BS/ruud-casper-zN9UpRqp/?mid=UHlr5dhM",
+          "sport_key": "tennis",
+          "gender_scope": "men",
+          "home_aliases": ["Casper Ruud", "Ruud Casper", "Ruud"],
+          "away_aliases": ["Tommy Paul", "Paul Tommy", "Paul"]
+        },
+        {
+          "event_name": "Bosnien-Hercegovina - Nordmakedonien",
+          "url": "https://www.flashscore.dk/kamp/fodbold/bosnien-herzegovina-fqe7WYTr/nordmakedonien-GrTQ3oHB/?mid=4lrOQdEN",
+          "sport_key": "football",
+          "home_aliases": ["Bosnien-Hercegovina", "Bosnien Herzegovina", "Bosnia and Herzegovina"],
+          "away_aliases": ["Nordmakedonien", "North Macedonia"]
         }
       ]
     }'::jsonb
@@ -272,6 +295,14 @@ VALUES
           "url": "https://www.sofascore.com/da/football/match/lyngby-ac-horsens/XAsgK#id:15885987",
           "home_aliases": ["Lyngby", "Lyngby AC"],
           "away_aliases": ["Horsens", "AC Horsens"]
+        },
+        {
+          "event_name": "CR Vasco da Gama (W) - America MG (k)",
+          "url": "https://www.sofascore.com/da/football/match/vasco-da-gama-america-mineiro/WzocsKgAc",
+          "sport_key": "football",
+          "gender_scope": "women",
+          "home_aliases": ["CR Vasco da Gama (W)", "Vasco da Gama", "Vasco da Gama W"],
+          "away_aliases": ["America MG (k)", "America MG", "America Mineiro", "America Mineiro W"]
         }
       ]
     }'::jsonb
@@ -2235,15 +2266,19 @@ impl Store {
         let row = client
             .query_opt(
                 r#"
-                SELECT id, candidate_id, created_at, hypothetical_stake::float8 AS hypothetical_stake,
-                       observed_decimal_odds::float8 AS observed_decimal_odds, status,
-                       strategy_id, event_start_time, expected_result_check_after, settled_at,
-                       simulated_return::float8 AS simulated_return,
-                       profit_loss::float8 AS profit_loss,
-                       settlement_payload, payload
-                FROM simulated_bets
-                WHERE candidate_id = $1
-                ORDER BY created_at ASC
+                SELECT sb.id, sb.candidate_id, sb.created_at,
+                       cb.sport_key, cb.event_name, cb.competition, cb.market_name,
+                       cb.market_kind, cb.outcome_name,
+                       sb.hypothetical_stake::float8 AS hypothetical_stake,
+                       sb.observed_decimal_odds::float8 AS observed_decimal_odds, sb.status,
+                       sb.strategy_id, sb.event_start_time, sb.expected_result_check_after, sb.settled_at,
+                       sb.simulated_return::float8 AS simulated_return,
+                       sb.profit_loss::float8 AS profit_loss,
+                       sb.settlement_payload, sb.payload
+                FROM simulated_bets sb
+                LEFT JOIN candidate_bets cb ON cb.id = sb.candidate_id
+                WHERE sb.candidate_id = $1
+                ORDER BY sb.created_at ASC
                 LIMIT 1
                 "#,
                 &[&candidate_id],
@@ -2268,6 +2303,8 @@ impl Store {
             .query_opt(
                 r#"
                 SELECT sb.id, sb.candidate_id, sb.created_at,
+                       cb.sport_key, cb.event_name, cb.competition, cb.market_name,
+                       cb.market_kind, cb.outcome_name,
                        sb.hypothetical_stake::float8 AS hypothetical_stake,
                        sb.observed_decimal_odds::float8 AS observed_decimal_odds,
                        sb.status, sb.strategy_id, sb.event_start_time,
@@ -9939,7 +9976,7 @@ fn source_url_participant_names(link: &ExternalResultLink) -> Option<(String, St
 fn flashscore_url_participant_names(url: &str) -> Option<(String, String)> {
     let parsed = Url::parse(url).ok()?;
     let segments = parsed.path_segments()?.collect::<Vec<_>>();
-    if segments.len() < 4 || segments.first().copied() != Some("match") {
+    if segments.len() < 4 || !matches!(segments.first().copied(), Some("match" | "kamp")) {
         return None;
     }
     Some((
@@ -10221,12 +10258,26 @@ fn json_string_array(value: Option<&Value>) -> Vec<String> {
 
 fn alias_matches(value: &str, aliases: &[String]) -> bool {
     let normalized = normalize_match_name(value);
-    aliases.iter().any(|alias| {
-        let alias = normalize_match_name(alias);
+    let normalized_tokens = alias_match_tokens(value);
+    aliases.iter().any(|raw_alias| {
+        let alias = normalize_match_name(raw_alias);
         normalized == alias
             || (normalized.len() >= 5 && alias.contains(&normalized))
             || (alias.len() >= 5 && normalized.contains(&alias))
+            || (!normalized_tokens.is_empty() && alias_match_tokens(raw_alias) == normalized_tokens)
     })
+}
+
+fn alias_match_tokens(value: &str) -> Vec<String> {
+    let stop = ["fc", "sc", "ac", "bk", "if", "kk"];
+    let mut tokens = normalize_token_text(value)
+        .split_whitespace()
+        .filter(|token| token.len() > 1 && !stop.contains(token))
+        .map(str::to_string)
+        .collect::<Vec<_>>();
+    tokens.sort();
+    tokens.dedup();
+    tokens
 }
 
 fn is_draw_outcome(value: &str) -> bool {
@@ -10240,6 +10291,29 @@ fn normalize_match_name(value: &str) -> String {
         .filter(|character| character.is_ascii_alphanumeric())
         .flat_map(char::to_lowercase)
         .collect()
+}
+
+fn normalize_token_text(value: &str) -> String {
+    let mut output = String::new();
+    for ch in value.chars().flat_map(|ch| match ch {
+        'Æ' | 'æ' => "ae".chars().collect::<Vec<_>>(),
+        'Ø' | 'ø' => "o".chars().collect::<Vec<_>>(),
+        'Å' | 'å' | 'Ä' | 'ä' | 'Á' | 'á' | 'À' | 'à' | 'Â' | 'â' => vec!['a'],
+        'Ö' | 'ö' | 'Ó' | 'ó' | 'Ò' | 'ò' | 'Ô' | 'ô' => vec!['o'],
+        'Ü' | 'ü' | 'Ú' | 'ú' | 'Ù' | 'ù' | 'Û' | 'û' => vec!['u'],
+        'É' | 'é' | 'È' | 'è' | 'Ê' | 'ê' => vec!['e'],
+        'Í' | 'í' | 'Ì' | 'ì' | 'Î' | 'î' => vec!['i'],
+        'Ç' | 'ç' => vec!['c'],
+        'Ñ' | 'ñ' => vec!['n'],
+        other => vec![other],
+    }) {
+        if ch.is_ascii_alphanumeric() {
+            output.push(ch.to_ascii_lowercase());
+        } else {
+            output.push(' ');
+        }
+    }
+    output.split_whitespace().collect::<Vec<_>>().join(" ")
 }
 
 fn settlement_review_recommendation(
@@ -10439,6 +10513,12 @@ mod tests {
 
         assert_eq!(flashscore_match_id(url).as_deref(), Some("K8aAGt6r"));
         assert_eq!(
+            flashscore_url_participant_names(
+                "https://www.flashscore.dk/kamp/basketball/dallas-wings-WlAAvRyL/las-vegas-aces-nZjYLTCd/?mid=88ogphkR"
+            ),
+            Some(("Dallas Wings".to_string(), "Las Vegas Aces".to_string()))
+        );
+        assert_eq!(
             parse_flashscore_title_participants(
                 "Irak vs Andorra 29/05/2026 | Fodbold - Flashscore"
             ),
@@ -10539,6 +10619,11 @@ mod tests {
         assert!(validate_external_result_url(
             "flashscore_results",
             "https://www.flashscore.dk/kamp/fodbold/andorra-dnO5z404/irak-K8aAGt6r/"
+        )
+        .is_ok());
+        assert!(validate_external_result_url(
+            "sofascore_results",
+            "https://www.sofascore.com/da/football/match/vasco-da-gama-america-mineiro/WzocsKgAc"
         )
         .is_ok());
         assert!(validate_external_result_url(
@@ -10648,6 +10733,42 @@ mod tests {
         assert_eq!(grade_winner_outcome("Irak", &link, &evidence), Some("won"));
         assert_eq!(
             grade_winner_outcome("Andorra", &link, &evidence),
+            Some("lost")
+        );
+    }
+
+    #[test]
+    fn grades_tennis_when_source_uses_surname_first_order() {
+        let link = ExternalResultLink {
+            source_key: "flashscore_results".to_string(),
+            url: "https://www.flashscore.dk/kamp/tennis/paul-tommy-pd3ye1BS/ruud-casper-zN9UpRqp/?mid=UHlr5dhM".to_string(),
+            sport_key: Some("tennis".to_string()),
+            gender_scope: Some("men".to_string()),
+            home_aliases: vec!["Casper Ruud".to_string()],
+            away_aliases: vec!["Tommy Paul".to_string()],
+            requires_browser_automation: false,
+            known_home_score: None,
+            known_away_score: None,
+            known_result_status: None,
+            known_result_notes: None,
+        };
+        let evidence = ExternalMatchResult {
+            source_key: link.source_key.clone(),
+            url: link.url.clone(),
+            title: "Paul Tommy - Ruud Casper 2:0".to_string(),
+            home_name: "Paul Tommy".to_string(),
+            away_name: "Ruud Casper".to_string(),
+            home_score: 2,
+            away_score: 0,
+            confidence: 0.86,
+        };
+
+        assert_eq!(
+            grade_winner_outcome("Tommy Paul", &link, &evidence),
+            Some("won")
+        );
+        assert_eq!(
+            grade_winner_outcome("Casper Ruud", &link, &evidence),
             Some("lost")
         );
     }

@@ -162,6 +162,10 @@ order across providers. Settlement matching therefore treats `A - B` and
 Flashscore domains, and orients winner-market grading by participant aliases
 before applying the final score. This prevents a source-side `Irak - Andorra
 1:0` result from being graded as if it were event-side `Andorra - Irak 1:0`.
+The same alias path handles Danish/localized provider names and person-name
+order changes, for example `Bosnien-Hercegovina` versus `Bosnia and
+Herzegovina`, women markers such as `(k)`/`(W)`, and tennis source names such
+as `Paul Tommy` for `Tommy Paul`.
 If a row still returns `flashscore_discovery_no_match`, the next step is to add
 another source adapter or a sport-specific pagination path, not an operator
 prompt.

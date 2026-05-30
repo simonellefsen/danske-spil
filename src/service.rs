@@ -2207,6 +2207,9 @@ fn selection_name_has_women_marker(name: &str) -> bool {
 fn localized_country_alias(name: &str) -> Option<&'static str> {
     let normalized = normalize_token_text(name);
     match normalized.as_str() {
+        "bosnien hercegovina" | "bosnien herzogovina" | "bosnien herzgovina" => {
+            Some("Bosnia and Herzegovina")
+        }
         "danmark" => Some("Denmark"),
         "england" => Some("England"),
         "finland" => Some("Finland"),
@@ -2222,6 +2225,7 @@ fn localized_country_alias(name: &str) -> Option<&'static str> {
         "kina" => Some("China"),
         "kroatien" => Some("Croatia"),
         "norge" => Some("Norway"),
+        "nordmakedonien" => Some("North Macedonia"),
         "polen" => Some("Poland"),
         "portugal" => Some("Portugal"),
         "schweiz" => Some("Switzerland"),
@@ -2253,6 +2257,18 @@ fn flashscore_known_name_aliases(name: &str) -> Vec<String> {
             vec!["Naestved".to_string(), "Team FOG Naestved".to_string()]
         }
         "bakken bears" => vec!["Bakken Bears".to_string()],
+        "cr vasco da gama w" | "cr vasco da gama k" | "vasco da gama w" | "vasco da gama k" => {
+            vec![
+                "Vasco da Gama W".to_string(),
+                "Vasco da Gama".to_string(),
+                "CR Vasco da Gama".to_string(),
+            ]
+        }
+        "america mg k" | "america mg w" | "america mineiro w" | "america mineiro k" => vec![
+            "America Mineiro W".to_string(),
+            "America Mineiro".to_string(),
+            "America MG".to_string(),
+        ],
         "kolding if k" | "kolding if kvinder" | "kolding if women" => {
             vec!["KoldingQ".to_string(), "Kolding IF W".to_string()]
         }
@@ -2791,12 +2807,20 @@ mod tests {
     #[test]
     fn flashscore_variants_expand_localized_and_known_names() {
         assert!(flashscore_name_variants("Indien", "football").contains(&"India".to_string()));
+        assert!(flashscore_name_variants("Bosnien-Hercegovina", "football")
+            .contains(&"Bosnia and Herzegovina".to_string()));
+        assert!(flashscore_name_variants("Nordmakedonien", "football")
+            .contains(&"North Macedonia".to_string()));
         assert!(flashscore_name_variants("Derthona Basket", "basketball")
             .contains(&"Tortona".to_string()));
         assert!(flashscore_name_variants("Kamil Majchrzak", "tennis")
             .contains(&"majchrzak kamil".to_string()));
         assert!(flashscore_name_variants("Kolding IF (k)", "football")
             .contains(&"KoldingQ".to_string()));
+        assert!(flashscore_name_variants("CR Vasco da Gama (W)", "football")
+            .contains(&"Vasco da Gama W".to_string()));
+        assert!(flashscore_name_variants("America MG (k)", "football")
+            .contains(&"America Mineiro W".to_string()));
     }
 
     #[test]

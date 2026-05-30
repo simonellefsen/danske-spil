@@ -306,3 +306,9 @@ Append-only timeline for project wiki maintenance. Use headings with the format 
 - Updated external result matching so reversed neutral-ground event names such as `Andorra - Irak` and `Irak - Andorra` can match the same public result link.
 - Updated winner-market grading to orient source-side evidence by participant aliases before applying the final score, preventing reversed Flashscore order from marking the wrong team as winner.
 - Allowed localized Flashscore domains and path-derived match ids for public result links such as `flashscore.dk`.
+
+## [2026-05-30] implementation | Result aliases for public source drift
+
+- Seeded public result links for Vasco da Gama women versus America Mineiro women, Dallas Wings versus Las Vegas Aces, Casper Ruud versus Tommy Paul, and Bosnien-Hercegovina versus Nordmakedonien.
+- Expanded result-agent aliases for Danish country names, women markers, and Brazilian women's team naming drift across Danske Spil, Flashscore, and Sofascore.
+- Updated settlement grading to treat surname-first tennis names such as `Paul Tommy` and `Ruud Casper` as aliases for `Tommy Paul` and `Casper Ruud`.
