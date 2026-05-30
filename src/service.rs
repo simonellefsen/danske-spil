@@ -2258,6 +2258,14 @@ fn flashscore_known_name_aliases(name: &str) -> Vec<String> {
             vec!["Naestved".to_string(), "Team FOG Naestved".to_string()]
         }
         "bakken bears" => vec!["Bakken Bears".to_string()],
+        "cd maristas palencia" | "maristas palencia" => vec!["Palencia".to_string()],
+        "cb fuenlabrada" => vec!["Fuenlabrada".to_string()],
+        "nsa" => vec!["NSA".to_string()],
+        "club antonin sportif" | "club antonine sportif" => vec![
+            "Antonine".to_string(),
+            "Antonin".to_string(),
+            "Club Antonine".to_string(),
+        ],
         "cr vasco da gama w" | "cr vasco da gama k" | "vasco da gama w" | "vasco da gama k" => {
             vec![
                 "Vasco da Gama W".to_string(),
@@ -2813,6 +2821,16 @@ mod tests {
         assert!(flashscore_name_variants("Irak", "football").contains(&"Iraq".to_string()));
         assert!(flashscore_name_variants("Nordmakedonien", "football")
             .contains(&"North Macedonia".to_string()));
+        assert!(
+            flashscore_name_variants("CD Maristas Palencia", "basketball")
+                .contains(&"Palencia".to_string())
+        );
+        assert!(flashscore_name_variants("Cb Fuenlabrada", "basketball")
+            .contains(&"Fuenlabrada".to_string()));
+        assert!(
+            flashscore_name_variants("Club Antonin Sportif", "basketball")
+                .contains(&"Antonine".to_string())
+        );
         assert!(flashscore_name_variants("Derthona Basket", "basketball")
             .contains(&"Tortona".to_string()));
         assert!(flashscore_name_variants("Kamil Majchrzak", "tennis")

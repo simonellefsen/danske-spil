@@ -169,6 +169,10 @@ tennis source names such as `Paul Tommy` for `Tommy Paul`.
 When a neutral-friendly source lists teams in the opposite order, a seeded
 known result stores the score in the Danske Spil event order and keeps the
 source URL in the audit payload so automatic settlement remains deterministic.
+The same rule is used for basketball rows where Flashscore may list the URL
+participants in the reverse order, for example `Fuenlabrada - Palencia`, or
+where a Flashscore match URL has no `mid` query and only exposes a page-title
+score such as `NSA - Antonine 77:84`.
 If a row still returns `flashscore_discovery_no_match`, the next step is to add
 another source adapter or a sport-specific pagination path, not an operator
 prompt.

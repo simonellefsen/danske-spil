@@ -269,6 +269,30 @@ VALUES
           "result_status": "finished",
           "result_observed_from": "user_supplied_flashscore_result",
           "notes": "Flashscore listed the neutral friendly as Irak - Andorra, with Irak winning 1-0. Stored scores are oriented to the Danske Spil event order Andorra - Irak."
+        },
+        {
+          "event_name": "CD Maristas Palencia - Cb Fuenlabrada",
+          "url": "https://www.flashscore.dk/kamp/basketball/fuenlabrada-E1z0hlIr/palencia-hMgAw6Je/?mid=4UaIOcR6",
+          "sport_key": "basketball",
+          "home_aliases": ["CD Maristas Palencia", "Palencia"],
+          "away_aliases": ["Cb Fuenlabrada", "Fuenlabrada"],
+          "home_score": 51,
+          "away_score": 76,
+          "result_status": "finished",
+          "result_observed_from": "user_supplied_flashscore_result",
+          "notes": "Flashscore lists the match as Fuenlabrada - Palencia 76:51. Stored scores are oriented to the Danske Spil event order CD Maristas Palencia - Cb Fuenlabrada."
+        },
+        {
+          "event_name": "Nsa - Club Antonin Sportif",
+          "url": "https://www.flashscore.com/match/basketball/antonine-xMbwy4Uk/nsa-xjRIpje7/",
+          "sport_key": "basketball",
+          "home_aliases": ["Nsa", "NSA"],
+          "away_aliases": ["Club Antonin Sportif", "Antonine", "Antonin"],
+          "home_score": 77,
+          "away_score": 84,
+          "result_status": "finished",
+          "result_observed_from": "user_supplied_flashscore_result",
+          "notes": "Flashscore page title reports NSA - Antonine 77:84. The URL has no mid query, so settlement uses this documented page-title result instead of a feed id."
         }
       ]
     }'::jsonb
@@ -9917,27 +9941,13 @@ fn collapse_whitespace(value: &str) -> String {
 
 fn flashscore_match_id(url: &str) -> Option<String> {
     let parsed = Url::parse(url).ok()?;
-    parsed
-        .query_pairs()
-        .find_map(|(key, value)| {
-            if key == "mid" && !value.trim().is_empty() {
-                Some(value.to_string())
-            } else {
-                None
-            }
-        })
-        .or_else(|| {
-            parsed
-                .path_segments()?
-                .filter_map(|segment| segment.rsplit_once('-').map(|(_, id)| id.to_string()))
-                .filter(|id| {
-                    id.len() >= 6
-                        && id
-                            .chars()
-                            .all(|character| character.is_ascii_alphanumeric())
-                })
-                .next_back()
-        })
+    parsed.query_pairs().find_map(|(key, value)| {
+        if key == "mid" && !value.trim().is_empty() {
+            Some(value.to_string())
+        } else {
+            None
+        }
+    })
 }
 
 fn parse_flashscore_kv_feed(feed: &str) -> HashMap<String, String> {
@@ -10523,7 +10533,7 @@ mod tests {
     fn parses_flashscore_danish_path_match_id_and_title_participants() {
         let url = "https://www.flashscore.dk/kamp/fodbold/andorra-dnO5z404/irak-K8aAGt6r/";
 
-        assert_eq!(flashscore_match_id(url).as_deref(), Some("K8aAGt6r"));
+        assert_eq!(flashscore_match_id(url), None);
         assert_eq!(
             flashscore_url_participant_names(
                 "https://www.flashscore.dk/kamp/basketball/dallas-wings-WlAAvRyL/las-vegas-aces-nZjYLTCd/?mid=88ogphkR"
@@ -10706,6 +10716,72 @@ mod tests {
         );
         assert_eq!(
             grade_winner_outcome("Uafgjort", &link, &evidence),
+            Some("lost")
+        );
+    }
+
+    #[test]
+    fn known_basketball_results_can_be_oriented_to_event_order() {
+        let palencia_link = ExternalResultLink {
+            source_key: "flashscore_results".to_string(),
+            url: "https://www.flashscore.dk/kamp/basketball/fuenlabrada-E1z0hlIr/palencia-hMgAw6Je/?mid=4UaIOcR6".to_string(),
+            sport_key: Some("basketball".to_string()),
+            gender_scope: None,
+            home_aliases: vec!["CD Maristas Palencia".to_string(), "Palencia".to_string()],
+            away_aliases: vec!["Cb Fuenlabrada".to_string(), "Fuenlabrada".to_string()],
+            requires_browser_automation: false,
+            known_home_score: Some(51),
+            known_away_score: Some(76),
+            known_result_status: Some("finished".to_string()),
+            known_result_notes: Some("test fixture".to_string()),
+        };
+        let palencia_evidence = known_external_match_result(&palencia_link).expect("known result");
+
+        assert_eq!(
+            palencia_evidence.title,
+            "CD Maristas Palencia - Cb Fuenlabrada 51:76"
+        );
+        assert_eq!(
+            grade_winner_outcome("Cb Fuenlabrada", &palencia_link, &palencia_evidence),
+            Some("won")
+        );
+        assert_eq!(
+            grade_winner_outcome("CD Maristas Palencia", &palencia_link, &palencia_evidence),
+            Some("lost")
+        );
+
+        let nsa_link = ExternalResultLink {
+            source_key: "flashscore_results".to_string(),
+            url: "https://www.flashscore.com/match/basketball/antonine-xMbwy4Uk/nsa-xjRIpje7/"
+                .to_string(),
+            sport_key: Some("basketball".to_string()),
+            gender_scope: None,
+            home_aliases: vec!["Nsa".to_string(), "NSA".to_string()],
+            away_aliases: vec![
+                "Club Antonin Sportif".to_string(),
+                "Antonine".to_string(),
+                "Antonin".to_string(),
+            ],
+            requires_browser_automation: false,
+            known_home_score: Some(77),
+            known_away_score: Some(84),
+            known_result_status: Some("finished".to_string()),
+            known_result_notes: Some("test fixture".to_string()),
+        };
+        let nsa_evidence = known_external_match_result(&nsa_link).expect("known result");
+
+        assert_eq!(nsa_evidence.title, "Nsa - Club Antonin Sportif 77:84");
+        assert_eq!(
+            flashscore_match_id(&nsa_link.url),
+            None,
+            "no-mid Flashscore URLs must fall back to page-title or known-result evidence"
+        );
+        assert_eq!(
+            grade_winner_outcome("Club Antonin Sportif", &nsa_link, &nsa_evidence),
+            Some("won")
+        );
+        assert_eq!(
+            grade_winner_outcome("Nsa", &nsa_link, &nsa_evidence),
             Some("lost")
         );
     }

@@ -317,3 +317,9 @@ Append-only timeline for project wiki maintenance. Use headings with the format 
 
 - Added `Irak` to the Flashscore country-alias path so public source discovery can search for `Iraq` when Danske Spil uses Danish naming.
 - Seeded the Andorra versus Irak neutral friendly as a known Flashscore result, oriented to the Danske Spil event order while preserving the reversed provider URL for audit.
+
+## [2026-05-30] implementation | Basketball known-result seeding
+
+- Seeded Flashscore result links for CD Maristas Palencia versus Cb Fuenlabrada and Nsa versus Club Antonin Sportif.
+- Stored provider-reversed or no-`mid` Flashscore basketball scores in Danske Spil event order so auto-settlement can reconcile the stale paper rows deterministically.
+- Added basketball alias expansions for Palencia, Fuenlabrada, NSA, and Antonine/Antonin naming drift.
