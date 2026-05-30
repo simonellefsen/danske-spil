@@ -396,6 +396,23 @@ VALUES
           "result_status": "finished",
           "result_observed_from": "public_search_index",
           "notes": "Xscores public result page was indexed with Brendan Loh 0 - 2 Marcus Schoeman and Finished status for 2026-05-26."
+        },
+        {
+          "event_name": "Paris SG - Arsenal",
+          "url": "https://www.xscores.com/soccer/match/international/paris-saint-germain-vs-arsenal/2025-2026/2684736",
+          "sport_key": "football",
+          "home_aliases": ["Paris SG", "PSG", "Paris Saint-Germain", "Paris Saint Germain"],
+          "away_aliases": ["Arsenal"],
+          "home_score": 4,
+          "away_score": 3,
+          "regulation_home_score": 1,
+          "regulation_away_score": 1,
+          "penalty_home_score": 4,
+          "penalty_away_score": 3,
+          "score_basis": "xscores_penalty_shootout_score",
+          "result_status": "finished",
+          "result_observed_from": "operator_supplied_public_url",
+          "notes": "Xscores representation shows fulltime 1:1 and Paris Saint-Germain winning 4:3 in the penalty shootout."
         }
       ]
     }'::jsonb
@@ -3474,6 +3491,8 @@ impl Store {
                 "away_score": evidence.away_score,
                 "regulation_home_score": evidence.regulation_home_score,
                 "regulation_away_score": evidence.regulation_away_score,
+                "penalty_home_score": evidence.penalty_home_score,
+                "penalty_away_score": evidence.penalty_away_score,
                 "score_basis": evidence.score_basis,
                 "grading_score_basis": external_grading_score_basis(
                     market_kind.as_deref(),
@@ -3708,6 +3727,8 @@ impl Store {
             "away_score": evidence.away_score,
             "regulation_home_score": evidence.regulation_home_score,
             "regulation_away_score": evidence.regulation_away_score,
+            "penalty_home_score": evidence.penalty_home_score,
+            "penalty_away_score": evidence.penalty_away_score,
             "score_basis": evidence.score_basis,
             "grading_score_basis": external_grading_score_basis(market_kind, market_name, &link, &evidence),
             "outcome_name": outcome_name,
@@ -3776,6 +3797,8 @@ impl Store {
             "away_score": evidence.away_score,
             "regulation_home_score": evidence.regulation_home_score,
             "regulation_away_score": evidence.regulation_away_score,
+            "penalty_home_score": evidence.penalty_home_score,
+            "penalty_away_score": evidence.penalty_away_score,
             "score_basis": evidence.score_basis,
             "confidence": evidence.confidence,
             "sport_key": link.sport_key,
@@ -3923,6 +3946,8 @@ impl Store {
             .clamp(0.0, 1.0);
         let regulation_home_score = json_i32(payload.get("regulation_home_score"));
         let regulation_away_score = json_i32(payload.get("regulation_away_score"));
+        let penalty_home_score = json_i32(payload.get("penalty_home_score"));
+        let penalty_away_score = json_i32(payload.get("penalty_away_score"));
         let score_basis = payload
             .get("score_basis")
             .and_then(Value::as_str)
@@ -3953,6 +3978,8 @@ impl Store {
             "away_score": away_score,
             "regulation_home_score": regulation_home_score,
             "regulation_away_score": regulation_away_score,
+            "penalty_home_score": penalty_home_score,
+            "penalty_away_score": penalty_away_score,
             "score_basis": score_basis,
             "confidence": confidence,
             "sport_key": payload.get("sport_key").cloned().unwrap_or(Value::Null),
@@ -4069,6 +4096,14 @@ impl Store {
                     requires_browser_automation: false,
                     known_home_score: json_i32(payload.get("home_score")),
                     known_away_score: json_i32(payload.get("away_score")),
+                    known_regulation_home_score: json_i32(payload.get("regulation_home_score")),
+                    known_regulation_away_score: json_i32(payload.get("regulation_away_score")),
+                    known_penalty_home_score: json_i32(payload.get("penalty_home_score")),
+                    known_penalty_away_score: json_i32(payload.get("penalty_away_score")),
+                    known_score_basis: payload
+                        .get("score_basis")
+                        .and_then(Value::as_str)
+                        .map(str::to_string),
                     known_result_status: payload
                         .get("result_status")
                         .and_then(Value::as_str)
@@ -4110,6 +4145,8 @@ impl Store {
             away_score,
             regulation_home_score,
             regulation_away_score,
+            penalty_home_score,
+            penalty_away_score,
             score_basis: score_basis.to_string(),
             confidence,
         };
@@ -4176,6 +4213,8 @@ impl Store {
                 "away_score": away_score,
                 "regulation_home_score": regulation_home_score,
                 "regulation_away_score": regulation_away_score,
+                "penalty_home_score": penalty_home_score,
+                "penalty_away_score": penalty_away_score,
                 "score_basis": score_basis,
                 "grading_score_basis": external_grading_score_basis(
                     market_kind.as_deref(),
@@ -6891,6 +6930,14 @@ impl Store {
             requires_browser_automation,
             known_home_score: json_i32(payload.get("home_score")),
             known_away_score: json_i32(payload.get("away_score")),
+            known_regulation_home_score: json_i32(payload.get("regulation_home_score")),
+            known_regulation_away_score: json_i32(payload.get("regulation_away_score")),
+            known_penalty_home_score: json_i32(payload.get("penalty_home_score")),
+            known_penalty_away_score: json_i32(payload.get("penalty_away_score")),
+            known_score_basis: payload
+                .get("score_basis")
+                .and_then(Value::as_str)
+                .map(str::to_string),
             known_result_status: payload
                 .get("result_status")
                 .and_then(Value::as_str)
@@ -9579,6 +9626,11 @@ struct ExternalResultLink {
     requires_browser_automation: bool,
     known_home_score: Option<i32>,
     known_away_score: Option<i32>,
+    known_regulation_home_score: Option<i32>,
+    known_regulation_away_score: Option<i32>,
+    known_penalty_home_score: Option<i32>,
+    known_penalty_away_score: Option<i32>,
+    known_score_basis: Option<String>,
     known_result_status: Option<String>,
     known_result_notes: Option<String>,
 }
@@ -9594,6 +9646,8 @@ struct ExternalMatchResult {
     away_score: i32,
     regulation_home_score: Option<i32>,
     regulation_away_score: Option<i32>,
+    penalty_home_score: Option<i32>,
+    penalty_away_score: Option<i32>,
     score_basis: String,
     confidence: f64,
 }
@@ -9847,6 +9901,14 @@ fn external_result_links_for_event(
                                 .unwrap_or(false),
                         known_home_score: json_i32(item.get("home_score")),
                         known_away_score: json_i32(item.get("away_score")),
+                        known_regulation_home_score: json_i32(item.get("regulation_home_score")),
+                        known_regulation_away_score: json_i32(item.get("regulation_away_score")),
+                        known_penalty_home_score: json_i32(item.get("penalty_home_score")),
+                        known_penalty_away_score: json_i32(item.get("penalty_away_score")),
+                        known_score_basis: item
+                            .get("score_basis")
+                            .and_then(Value::as_str)
+                            .map(str::to_string),
                         known_result_status: item
                             .get("result_status")
                             .and_then(Value::as_str)
@@ -9888,6 +9950,11 @@ fn external_result_link_json(link: &ExternalResultLink) -> Value {
             (Some(home), Some(away)) => json!({
                 "home_score": home,
                 "away_score": away,
+                "regulation_home_score": link.known_regulation_home_score,
+                "regulation_away_score": link.known_regulation_away_score,
+                "penalty_home_score": link.known_penalty_home_score,
+                "penalty_away_score": link.known_penalty_away_score,
+                "score_basis": link.known_score_basis,
                 "status": link.known_result_status,
                 "notes": link.known_result_notes
             }),
@@ -10103,6 +10170,14 @@ fn external_result_link_from_task_source(value: &Value) -> Option<ExternalResult
             .unwrap_or(false),
         known_home_score: json_i32(known_result.get("home_score")),
         known_away_score: json_i32(known_result.get("away_score")),
+        known_regulation_home_score: json_i32(known_result.get("regulation_home_score")),
+        known_regulation_away_score: json_i32(known_result.get("regulation_away_score")),
+        known_penalty_home_score: json_i32(known_result.get("penalty_home_score")),
+        known_penalty_away_score: json_i32(known_result.get("penalty_away_score")),
+        known_score_basis: known_result
+            .get("score_basis")
+            .and_then(Value::as_str)
+            .map(str::to_string),
         known_result_status: known_result
             .get("status")
             .and_then(Value::as_str)
@@ -10158,6 +10233,8 @@ async fn fetch_external_match_result(
         away_score,
         regulation_home_score: None,
         regulation_away_score: None,
+        penalty_home_score: None,
+        penalty_away_score: None,
         score_basis: "page_title_score".to_string(),
         confidence: if link.source_key == "flashscore_results" {
             0.86
@@ -10181,9 +10258,14 @@ fn known_external_match_result(link: &ExternalResultLink) -> Option<ExternalMatc
         away_name,
         home_score,
         away_score,
-        regulation_home_score: None,
-        regulation_away_score: None,
-        score_basis: "known_final_score".to_string(),
+        regulation_home_score: link.known_regulation_home_score,
+        regulation_away_score: link.known_regulation_away_score,
+        penalty_home_score: link.known_penalty_home_score,
+        penalty_away_score: link.known_penalty_away_score,
+        score_basis: link
+            .known_score_basis
+            .clone()
+            .unwrap_or_else(|| "known_final_score".to_string()),
         confidence: match link.source_key.as_str() {
             "xscores_results" => 0.78,
             "flashscore_results" => 0.86,
@@ -10232,6 +10314,8 @@ async fn fetch_flashscore_match_result(
         away_score,
         regulation_home_score,
         regulation_away_score,
+        penalty_home_score: None,
+        penalty_away_score: None,
         score_basis: "flashscore_final_score".to_string(),
         confidence: 0.86,
     }))
@@ -10268,9 +10352,24 @@ fn parse_xscores_match_result(
         return None;
     }
     let (home_name, away_name) = external_link_participants(link);
-    let (home_score, away_score) =
+    let (regulation_home_score, regulation_away_score) =
         parse_score_near_participant_names(&text, &home_name, &away_name)
             .or_else(|| parse_first_dash_score(&text))?;
+    let penalty_score = parse_penalty_shootout_score(&text);
+    let (home_score, away_score, score_basis) =
+        if let Some((penalty_home_score, penalty_away_score)) = penalty_score {
+            (
+                penalty_home_score,
+                penalty_away_score,
+                "xscores_penalty_shootout_score",
+            )
+        } else {
+            (
+                regulation_home_score,
+                regulation_away_score,
+                "page_final_score",
+            )
+        };
     Some(ExternalMatchResult {
         source_key: link.source_key.clone(),
         url: link.url.clone(),
@@ -10279,9 +10378,11 @@ fn parse_xscores_match_result(
         away_name,
         home_score,
         away_score,
-        regulation_home_score: None,
-        regulation_away_score: None,
-        score_basis: "page_final_score".to_string(),
+        regulation_home_score: penalty_score.map(|_| regulation_home_score),
+        regulation_away_score: penalty_score.map(|_| regulation_away_score),
+        penalty_home_score: penalty_score.map(|(home, _)| home),
+        penalty_away_score: penalty_score.map(|(_, away)| away),
+        score_basis: score_basis.to_string(),
         confidence: 0.78,
     })
 }
@@ -10310,6 +10411,41 @@ fn parse_score_near_participant_names(
 fn parse_first_dash_score(text: &str) -> Option<(i32, i32)> {
     let tokens = text.split_whitespace().collect::<Vec<_>>();
     tokens.windows(3).find_map(|window| {
+        if window.get(1).copied() != Some("-") {
+            return None;
+        }
+        let home = window.first()?.parse::<i32>().ok()?;
+        let away = window.get(2)?.parse::<i32>().ok()?;
+        Some((home, away))
+    })
+}
+
+fn parse_penalty_shootout_score(text: &str) -> Option<(i32, i32)> {
+    let normalized = collapse_whitespace(text);
+    let lower = normalized.to_ascii_lowercase();
+    let marker_index = [
+        "penalty shootout",
+        "penalties",
+        "after penalties",
+        "straffesparkskonkurrence",
+        "straffespark",
+        "straffe",
+    ]
+    .iter()
+    .filter_map(|marker| lower.find(marker))
+    .min()?;
+    let before_marker = normalized
+        .get(..marker_index)
+        .unwrap_or(normalized.as_str());
+    let after_marker = normalized
+        .get(marker_index..)
+        .unwrap_or(normalized.as_str());
+    parse_last_dash_score(before_marker).or_else(|| parse_first_dash_score(after_marker))
+}
+
+fn parse_last_dash_score(text: &str) -> Option<(i32, i32)> {
+    let tokens = text.split_whitespace().collect::<Vec<_>>();
+    tokens.windows(3).rev().find_map(|window| {
         if window.get(1).copied() != Some("-") {
             return None;
         }
@@ -10472,9 +10608,34 @@ fn is_auto_settle_over_under_market(market_kind: Option<&str>, market_name: Opti
         || name.contains("over under")
 }
 
+fn is_auto_settle_penalty_shootout_market(
+    market_kind: Option<&str>,
+    market_name: Option<&str>,
+) -> bool {
+    let kind = market_kind.unwrap_or_default().to_ascii_lowercase();
+    let name_words = normalize_token_text(market_name.unwrap_or_default());
+    let name_compact = normalize_match_name(market_name.unwrap_or_default());
+    kind == "penalty_shootout"
+        || kind == "penalties"
+        || name_words.contains("penalty shootout")
+        || name_words.contains("after penalties")
+        || name_words.contains("decided on penalties")
+        || name_words.contains("ends in penalties")
+        || name_words.contains("goes to penalties")
+        || name_compact.contains("straffesparkskonkurrence")
+        || (name_compact.contains("straffe")
+            && (name_words.contains("afgores")
+                || name_words.contains("ender")
+                || name_words.contains("gar til")
+                || name_words.contains("gaar til")
+                || name_words.contains("til straffe")))
+        || name_compact.contains("penaltyshootout")
+}
+
 fn is_auto_settle_external_market(market_kind: Option<&str>, market_name: Option<&str>) -> bool {
     is_auto_settle_winner_market(market_kind, market_name)
         || is_auto_settle_over_under_market(market_kind, market_name)
+        || is_auto_settle_penalty_shootout_market(market_kind, market_name)
 }
 
 fn grade_external_outcome(
@@ -10484,10 +10645,20 @@ fn grade_external_outcome(
     link: &ExternalResultLink,
     evidence: &ExternalMatchResult,
 ) -> Option<&'static str> {
+    if is_auto_settle_penalty_shootout_market(market_kind, market_name) {
+        return grade_penalty_shootout_outcome(outcome_name, evidence);
+    }
     if is_auto_settle_over_under_market(market_kind, market_name) {
+        if should_grade_football_by_regulation_score(market_kind, market_name, link, evidence) {
+            let mut regulation = evidence.clone();
+            regulation.home_score = evidence.regulation_home_score?;
+            regulation.away_score = evidence.regulation_away_score?;
+            regulation.score_basis = "regulation_time_score".to_string();
+            return grade_over_under_outcome(outcome_name, market_name, &regulation);
+        }
         return grade_over_under_outcome(outcome_name, market_name, evidence);
     }
-    if should_grade_football_winner_by_regulation_score(market_kind, market_name, link, evidence) {
+    if should_grade_football_by_regulation_score(market_kind, market_name, link, evidence) {
         let mut regulation = evidence.clone();
         regulation.home_score = evidence.regulation_home_score?;
         regulation.away_score = evidence.regulation_away_score?;
@@ -10503,6 +10674,8 @@ fn external_evidence_score_payload(evidence: &ExternalMatchResult) -> Value {
         "away": evidence.away_score,
         "regulation_home": evidence.regulation_home_score,
         "regulation_away": evidence.regulation_away_score,
+        "penalty_home": evidence.penalty_home_score,
+        "penalty_away": evidence.penalty_away_score,
         "basis": evidence.score_basis
     })
 }
@@ -10513,21 +10686,27 @@ fn external_grading_score_basis(
     link: &ExternalResultLink,
     evidence: &ExternalMatchResult,
 ) -> String {
-    if should_grade_football_winner_by_regulation_score(market_kind, market_name, link, evidence) {
+    if should_grade_football_by_regulation_score(market_kind, market_name, link, evidence) {
         "regulation_time_score".to_string()
+    } else if is_auto_settle_penalty_shootout_market(market_kind, market_name)
+        && evidence.penalty_home_score.is_some()
+        && evidence.penalty_away_score.is_some()
+    {
+        "penalty_shootout_presence".to_string()
     } else {
         evidence.score_basis.clone()
     }
 }
 
-fn should_grade_football_winner_by_regulation_score(
+fn should_grade_football_by_regulation_score(
     market_kind: Option<&str>,
     market_name: Option<&str>,
     link: &ExternalResultLink,
     evidence: &ExternalMatchResult,
 ) -> bool {
     if link.sport_key.as_deref() != Some("football")
-        || !is_auto_settle_winner_market(market_kind, market_name)
+        || !(is_auto_settle_winner_market(market_kind, market_name)
+            || is_auto_settle_over_under_market(market_kind, market_name))
         || evidence.regulation_home_score.is_none()
         || evidence.regulation_away_score.is_none()
     {
@@ -10573,6 +10752,21 @@ fn should_grade_football_winner_by_regulation_score(
         && !word_extra_time_markers
             .iter()
             .any(|marker| market_words.contains(marker))
+}
+
+fn grade_penalty_shootout_outcome(
+    outcome_name: &str,
+    evidence: &ExternalMatchResult,
+) -> Option<&'static str> {
+    let went_to_penalties =
+        evidence.penalty_home_score.is_some() && evidence.penalty_away_score.is_some();
+    if is_yes_outcome(outcome_name) {
+        Some(if went_to_penalties { "won" } else { "lost" })
+    } else if is_no_outcome(outcome_name) {
+        Some(if went_to_penalties { "lost" } else { "won" })
+    } else {
+        None
+    }
 }
 
 fn grade_winner_outcome(
@@ -10796,6 +10990,16 @@ fn is_draw_outcome(value: &str) -> bool {
     matches!(normalized.as_str(), "uafgjort" | "draw" | "x" | "tie")
 }
 
+fn is_yes_outcome(value: &str) -> bool {
+    let normalized = normalize_match_name(value);
+    matches!(normalized.as_str(), "ja" | "yes" | "y")
+}
+
+fn is_no_outcome(value: &str) -> bool {
+    let normalized = normalize_match_name(value);
+    matches!(normalized.as_str(), "nej" | "no" | "n")
+}
+
 fn normalize_match_name(value: &str) -> String {
     value
         .chars()
@@ -10998,6 +11202,11 @@ mod tests {
             requires_browser_automation: false,
             known_home_score: None,
             known_away_score: None,
+            known_regulation_home_score: None,
+            known_regulation_away_score: None,
+            known_penalty_home_score: None,
+            known_penalty_away_score: None,
+            known_score_basis: None,
             known_result_status: None,
             known_result_notes: None,
         };
@@ -11049,6 +11258,11 @@ mod tests {
             requires_browser_automation: false,
             known_home_score: Some(0),
             known_away_score: Some(2),
+            known_regulation_home_score: None,
+            known_regulation_away_score: None,
+            known_penalty_home_score: None,
+            known_penalty_away_score: None,
+            known_score_basis: None,
             known_result_status: Some("finished".to_string()),
             known_result_notes: Some("test fixture".to_string()),
         };
@@ -11061,6 +11275,99 @@ mod tests {
         assert_eq!(
             xscores_url_participant_names(&link.url),
             Some(("Brendan Loh".to_string(), "Marcus Schoeman".to_string()))
+        );
+    }
+
+    #[test]
+    fn parses_xscores_fulltime_and_penalty_shootout_scores() {
+        let link = ExternalResultLink {
+            source_key: "xscores_results".to_string(),
+            url: "https://www.xscores.com/soccer/match/international/paris-saint-germain-vs-arsenal/2025-2026/2684736".to_string(),
+            sport_key: Some("football".to_string()),
+            gender_scope: None,
+            home_aliases: vec![
+                "Paris SG".to_string(),
+                "PSG".to_string(),
+                "Paris Saint-Germain".to_string(),
+                "Paris Saint Germain".to_string(),
+            ],
+            away_aliases: vec!["Arsenal".to_string()],
+            requires_browser_automation: false,
+            known_home_score: Some(4),
+            known_away_score: Some(3),
+            known_regulation_home_score: Some(1),
+            known_regulation_away_score: Some(1),
+            known_penalty_home_score: Some(4),
+            known_penalty_away_score: Some(3),
+            known_score_basis: Some("xscores_penalty_shootout_score".to_string()),
+            known_result_status: Some("finished".to_string()),
+            known_result_notes: Some("test fixture".to_string()),
+        };
+        let html = "<html><body>Paris Saint Germain 1 - 1 Finished Arsenal 4 - 3 Penalty Shootout</body></html>";
+        let parsed = parse_xscores_match_result(html, &link).expect("xscores penalty score");
+        let known = known_external_match_result(&link).expect("known result");
+
+        assert_eq!((parsed.home_score, parsed.away_score), (4, 3));
+        assert_eq!(
+            (
+                parsed.regulation_home_score,
+                parsed.regulation_away_score,
+                parsed.penalty_home_score,
+                parsed.penalty_away_score
+            ),
+            (Some(1), Some(1), Some(4), Some(3))
+        );
+        assert_eq!(parsed.score_basis, "xscores_penalty_shootout_score");
+        assert_eq!(known.penalty_home_score, Some(4));
+        assert_eq!(
+            grade_external_outcome(
+                "Uafgjort",
+                Some("handicap"),
+                Some("Kampvinder"),
+                &link,
+                &parsed
+            ),
+            Some("won")
+        );
+        assert_eq!(
+            grade_external_outcome(
+                "Paris SG",
+                Some("handicap"),
+                Some("Kampvinder inkl. straffe"),
+                &link,
+                &parsed
+            ),
+            Some("won")
+        );
+        assert_eq!(
+            grade_external_outcome(
+                "Ja",
+                Some("penalty_shootout"),
+                Some("Afgøres kampen på straffe?"),
+                &link,
+                &parsed
+            ),
+            Some("won")
+        );
+        assert_eq!(
+            grade_external_outcome(
+                "Nej",
+                Some("penalty_shootout"),
+                Some("Afgøres kampen på straffe?"),
+                &link,
+                &parsed
+            ),
+            Some("lost")
+        );
+        assert_eq!(
+            grade_external_outcome(
+                "Over",
+                Some("over_under"),
+                Some("Mål O/U 2,5"),
+                &link,
+                &parsed
+            ),
+            Some("lost")
         );
     }
 
@@ -11233,6 +11540,11 @@ mod tests {
             requires_browser_automation: false,
             known_home_score: Some(0),
             known_away_score: Some(1),
+            known_regulation_home_score: None,
+            known_regulation_away_score: None,
+            known_penalty_home_score: None,
+            known_penalty_away_score: None,
+            known_score_basis: None,
             known_result_status: Some("finished".to_string()),
             known_result_notes: Some("test fixture".to_string()),
         };
@@ -11262,6 +11574,11 @@ mod tests {
             requires_browser_automation: false,
             known_home_score: Some(51),
             known_away_score: Some(76),
+            known_regulation_home_score: None,
+            known_regulation_away_score: None,
+            known_penalty_home_score: None,
+            known_penalty_away_score: None,
+            known_score_basis: None,
             known_result_status: Some("finished".to_string()),
             known_result_notes: Some("test fixture".to_string()),
         };
@@ -11295,6 +11612,11 @@ mod tests {
             requires_browser_automation: false,
             known_home_score: Some(77),
             known_away_score: Some(84),
+            known_regulation_home_score: None,
+            known_regulation_away_score: None,
+            known_penalty_home_score: None,
+            known_penalty_away_score: None,
+            known_score_basis: None,
             known_result_status: Some("finished".to_string()),
             known_result_notes: Some("test fixture".to_string()),
         };
@@ -11328,6 +11650,11 @@ mod tests {
             requires_browser_automation: false,
             known_home_score: None,
             known_away_score: None,
+            known_regulation_home_score: None,
+            known_regulation_away_score: None,
+            known_penalty_home_score: None,
+            known_penalty_away_score: None,
+            known_score_basis: None,
             known_result_status: None,
             known_result_notes: None,
         };
@@ -11341,6 +11668,8 @@ mod tests {
             away_score: 2,
             regulation_home_score: None,
             regulation_away_score: None,
+            penalty_home_score: None,
+            penalty_away_score: None,
             score_basis: "test_final_score".to_string(),
             confidence: 0.86,
         };
@@ -11372,6 +11701,11 @@ mod tests {
             requires_browser_automation: false,
             known_home_score: None,
             known_away_score: None,
+            known_regulation_home_score: None,
+            known_regulation_away_score: None,
+            known_penalty_home_score: None,
+            known_penalty_away_score: None,
+            known_score_basis: None,
             known_result_status: None,
             known_result_notes: None,
         };
@@ -11385,6 +11719,8 @@ mod tests {
             away_score: 0,
             regulation_home_score: None,
             regulation_away_score: None,
+            penalty_home_score: None,
+            penalty_away_score: None,
             score_basis: "test_final_score".to_string(),
             confidence: 0.86,
         };
@@ -11408,6 +11744,11 @@ mod tests {
             requires_browser_automation: false,
             known_home_score: None,
             known_away_score: None,
+            known_regulation_home_score: None,
+            known_regulation_away_score: None,
+            known_penalty_home_score: None,
+            known_penalty_away_score: None,
+            known_score_basis: None,
             known_result_status: None,
             known_result_notes: None,
         };
@@ -11421,6 +11762,8 @@ mod tests {
             away_score: 0,
             regulation_home_score: None,
             regulation_away_score: None,
+            penalty_home_score: None,
+            penalty_away_score: None,
             score_basis: "test_final_score".to_string(),
             confidence: 0.86,
         };
@@ -11447,6 +11790,11 @@ mod tests {
             requires_browser_automation: false,
             known_home_score: None,
             known_away_score: None,
+            known_regulation_home_score: None,
+            known_regulation_away_score: None,
+            known_penalty_home_score: None,
+            known_penalty_away_score: None,
+            known_score_basis: None,
             known_result_status: None,
             known_result_notes: None,
         };
@@ -11460,6 +11808,8 @@ mod tests {
             away_score: 1,
             regulation_home_score: None,
             regulation_away_score: None,
+            penalty_home_score: None,
+            penalty_away_score: None,
             score_basis: "test_final_score".to_string(),
             confidence: 0.86,
         };
@@ -11490,6 +11840,11 @@ mod tests {
             requires_browser_automation: false,
             known_home_score: None,
             known_away_score: None,
+            known_regulation_home_score: None,
+            known_regulation_away_score: None,
+            known_penalty_home_score: None,
+            known_penalty_away_score: None,
+            known_score_basis: None,
             known_result_status: None,
             known_result_notes: None,
         };
@@ -11503,6 +11858,8 @@ mod tests {
             away_score: 1,
             regulation_home_score: Some(1),
             regulation_away_score: Some(1),
+            penalty_home_score: None,
+            penalty_away_score: None,
             score_basis: "flashscore_final_score".to_string(),
             confidence: 0.86,
         };
@@ -11575,6 +11932,11 @@ mod tests {
             requires_browser_automation: false,
             known_home_score: None,
             known_away_score: None,
+            known_regulation_home_score: None,
+            known_regulation_away_score: None,
+            known_penalty_home_score: None,
+            known_penalty_away_score: None,
+            known_score_basis: None,
             known_result_status: None,
             known_result_notes: None,
         };
@@ -11588,6 +11950,8 @@ mod tests {
             away_score: 87,
             regulation_home_score: None,
             regulation_away_score: None,
+            penalty_home_score: None,
+            penalty_away_score: None,
             score_basis: "test_final_score".to_string(),
             confidence: 0.82,
         };

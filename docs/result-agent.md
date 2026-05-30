@@ -190,10 +190,14 @@ Football knockout or cup matches can expose two valid scores: the regulation
 score used for a normal `Kampvinder`/match-winner market, and the decided-winner
 score after extra time or penalties. Flashscore feeds may publish the decided
 score in the primary final fields and the regulation score in separate fields.
+Xscores can represent the same type of match as a full-time score plus a
+penalty-shootout score, for example full time 1:1 and penalties 4:3.
 The result agent therefore grades normal football winner markets from regulation
 time when that score is available, while markets that explicitly include extra
 time, penalties, qualification, or advancement keep using the decided-winner
-score. Settlement notes record both score values and the `grading_score_basis`.
+score. Explicit yes/no penalty-shootout markets are settled from the presence
+of a penalty-shootout score. Settlement notes record regulation, penalty, and
+decided score values plus the `grading_score_basis`.
 If a row still returns `flashscore_discovery_no_match`, the next step is to add
 another source adapter or a sport-specific pagination path, not an operator
 prompt.

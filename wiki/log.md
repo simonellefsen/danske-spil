@@ -362,3 +362,9 @@ Append-only timeline for project wiki maintenance. Use headings with the format 
 - Updated external result grading so normal football `Kampvinder` markets use regulation/full-time score when the source exposes it, while extra-time, penalty, qualification, and advancement markets keep using the decided-winner score.
 - Added PSG-Arsenal regression coverage for a neutral knockout match where Flashscore reports a decided winner score and a separate 1:1 regulation score.
 - Extended settlement audit payloads with both final and regulation scores plus the `grading_score_basis` used by the paper ledger.
+
+## [2026-05-30] implementation | Penalty-shootout settlement semantics
+
+- Added Xscores score semantics for knockout football rows that expose full-time and penalty-shootout scores separately.
+- Added settlement support for explicit yes/no penalty-shootout markets, with audit payloads carrying penalty shootout scores alongside regulation and decided scores.
+- Seeded the PSG-Arsenal Xscores public result URL as a known third-party source showing full time 1:1 and Paris Saint-Germain winning 4:3 on penalties.
