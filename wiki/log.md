@@ -215,6 +215,7 @@ Append-only timeline for project wiki maintenance. Use headings with the format 
 - Added Makefile wrappers for local scratch-image builds, Kubernetes deployment, and namespace status checks.
 - Generalized daily paper performance to `/api/performance/yesterday` and `/api/performance/day?date=YYYY-MM-DD`, and added a web UI `Yesterday` panel.
 - Added a web UI daily-performance date picker backed by `/api/performance/day`.
+- Added selected-day recent paper placements to the daily-performance lookup panel.
 
 ## [2026-05-25] implementation | Candidate ranking and paper settlement POC
 

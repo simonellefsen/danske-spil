@@ -244,6 +244,13 @@ pub fn render_index(base_path: &str) -> String {
                             } }
                             tbody { id: "daily-performance" }
                         }
+                        h2 { title: "Recent paper placements in the selected local-day report.", "Daily placements" }
+                        table {
+                            thead { tr {
+                                th { "Created" } th { "Type" } th { "Selection" } th { "Stake" } th { "Status" }
+                            } }
+                            tbody { id: "daily-performance-recent" }
+                        }
                     }
                     section {
                         h2 { "Risk flag performance" }
@@ -1155,6 +1162,7 @@ function renderYesterdayPerformance(report) {
 }
 function renderSelectedDailyPerformance(report) {
   renderDailyPerformance(report, "daily-performance-window", "daily-performance", report.local_date || "selected date");
+  renderDailyPerformanceRecent(report.recent || []);
 }
 function renderDailyPerformance(report, windowId, tableId, label) {
   const summary = report.summary || {};
@@ -1202,11 +1210,32 @@ function renderDailyPerformance(report, windowId, tableId, label) {
     $(tableId).innerHTML = `<tr><td colspan="6" class="muted">No paper placements recorded for ${esc(label)}.</td></tr>`;
   }
 }
+function renderDailyPerformanceRecent(items) {
+  $("daily-performance-recent").innerHTML = items.map((item) => {
+    const selection = item.item_type === "coupon"
+      ? `${item.market_name || "coupon"} / ${item.outcome_name || ""}`
+      : `${item.event_name || item.item_id || ""} / ${item.outcome_name || ""}`;
+    const context = [item.sport_key, item.competition, item.market_kind].filter(Boolean).join(" / ");
+    return `
+      <tr>
+        <td>${esc(item.created_at || "-")}</td>
+        <td><span class="pill">${esc(item.item_type || "single")}</span></td>
+        <td>${esc(selection)}<br><span class="label">${esc(context)}</span></td>
+        <td>${money(item.stake)}<br><span class="muted">@ ${esc(item.observed_odds ?? "-")}</span></td>
+        <td>${esc(item.status || "-")}<br><span class="muted">P/L ${money(item.profit_loss)}</span></td>
+      </tr>
+    `;
+  }).join("");
+  if (!items.length) {
+    $("daily-performance-recent").innerHTML = `<tr><td colspan="5" class="muted">No paper placements for the selected date.</td></tr>`;
+  }
+}
 async function loadDailyPerformanceForDate(value) {
   const date = String(value || "").trim();
   if (!date) {
     $("daily-performance-window").textContent = "Select a date to load a daily report.";
     $("daily-performance").innerHTML = `<tr><td colspan="6" class="muted">No date selected.</td></tr>`;
+    $("daily-performance-recent").innerHTML = `<tr><td colspan="5" class="muted">No date selected.</td></tr>`;
     return;
   }
   $("daily-performance-window").textContent = `Loading ${date}...`;
@@ -1604,6 +1633,7 @@ $("load-daily-performance").addEventListener("click", async () => {
   catch (error) {
     $("daily-performance-window").textContent = `Daily report failed: ${error.message || error}`;
     $("daily-performance").innerHTML = `<tr><td colspan="6" class="muted">Could not load daily report.</td></tr>`;
+    $("daily-performance-recent").innerHTML = `<tr><td colspan="5" class="muted">Could not load daily placements.</td></tr>`;
   }
   finally { $("load-daily-performance").disabled = false; }
 });
@@ -1611,6 +1641,7 @@ $("daily-performance-date").addEventListener("change", async () => {
   try { await loadDailyPerformanceForDate($("daily-performance-date").value); }
   catch (error) {
     $("daily-performance-window").textContent = `Daily report failed: ${error.message || error}`;
+    $("daily-performance-recent").innerHTML = `<tr><td colspan="5" class="muted">Could not load daily placements.</td></tr>`;
   }
 });
 $("commit-settlements").addEventListener("click", async () => {

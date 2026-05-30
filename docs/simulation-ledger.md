@@ -232,7 +232,8 @@ exposure, realized P/L, hit rate, by-sport aggregates, the latest paper
 placements, and settlement observation counts for the same local-day window.
 The web UI renders current and previous local-day panels so operators can answer
 daily performance questions without querying Postgres directly. It also exposes
-a date picker backed by `/api/performance/day` for ad hoc local-day review.
+a date picker backed by `/api/performance/day` for ad hoc local-day review,
+including the recent paper placements behind the selected day's aggregate P/L.
 
 Auto-paper placement walks a wider ranked selection window than the per-scan
 placement limit. This lets it skip opportunities already represented by
