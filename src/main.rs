@@ -6,6 +6,7 @@ use axum::http::{header, StatusCode};
 use axum::response::{Html, IntoResponse, Response};
 use axum::routing::get;
 use axum::{Json, Router};
+use chrono::NaiveDate;
 use danske_spil_gambler::config::Settings;
 use danske_spil_gambler::service::GamblerService;
 use danske_spil_gambler::store::Store;
@@ -215,6 +216,24 @@ async fn get_handler(State(state): State<Arc<AppState>>, uri: OriginalUri) -> Re
         "/api/performance/today" => match state.service.store().paper_performance_today().await {
             Ok(summary) => Json(summary).into_response(),
             Err(error) => error_response(StatusCode::INTERNAL_SERVER_ERROR, error),
+        },
+        "/api/performance/yesterday" => {
+            match state.service.store().paper_performance_yesterday().await {
+                Ok(summary) => Json(summary).into_response(),
+                Err(error) => error_response(StatusCode::INTERNAL_SERVER_ERROR, error),
+            }
+        }
+        "/api/performance/day" => match performance_day_from_query(uri.0.query()) {
+            Ok(local_date) => match state
+                .service
+                .store()
+                .paper_performance_for_local_date(local_date)
+                .await
+            {
+                Ok(summary) => Json(summary).into_response(),
+                Err(error) => error_response(StatusCode::INTERNAL_SERVER_ERROR, error),
+            },
+            Err(error) => error_response(StatusCode::BAD_REQUEST, error),
         },
         "/api/performance/history" => Json(state.service.performance_history(25).await).into_response(),
         "/api/ledger/queue" => Json(state.service.advance_settlement_queue().await).into_response(),
@@ -790,6 +809,25 @@ fn normalized_path(path: &str, base_path: &str) -> String {
     } else {
         path.to_string()
     }
+}
+
+fn performance_day_from_query(query: Option<&str>) -> anyhow::Result<NaiveDate> {
+    let Some(value) = query_param(query, "date") else {
+        anyhow::bail!("missing required date query parameter");
+    };
+    NaiveDate::parse_from_str(value, "%Y-%m-%d")
+        .map_err(|_| anyhow::anyhow!("date must use YYYY-MM-DD format"))
+}
+
+fn query_param<'a>(query: Option<&'a str>, key: &str) -> Option<&'a str> {
+    query?.split('&').find_map(|pair| {
+        let (candidate_key, value) = pair.split_once('=').unwrap_or((pair, ""));
+        if candidate_key == key && !value.trim().is_empty() {
+            Some(value)
+        } else {
+            None
+        }
+    })
 }
 
 fn parse_json_body(body: Bytes) -> Value {

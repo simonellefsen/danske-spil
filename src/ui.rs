@@ -222,6 +222,16 @@ pub fn render_index(base_path: &str) -> String {
                         }
                     }
                     section {
+                        h2 { title: "Previous Europe/Copenhagen local-day paper performance for singles and coupons.", "Yesterday" }
+                        div { class: "operator-note", id: "yesterday-window", "Loading yesterday..." }
+                        table {
+                            thead { tr {
+                                th { "Scope" } th { "Played" } th { "Settled" } th { "Open" } th { "P/L" } th { "Hit rate" }
+                            } }
+                            tbody { id: "yesterday-performance" }
+                        }
+                    }
+                    section {
                         h2 { "Risk flag performance" }
                         table {
                             thead { tr {
@@ -1119,12 +1129,18 @@ function renderPerformance(report) {
   }
 }
 function renderTodayPerformance(report) {
+  renderDailyPerformance(report, "today-window", "today-performance", "today");
+}
+function renderYesterdayPerformance(report) {
+  renderDailyPerformance(report, "yesterday-window", "yesterday-performance", "yesterday");
+}
+function renderDailyPerformance(report, windowId, tableId, label) {
   const summary = report.summary || {};
   const observations = (report.settlement_observations || {}).items || [];
   const observationLabel = observations.length
     ? observations.map((item) => `${item.observed_result}: ${item.count}`).join(" / ")
-    : "no settlement observations today";
-  $("today-window").textContent = `${report.local_date || "-"} (${report.timezone || "local"}), ${report.window?.start || "-"} to ${report.window?.end || "-"}; ${observationLabel}`;
+    : `no settlement observations ${label}`;
+  $(windowId).textContent = `${report.local_date || "-"} (${report.timezone || "local"}), ${report.window?.start || "-"} to ${report.window?.end || "-"}; ${observationLabel}`;
 
   const rows = [{
     scope: "all",
@@ -1150,7 +1166,7 @@ function renderTodayPerformance(report) {
     average_odds: item.average_odds
   })));
 
-  $("today-performance").innerHTML = rows.map((item) => `
+  $(tableId).innerHTML = rows.map((item) => `
     <tr>
       <td><span class="pill">${esc(item.scope)}</span><br><span class="label">${esc(item.label)} / avg @ ${item.average_odds ? num(item.average_odds) : "-"}</span></td>
       <td>${esc(item.played_count)}<br><span class="muted">${money(item.turnover)}</span></td>
@@ -1161,7 +1177,7 @@ function renderTodayPerformance(report) {
     </tr>
   `).join("");
   if (!Number(summary.placed_count || 0) && !(report.by_sport || []).length) {
-    $("today-performance").innerHTML = `<tr><td colspan="6" class="muted">No paper placements recorded for today.</td></tr>`;
+    $(tableId).innerHTML = `<tr><td colspan="6" class="muted">No paper placements recorded for ${esc(label)}.</td></tr>`;
   }
 }
 function renderPerformanceHistory(history) {
@@ -1490,6 +1506,8 @@ async function load() {
   renderPerformance(performance);
   const todayPerformance = await json(api("/api/performance/today"));
   renderTodayPerformance(todayPerformance);
+  const yesterdayPerformance = await json(api("/api/performance/yesterday"));
+  renderYesterdayPerformance(yesterdayPerformance);
   const performanceHistory = await json(api("/api/performance/history"));
   renderPerformanceHistory(performanceHistory);
   const coverage = await json(api("/api/catalog/coverage"));

@@ -4292,15 +4292,42 @@ impl Store {
 
     pub async fn paper_performance_today(&self) -> anyhow::Result<Value> {
         let client = self.connect().await?;
+        let row = client
+            .query_one(
+                "SELECT (now() AT TIME ZONE 'Europe/Copenhagen')::date AS local_date",
+                &[],
+            )
+            .await?;
+        let local_date: NaiveDate = row.get("local_date");
+        self.paper_performance_for_local_date(local_date).await
+    }
+
+    pub async fn paper_performance_yesterday(&self) -> anyhow::Result<Value> {
+        let client = self.connect().await?;
+        let row = client
+            .query_one(
+                "SELECT ((now() AT TIME ZONE 'Europe/Copenhagen')::date - 1) AS local_date",
+                &[],
+            )
+            .await?;
+        let local_date: NaiveDate = row.get("local_date");
+        self.paper_performance_for_local_date(local_date).await
+    }
+
+    pub async fn paper_performance_for_local_date(
+        &self,
+        local_date_value: NaiveDate,
+    ) -> anyhow::Result<Value> {
+        let client = self.connect().await?;
         let window = client
             .query_one(
                 r#"
                 SELECT
-                  (now() AT TIME ZONE 'Europe/Copenhagen')::date::text AS local_date,
-                  ((now() AT TIME ZONE 'Europe/Copenhagen')::date::timestamp AT TIME ZONE 'Europe/Copenhagen') AS window_start,
-                  (((now() AT TIME ZONE 'Europe/Copenhagen')::date + interval '1 day')::timestamp AT TIME ZONE 'Europe/Copenhagen') AS window_end
+                  $1::date::text AS local_date,
+                  ($1::date::timestamp AT TIME ZONE 'Europe/Copenhagen') AS window_start,
+                  (($1::date + interval '1 day')::timestamp AT TIME ZONE 'Europe/Copenhagen') AS window_end
                 "#,
-                &[],
+                &[&local_date_value],
             )
             .await?;
         let local_date: String = window.get("local_date");
