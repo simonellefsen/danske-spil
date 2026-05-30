@@ -4398,6 +4398,7 @@ impl Store {
                   count(*) FILTER (WHERE status <> 'duplicate_void' AND latest_observation_id IS NOT NULL)::int AS truth_observation_count,
                   COALESCE(sum(stake) FILTER (WHERE status <> 'duplicate_void'), 0)::float8 AS turnover,
                   COALESCE(sum(stake) FILTER (WHERE status IN ('open', 'awaiting_result', 'unresolved', 'postponed')), 0)::float8 AS open_exposure,
+                  COALESCE(sum(stake) FILTER (WHERE status = 'awaiting_result'), 0)::float8 AS awaiting_result_exposure,
                   COALESCE(sum(profit_loss) FILTER (WHERE status <> 'duplicate_void'), 0)::float8 AS realized_profit_loss,
                   avg(odds) FILTER (WHERE status <> 'duplicate_void')::float8 AS average_odds
                 FROM positions_with_truth
@@ -4482,6 +4483,7 @@ impl Store {
                   count(*) FILTER (WHERE status <> 'duplicate_void' AND latest_observation_id IS NOT NULL)::int AS truth_observation_count,
                   COALESCE(sum(stake) FILTER (WHERE status <> 'duplicate_void'), 0)::float8 AS turnover,
                   COALESCE(sum(stake) FILTER (WHERE status IN ('open', 'awaiting_result', 'unresolved', 'postponed')), 0)::float8 AS open_exposure,
+                  COALESCE(sum(stake) FILTER (WHERE status = 'awaiting_result'), 0)::float8 AS awaiting_result_exposure,
                   COALESCE(sum(profit_loss) FILTER (WHERE status <> 'duplicate_void'), 0)::float8 AS realized_profit_loss,
                   avg(odds) FILTER (WHERE status <> 'duplicate_void')::float8 AS average_odds
                 FROM positions_with_truth
@@ -4510,6 +4512,7 @@ impl Store {
                     "truth_observation_count": row.get::<_, i32>("truth_observation_count"),
                     "turnover": row.get::<_, f64>("turnover"),
                     "open_exposure": row.get::<_, f64>("open_exposure"),
+                    "awaiting_result_exposure": row.get::<_, f64>("awaiting_result_exposure"),
                     "realized_profit_loss": row.get::<_, f64>("realized_profit_loss"),
                     "hit_rate": if decided > 0 { Some(won as f64 / decided as f64) } else { None },
                     "average_odds": row.get::<_, Option<f64>>("average_odds")
@@ -4726,6 +4729,7 @@ impl Store {
                 "truth_observation_count": summary_row.get::<_, i32>("truth_observation_count"),
                 "turnover": summary_row.get::<_, f64>("turnover"),
                 "open_exposure": summary_row.get::<_, f64>("open_exposure"),
+                "awaiting_result_exposure": summary_row.get::<_, f64>("awaiting_result_exposure"),
                 "realized_profit_loss": summary_row.get::<_, f64>("realized_profit_loss"),
                 "hit_rate": hit_rate,
                 "average_odds": summary_row.get::<_, Option<f64>>("average_odds")

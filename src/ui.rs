@@ -1183,6 +1183,7 @@ function renderDailyPerformance(report, windowId, tableId, label) {
     truth_observation_count: summary.truth_observation_count || 0,
     turnover: summary.turnover || 0,
     open_exposure: summary.open_exposure || 0,
+    awaiting_result_exposure: summary.awaiting_result_exposure || 0,
     profit_loss: summary.realized_profit_loss || 0,
     hit_rate: summary.hit_rate,
     average_odds: summary.average_odds
@@ -1196,6 +1197,7 @@ function renderDailyPerformance(report, windowId, tableId, label) {
     truth_observation_count: item.truth_observation_count || 0,
     turnover: item.turnover || 0,
     open_exposure: item.open_exposure || 0,
+    awaiting_result_exposure: item.awaiting_result_exposure || 0,
     profit_loss: item.realized_profit_loss || 0,
     hit_rate: item.hit_rate,
     average_odds: item.average_odds
@@ -1206,7 +1208,7 @@ function renderDailyPerformance(report, windowId, tableId, label) {
       <td><span class="pill">${esc(item.scope)}</span><br><span class="label">${esc(item.label)} / avg @ ${item.average_odds ? num(item.average_odds) : "-"}</span></td>
       <td>${esc(item.played_count)}<br><span class="muted">${money(item.turnover)}</span></td>
       <td>${esc(item.settled_count)}<br><span class="muted">truth ${esc(item.truth_observation_count || 0)}</span></td>
-      <td>${esc(item.open_count)}<br><span class="muted">${money(item.open_exposure)}</span><br><span class="label">awaiting ${esc(item.awaiting_result_count || 0)}</span></td>
+      <td>${esc(item.open_count)}<br><span class="muted">${money(item.open_exposure)}</span><br><span class="label">awaiting ${esc(item.awaiting_result_count || 0)} / ${money(item.awaiting_result_exposure)}</span></td>
       <td>${money(item.profit_loss)}</td>
       <td>${pct(item.hit_rate)}</td>
     </tr>
