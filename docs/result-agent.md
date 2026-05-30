@@ -32,6 +32,12 @@ Tasks are ordered by priority score. The score is paper stake weighted by
 overdue age, which keeps the agent deterministic while making stale,
 higher-exposure rows run before low-impact backlog entries.
 
+`POST /api/result-agent/run` returns the same priority accounting used by the
+scheduled worker: queued task count/exposure, selected task count/exposure,
+attempted discovery count/exposure, skipped exposure, and the highest selected
+priority. This makes a capped result-agent cycle auditable without inspecting
+raw database rows.
+
 `GET /api/result-agent/account-requests` exposes a focused subset for a local
 read-only Danske Spil account-history browser agent. It is independent of
 whether the Kubernetes API pod has credentials, because the intended worker is

@@ -259,3 +259,9 @@ Append-only timeline for project wiki maintenance. Use headings with the format 
 - Added paper stake and priority score to result-agent queue tasks and account-history requests.
 - Ordered result-agent tasks by stake weighted with overdue age so capped cycles attempt higher-impact stale rows first.
 - Ordered account-history requests by the same priority and updated the web UI result-agent/account-history surfaces to show exposure and per-row priority.
+
+## [2026-05-30] implementation | Result-agent cycle exposure accounting
+
+- Added queued, selected, attempted, and skipped paper exposure fields to `POST /api/result-agent/run` summaries.
+- Included per-task stake and priority in result-agent discovery results and skip records.
+- Preserved the priority accounting in `result_agent_cycle_completed` audit events for scheduled cycle review.

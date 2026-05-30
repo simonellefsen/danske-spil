@@ -130,6 +130,10 @@ and run browser evidence collection without prompting for URLs:
 rtk python3 scripts/result_agent.py --api http://127.0.0.1:18083 --browser-only --dry-run
 ```
 
+`POST /api/result-agent/run` records a cycle audit summary with queued,
+selected, attempted, and skipped paper exposure so the scheduled worker's capped
+work can be reconciled against the prioritized backlog.
+
 The Danske Spil account-history path should be implemented as the same kind of
 local read-only browser agent: use an authenticated operator session, inspect
 settled coupon/account history, and post only sanitized settlement evidence.

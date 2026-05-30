@@ -702,12 +702,31 @@ impl GamblerService {
             .cloned()
             .unwrap_or_default();
         let limit = self.settings.result_agent_per_cycle_limit.min(tasks.len());
+        let queued_exposure = tasks
+            .iter()
+            .map(|task| number(task, "hypothetical_stake"))
+            .sum::<f64>();
+        let selected_tasks = tasks.into_iter().take(limit).collect::<Vec<_>>();
+        let selected_exposure = selected_tasks
+            .iter()
+            .map(|task| number(task, "hypothetical_stake"))
+            .sum::<f64>();
+        let max_selected_priority = selected_tasks
+            .iter()
+            .map(|task| number(task, "priority_score"))
+            .fold(0.0, f64::max);
         let http = match flashscore_http_client() {
             Ok(client) => client,
             Err(error) => {
                 return json!({
                     "enabled": true,
                     "attempted_count": 0,
+                    "task_attempted_count": 0,
+                    "queued_task_count": queue.get("task_count").cloned().unwrap_or(Value::Null),
+                    "queued_task_exposure": queued_exposure,
+                    "selected_task_count": selected_tasks.len(),
+                    "selected_task_exposure": selected_exposure,
+                    "max_selected_priority": max_selected_priority,
                     "settled_count": 0,
                     "error": error.to_string(),
                     "results": [],
@@ -718,6 +737,9 @@ impl GamblerService {
         let mut results = Vec::new();
         let mut skipped = Vec::new();
         let mut settled_count = 0usize;
+        let mut task_attempted_count = 0usize;
+        let mut task_attempted_exposure = 0.0;
+        let mut task_skipped_exposure = 0.0;
 
         match self
             .store
@@ -742,16 +764,23 @@ impl GamblerService {
             })),
         }
 
-        for task in tasks.into_iter().take(limit) {
+        for task in selected_tasks {
             let task_kind = text(&task, "task_kind").unwrap_or_default();
+            let task_stake = number(&task, "hypothetical_stake");
+            let task_priority = number(&task, "priority_score");
             if task_kind != "public_result_source_discovery" {
+                task_skipped_exposure += task_stake;
                 skipped.push(json!({
                     "task_kind": task_kind,
                     "reason": "handled_by_account_agent_or_configured_link_worker",
+                    "hypothetical_stake": task_stake,
+                    "priority_score": task_priority,
                     "selection": task.get("selection").cloned().unwrap_or(Value::Null)
                 }));
                 continue;
             }
+            task_attempted_count += 1;
+            task_attempted_exposure += task_stake;
 
             match flashscore_discover(&http, &task).await {
                 Ok(FlashscoreDiscovery {
@@ -771,6 +800,8 @@ impl GamblerService {
                                 "reason": "source_link_persist_failed",
                                 "event_name": evidence.event_name,
                                 "source_url": evidence.source_url,
+                                "hypothetical_stake": task_stake,
+                                "priority_score": task_priority,
                                 "error": error.to_string()
                             }));
                             continue;
@@ -816,6 +847,8 @@ impl GamblerService {
                         "diagnostics": diagnostics,
                         "source_link": source_link_result,
                         "evidence_result": evidence_result,
+                        "hypothetical_stake": task_stake,
+                        "priority_score": task_priority,
                         "paper_only": true
                     });
                     self.store
@@ -831,6 +864,8 @@ impl GamblerService {
                     let skipped_item = json!({
                         "task_kind": task_kind,
                         "reason": "flashscore_discovery_no_match",
+                        "hypothetical_stake": task_stake,
+                        "priority_score": task_priority,
                         "selection": task.get("selection").cloned().unwrap_or(Value::Null),
                         "diagnostics": diagnostics
                     });
@@ -843,6 +878,8 @@ impl GamblerService {
                 Err(error) => skipped.push(json!({
                     "task_kind": task_kind,
                     "reason": "flashscore_discovery_failed",
+                    "hypothetical_stake": task_stake,
+                    "priority_score": task_priority,
                     "selection": task.get("selection").cloned().unwrap_or(Value::Null),
                     "error": error.to_string()
                 })),
@@ -855,6 +892,14 @@ impl GamblerService {
             "agent": "rust_flashscore_result_agent",
             "cycle_limit": self.settings.result_agent_per_cycle_limit,
             "attempted_count": results.len(),
+            "task_attempted_count": task_attempted_count,
+            "queued_task_count": queue.get("task_count").cloned().unwrap_or(Value::Null),
+            "queued_task_exposure": queued_exposure,
+            "selected_task_count": limit,
+            "selected_task_exposure": selected_exposure,
+            "task_attempted_exposure": task_attempted_exposure,
+            "task_skipped_exposure": task_skipped_exposure,
+            "max_selected_priority": max_selected_priority,
             "settled_count": settled_count,
             "skipped_count": skipped.len(),
             "results": results,
