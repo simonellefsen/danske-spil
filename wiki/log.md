@@ -368,3 +368,8 @@ Append-only timeline for project wiki maintenance. Use headings with the format 
 - Added Xscores score semantics for knockout football rows that expose full-time and penalty-shootout scores separately.
 - Added settlement support for explicit yes/no penalty-shootout markets, with audit payloads carrying penalty shootout scores alongside regulation and decided scores.
 - Seeded the PSG-Arsenal Xscores public result URL as a known third-party source showing full time 1:1 and Paris Saint-Germain winning 4:3 on penalties.
+
+## [2026-05-30] implementation | Result-agent participant confidence guard
+
+- Added a stricter Flashscore selected-participant threshold for team sports so one-token overlaps such as city-only matches do not send the result agent into unrelated team feeds.
+- Added diagnostics for low-confidence home/away participant selections and a regression test covering the Toronto Tempo/Seattle Storm failure shape.

@@ -1911,7 +1911,12 @@ async fn flashscore_discover(
         "home_participant_candidates".to_string(),
         flashscore_participant_candidates_json(&home_candidates),
     );
-    let Some((_, home)) = home_candidates.first().cloned() else {
+    let participant_min_score = flashscore_selected_participant_min_score(&sport_key);
+    diagnostics.insert(
+        "participant_match_threshold".to_string(),
+        json!(participant_min_score),
+    );
+    let Some((home_score, home)) = home_candidates.first().cloned() else {
         diagnostics.insert("reason".to_string(), json!("home_participant_not_found"));
         return Ok(FlashscoreDiscovery {
             evidence: None,
@@ -1919,6 +1924,22 @@ async fn flashscore_discover(
             diagnostics: Value::Object(diagnostics),
         });
     };
+    if home_score < participant_min_score {
+        diagnostics.insert(
+            "reason".to_string(),
+            json!("home_participant_low_confidence"),
+        );
+        diagnostics.insert("home_selected_score".to_string(), json!(home_score));
+        diagnostics.insert(
+            "home_selected_participant".to_string(),
+            flashscore_participant_json(Some(home_score), &home),
+        );
+        return Ok(FlashscoreDiscovery {
+            evidence: None,
+            status_evidence: None,
+            diagnostics: Value::Object(diagnostics),
+        });
+    }
     let away_candidates =
         ranked_flashscore_participants(http, &away_name, &sport_key, gender_scope.as_deref())
             .await?;
@@ -1926,7 +1947,7 @@ async fn flashscore_discover(
         "away_participant_candidates".to_string(),
         flashscore_participant_candidates_json(&away_candidates),
     );
-    let Some((_, away)) = away_candidates.first().cloned() else {
+    let Some((away_score, away)) = away_candidates.first().cloned() else {
         diagnostics.insert("reason".to_string(), json!("away_participant_not_found"));
         return Ok(FlashscoreDiscovery {
             evidence: None,
@@ -1934,11 +1955,27 @@ async fn flashscore_discover(
             diagnostics: Value::Object(diagnostics),
         });
     };
+    if away_score < participant_min_score {
+        diagnostics.insert(
+            "reason".to_string(),
+            json!("away_participant_low_confidence"),
+        );
+        diagnostics.insert("away_selected_score".to_string(), json!(away_score));
+        diagnostics.insert(
+            "away_selected_participant".to_string(),
+            flashscore_participant_json(Some(away_score), &away),
+        );
+        return Ok(FlashscoreDiscovery {
+            evidence: None,
+            status_evidence: None,
+            diagnostics: Value::Object(diagnostics),
+        });
+    }
     diagnostics.insert(
         "selected_participants".to_string(),
         json!({
-            "home": flashscore_participant_json(None, &home),
-            "away": flashscore_participant_json(None, &away)
+            "home": flashscore_participant_json(Some(home_score), &home),
+            "away": flashscore_participant_json(Some(away_score), &away)
         }),
     );
     let mut best: Option<(f64, bool, Value, String)> = None;
@@ -2812,6 +2849,14 @@ fn flashscore_participant_score(
     score
 }
 
+fn flashscore_selected_participant_min_score(sport_key: &str) -> f64 {
+    if sport_uses_individual_participants(sport_key) {
+        0.55
+    } else {
+        0.75
+    }
+}
+
 fn sport_uses_individual_participants(sport_key: &str) -> bool {
     matches!(sport_key, "tennis" | "motorsports" | "golf" | "cycling")
 }
@@ -3616,6 +3661,43 @@ mod tests {
         );
 
         assert!(team_score > player_score);
+    }
+
+    #[test]
+    fn flashscore_team_participant_threshold_rejects_single_token_overlap() {
+        let raptors = FlashscoreParticipant {
+            id: "raptors".to_string(),
+            title: "Toronto Raptors (Canada)".to_string(),
+            url: "toronto-raptors".to_string(),
+            participant_type_id: Some(1),
+        };
+        let hefei = FlashscoreParticipant {
+            id: "hefei".to_string(),
+            title: "Hefei Storm (China)".to_string(),
+            url: "hefei-storm".to_string(),
+            participant_type_id: Some(1),
+        };
+        let threshold = flashscore_selected_participant_min_score("basketball");
+
+        assert_eq!(threshold, 0.75);
+        assert!(
+            flashscore_participant_score(
+                "Toronto Tempo",
+                "Toronto Tempo",
+                &raptors,
+                "basketball",
+                None
+            ) < threshold
+        );
+        assert!(
+            flashscore_participant_score(
+                "Seattle Storm",
+                "Seattle Storm",
+                &hefei,
+                "basketball",
+                None
+            ) < threshold
+        );
     }
 
     #[test]

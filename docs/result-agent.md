@@ -117,6 +117,11 @@ result-agent pass. It consumes
 supported sports, stores the durable source link, and posts sanitized
 final-score evidence when the event is finished. The same cycle can be
 triggered manually from the web UI or API:
+For team sports, the Flashscore discovery step requires a stronger selected
+participant match than a single shared token. This prevents rows such as a
+city-name-only match from being resolved through an unrelated club and records
+`home_participant_low_confidence` or `away_participant_low_confidence` in the
+cycle diagnostics instead of probing irrelevant feeds.
 
 ```text
 POST /api/result-agent/run
