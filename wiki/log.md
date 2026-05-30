@@ -356,3 +356,9 @@ Append-only timeline for project wiki maintenance. Use headings with the format 
 
 - Added a direct result-agent path for selected `public_result_evidence_check` tasks, so rows with configured non-browser public result links can fetch evidence and settle during the selected cycle instead of waiting for the global 120-minute overdue sweep.
 - Kept the existing overdue sweep as a backstop and added a parser regression test for queued source-link payloads.
+
+## [2026-05-30] implementation | Football regulation-time settlement
+
+- Updated external result grading so normal football `Kampvinder` markets use regulation/full-time score when the source exposes it, while extra-time, penalty, qualification, and advancement markets keep using the decided-winner score.
+- Added PSG-Arsenal regression coverage for a neutral knockout match where Flashscore reports a decided winner score and a separate 1:1 regulation score.
+- Extended settlement audit payloads with both final and regulation scores plus the `grading_score_basis` used by the paper ledger.

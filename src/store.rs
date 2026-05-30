@@ -3436,7 +3436,7 @@ impl Store {
                 "attempts": link_attempts,
                 "event_start_time": event_start_time,
                 "expected_event_finish_at": expected_result_check_after,
-                "score": {"home": evidence.home_score, "away": evidence.away_score}
+                "score": external_evidence_score_payload(&evidence)
             }));
             let Some(result) = grade_external_outcome(
                 &outcome_name,
@@ -3452,7 +3452,7 @@ impl Store {
                     "source_key": evidence.source_key,
                     "source_url": evidence.url,
                     "source_title": evidence.title,
-                    "score": {"home": evidence.home_score, "away": evidence.away_score},
+                    "score": external_evidence_score_payload(&evidence),
                     "event_start_time": event_start_time,
                     "expected_event_finish_at": expected_result_check_after,
                     "reason": "unable_to_map_outcome_to_external_result"
@@ -3472,6 +3472,15 @@ impl Store {
                 "external_check_grace_minutes": min_overdue_minutes,
                 "home_score": evidence.home_score,
                 "away_score": evidence.away_score,
+                "regulation_home_score": evidence.regulation_home_score,
+                "regulation_away_score": evidence.regulation_away_score,
+                "score_basis": evidence.score_basis,
+                "grading_score_basis": external_grading_score_basis(
+                    market_kind.as_deref(),
+                    market_name.as_deref(),
+                    &link,
+                    &evidence
+                ),
                 "outcome_name": outcome_name,
                 "overdue_minutes": overdue_minutes,
                 "paper_only": true
@@ -3498,7 +3507,7 @@ impl Store {
                         "source_key": evidence.source_key,
                         "source_url": evidence.url,
                         "source_title": evidence.title,
-                        "score": {"home": evidence.home_score, "away": evidence.away_score},
+                        "score": external_evidence_score_payload(&evidence),
                         "event_start_time": event_start_time,
                         "expected_event_finish_at": expected_result_check_after,
                         "external_check_grace_minutes": min_overdue_minutes,
@@ -3661,7 +3670,7 @@ impl Store {
             "source_title": evidence.title,
             "attempts": link_attempts,
             "expected_event_finish_at": expected_result_check_after,
-            "score": {"home": evidence.home_score, "away": evidence.away_score}
+            "score": external_evidence_score_payload(&evidence)
         });
         let Some(result) =
             grade_external_outcome(outcome_name, market_kind, market_name, &link, &evidence)
@@ -3680,7 +3689,7 @@ impl Store {
                     "source_key": evidence.source_key,
                     "source_url": evidence.url,
                     "source_title": evidence.title,
-                    "score": {"home": evidence.home_score, "away": evidence.away_score},
+                    "score": external_evidence_score_payload(&evidence),
                     "expected_event_finish_at": expected_result_check_after,
                     "reason": "unable_to_map_outcome_to_external_result"
                 }]
@@ -3697,6 +3706,10 @@ impl Store {
             "expected_event_finish_at": expected_result_check_after,
             "home_score": evidence.home_score,
             "away_score": evidence.away_score,
+            "regulation_home_score": evidence.regulation_home_score,
+            "regulation_away_score": evidence.regulation_away_score,
+            "score_basis": evidence.score_basis,
+            "grading_score_basis": external_grading_score_basis(market_kind, market_name, &link, &evidence),
             "outcome_name": outcome_name,
             "overdue_minutes": overdue_minutes,
             "paper_only": true
@@ -3721,7 +3734,7 @@ impl Store {
             "source_key": evidence.source_key,
             "source_url": evidence.url,
             "source_title": evidence.title,
-            "score": {"home": evidence.home_score, "away": evidence.away_score},
+            "score": external_evidence_score_payload(&evidence),
             "expected_event_finish_at": expected_result_check_after,
             "overdue_minutes": overdue_minutes,
             "paper_only": true
@@ -3761,6 +3774,9 @@ impl Store {
             "away_aliases": link.away_aliases,
             "home_score": evidence.home_score,
             "away_score": evidence.away_score,
+            "regulation_home_score": evidence.regulation_home_score,
+            "regulation_away_score": evidence.regulation_away_score,
+            "score_basis": evidence.score_basis,
             "confidence": evidence.confidence,
             "sport_key": link.sport_key,
             "gender_scope": link.gender_scope,
@@ -3905,6 +3921,14 @@ impl Store {
             .or_else(|| source_record.get("reliability").and_then(Value::as_f64))
             .unwrap_or(0.7)
             .clamp(0.0, 1.0);
+        let regulation_home_score = json_i32(payload.get("regulation_home_score"));
+        let regulation_away_score = json_i32(payload.get("regulation_away_score"));
+        let score_basis = payload
+            .get("score_basis")
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .unwrap_or("external_result_evidence_score");
         let settle = payload
             .get("settle")
             .and_then(Value::as_bool)
@@ -3927,6 +3951,9 @@ impl Store {
             "away_name": away_name,
             "home_score": home_score,
             "away_score": away_score,
+            "regulation_home_score": regulation_home_score,
+            "regulation_away_score": regulation_away_score,
+            "score_basis": score_basis,
             "confidence": confidence,
             "sport_key": payload.get("sport_key").cloned().unwrap_or(Value::Null),
             "gender_scope": payload.get("gender_scope").or_else(|| payload.get("gender")).cloned().unwrap_or(Value::Null),
@@ -4081,6 +4108,9 @@ impl Store {
             away_name: away_name.clone(),
             home_score,
             away_score,
+            regulation_home_score,
+            regulation_away_score,
+            score_basis: score_basis.to_string(),
             confidence,
         };
 
@@ -4144,6 +4174,15 @@ impl Store {
                 "away_name": away_name,
                 "home_score": home_score,
                 "away_score": away_score,
+                "regulation_home_score": regulation_home_score,
+                "regulation_away_score": regulation_away_score,
+                "score_basis": score_basis,
+                "grading_score_basis": external_grading_score_basis(
+                    market_kind.as_deref(),
+                    market_name.as_deref(),
+                    &link,
+                    &evidence
+                ),
                 "outcome_name": outcome_name,
                 "paper_only": true
             })
@@ -4162,7 +4201,7 @@ impl Store {
                         "status": item.status,
                         "source_key": source_key,
                         "source_url": source_url,
-                        "score": {"home": home_score, "away": away_score},
+                        "score": external_evidence_score_payload(&evidence),
                         "paper_only": true
                     });
                     self.record_audit("paper_bet_settled_from_external_evidence", audit.clone())
@@ -4195,7 +4234,7 @@ impl Store {
             "source_key": source_key,
             "source_url": source_url,
             "event_name": event_name,
-            "score": {"home": home_score, "away": away_score},
+            "score": external_evidence_score_payload(&evidence),
             "matched_bet_count": settled.len() + skipped.len(),
             "settled_count": settled.len(),
             "skipped_count": skipped.len(),
@@ -9553,6 +9592,9 @@ struct ExternalMatchResult {
     away_name: String,
     home_score: i32,
     away_score: i32,
+    regulation_home_score: Option<i32>,
+    regulation_away_score: Option<i32>,
+    score_basis: String,
     confidence: f64,
 }
 
@@ -10114,6 +10156,9 @@ async fn fetch_external_match_result(
         away_name,
         home_score,
         away_score,
+        regulation_home_score: None,
+        regulation_away_score: None,
+        score_basis: "page_title_score".to_string(),
         confidence: if link.source_key == "flashscore_results" {
             0.86
         } else {
@@ -10136,6 +10181,9 @@ fn known_external_match_result(link: &ExternalResultLink) -> Option<ExternalMatc
         away_name,
         home_score,
         away_score,
+        regulation_home_score: None,
+        regulation_away_score: None,
+        score_basis: "known_final_score".to_string(),
         confidence: match link.source_key.as_str() {
             "xscores_results" => 0.78,
             "flashscore_results" => 0.86,
@@ -10167,6 +10215,8 @@ async fn fetch_flashscore_match_result(
         .ok_or_else(|| anyhow!("FlashScore match feed did not expose a home score"))?;
     let away_score = flashscore_score_field(&fields, &["DF", "DH", "DS"])
         .ok_or_else(|| anyhow!("FlashScore match feed did not expose an away score"))?;
+    let regulation_home_score = flashscore_score_field(&fields, &["DG"]);
+    let regulation_away_score = flashscore_score_field(&fields, &["DH"]);
     let (home_name, away_name) = fetch_flashscore_page_participants(http, &link.url)
         .await?
         .or_else(|| source_url_participant_names(link))
@@ -10180,6 +10230,9 @@ async fn fetch_flashscore_match_result(
         away_name,
         home_score,
         away_score,
+        regulation_home_score,
+        regulation_away_score,
+        score_basis: "flashscore_final_score".to_string(),
         confidence: 0.86,
     }))
 }
@@ -10226,6 +10279,9 @@ fn parse_xscores_match_result(
         away_name,
         home_score,
         away_score,
+        regulation_home_score: None,
+        regulation_away_score: None,
+        score_basis: "page_final_score".to_string(),
         confidence: 0.78,
     })
 }
@@ -10431,7 +10487,92 @@ fn grade_external_outcome(
     if is_auto_settle_over_under_market(market_kind, market_name) {
         return grade_over_under_outcome(outcome_name, market_name, evidence);
     }
+    if should_grade_football_winner_by_regulation_score(market_kind, market_name, link, evidence) {
+        let mut regulation = evidence.clone();
+        regulation.home_score = evidence.regulation_home_score?;
+        regulation.away_score = evidence.regulation_away_score?;
+        regulation.score_basis = "regulation_time_score".to_string();
+        return grade_winner_outcome(outcome_name, link, &regulation);
+    }
     grade_winner_outcome(outcome_name, link, evidence)
+}
+
+fn external_evidence_score_payload(evidence: &ExternalMatchResult) -> Value {
+    json!({
+        "home": evidence.home_score,
+        "away": evidence.away_score,
+        "regulation_home": evidence.regulation_home_score,
+        "regulation_away": evidence.regulation_away_score,
+        "basis": evidence.score_basis
+    })
+}
+
+fn external_grading_score_basis(
+    market_kind: Option<&str>,
+    market_name: Option<&str>,
+    link: &ExternalResultLink,
+    evidence: &ExternalMatchResult,
+) -> String {
+    if should_grade_football_winner_by_regulation_score(market_kind, market_name, link, evidence) {
+        "regulation_time_score".to_string()
+    } else {
+        evidence.score_basis.clone()
+    }
+}
+
+fn should_grade_football_winner_by_regulation_score(
+    market_kind: Option<&str>,
+    market_name: Option<&str>,
+    link: &ExternalResultLink,
+    evidence: &ExternalMatchResult,
+) -> bool {
+    if link.sport_key.as_deref() != Some("football")
+        || !is_auto_settle_winner_market(market_kind, market_name)
+        || evidence.regulation_home_score.is_none()
+        || evidence.regulation_away_score.is_none()
+    {
+        return false;
+    }
+    let market_compact = normalize_match_name(market_name.unwrap_or_default());
+    let market_words = normalize_token_text(market_name.unwrap_or_default());
+    let compact_extra_time_markers = [
+        "inkl",
+        "inklot",
+        "inklforl",
+        "forlnget",
+        "forlaenget",
+        "extratime",
+        "overtime",
+        "penalty",
+        "penalties",
+        "straffe",
+        "toqualify",
+        "qualify",
+        "advance",
+        "advancement",
+        "winnerrequired",
+    ];
+    let word_extra_time_markers = [
+        "inkl ot",
+        "inkl forl",
+        "forlaenget",
+        "extra time",
+        "overtime",
+        "penalty",
+        "penalties",
+        "straffe",
+        "to qualify",
+        "qualify",
+        "advance",
+        "advancement",
+        "winner required",
+    ];
+    !compact_extra_time_markers
+        .iter()
+        .any(|marker| market_compact.contains(marker))
+        && !word_extra_time_markers
+            .iter()
+            .any(|marker| market_words.contains(marker))
 }
 
 fn grade_winner_outcome(
@@ -11198,6 +11339,9 @@ mod tests {
             away_name: "Horsens".to_string(),
             home_score: 0,
             away_score: 2,
+            regulation_home_score: None,
+            regulation_away_score: None,
+            score_basis: "test_final_score".to_string(),
             confidence: 0.86,
         };
 
@@ -11239,6 +11383,9 @@ mod tests {
             away_name: "Andorra".to_string(),
             home_score: 1,
             away_score: 0,
+            regulation_home_score: None,
+            regulation_away_score: None,
+            score_basis: "test_final_score".to_string(),
             confidence: 0.86,
         };
 
@@ -11272,6 +11419,9 @@ mod tests {
             away_name: "Ruud Casper".to_string(),
             home_score: 2,
             away_score: 0,
+            regulation_home_score: None,
+            regulation_away_score: None,
+            score_basis: "test_final_score".to_string(),
             confidence: 0.86,
         };
 
@@ -11308,6 +11458,9 @@ mod tests {
             away_name: "Salford City".to_string(),
             home_score: 1,
             away_score: 1,
+            regulation_home_score: None,
+            regulation_away_score: None,
+            score_basis: "test_final_score".to_string(),
             confidence: 0.86,
         };
 
@@ -11319,6 +11472,95 @@ mod tests {
             grade_winner_outcome("Notts County", &link, &evidence),
             Some("lost")
         );
+    }
+
+    #[test]
+    fn football_winner_market_uses_regulation_score_when_available() {
+        let link = ExternalResultLink {
+            source_key: "flashscore_results".to_string(),
+            url: "https://www.flashscore.com/match/football/paris-sg-Sn7FHh3J/arsenal-pfchd3yB/?mid=EJZRaQ15".to_string(),
+            sport_key: Some("football".to_string()),
+            gender_scope: None,
+            home_aliases: vec![
+                "Paris SG".to_string(),
+                "PSG".to_string(),
+                "Paris Saint-Germain".to_string(),
+            ],
+            away_aliases: vec!["Arsenal".to_string()],
+            requires_browser_automation: false,
+            known_home_score: None,
+            known_away_score: None,
+            known_result_status: None,
+            known_result_notes: None,
+        };
+        let evidence = ExternalMatchResult {
+            source_key: link.source_key.clone(),
+            url: link.url.clone(),
+            title: "Paris SG - Arsenal 2:1".to_string(),
+            home_name: "Paris SG".to_string(),
+            away_name: "Arsenal".to_string(),
+            home_score: 2,
+            away_score: 1,
+            regulation_home_score: Some(1),
+            regulation_away_score: Some(1),
+            score_basis: "flashscore_final_score".to_string(),
+            confidence: 0.86,
+        };
+
+        assert_eq!(
+            grade_external_outcome(
+                "Uafgjort",
+                Some("handicap"),
+                Some("Kampvinder"),
+                &link,
+                &evidence
+            ),
+            Some("won")
+        );
+        assert_eq!(
+            grade_external_outcome(
+                "Paris SG",
+                Some("handicap"),
+                Some("Kampvinder"),
+                &link,
+                &evidence
+            ),
+            Some("lost")
+        );
+        assert_eq!(
+            grade_external_outcome(
+                "Arsenal",
+                Some("handicap"),
+                Some("Kampvinder"),
+                &link,
+                &evidence
+            ),
+            Some("lost")
+        );
+        assert_eq!(
+            grade_external_outcome(
+                "Paris SG",
+                Some("handicap"),
+                Some("Kampvinder inkl. forlænget spilletid"),
+                &link,
+                &evidence
+            ),
+            Some("won")
+        );
+        assert_eq!(
+            external_grading_score_basis(Some("handicap"), Some("Kampvinder"), &link, &evidence),
+            "regulation_time_score"
+        );
+    }
+
+    #[test]
+    fn flashscore_feed_parser_exposes_final_and_regulation_scores() {
+        let fields = parse_flashscore_kv_feed("DA÷3¬DE÷2¬DF÷1¬DG÷1¬DH÷1¬DM÷Neutral location.");
+
+        assert_eq!(flashscore_score_field(&fields, &["DE", "DG"]), Some(2));
+        assert_eq!(flashscore_score_field(&fields, &["DF", "DH"]), Some(1));
+        assert_eq!(flashscore_score_field(&fields, &["DG"]), Some(1));
+        assert_eq!(flashscore_score_field(&fields, &["DH"]), Some(1));
     }
 
     #[test]
@@ -11344,6 +11586,9 @@ mod tests {
             away_name: "Bakken Bears".to_string(),
             home_score: 81,
             away_score: 87,
+            regulation_home_score: None,
+            regulation_away_score: None,
+            score_basis: "test_final_score".to_string(),
             confidence: 0.82,
         };
 

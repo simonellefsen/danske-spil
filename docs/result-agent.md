@@ -186,6 +186,14 @@ names such as `Rinascita Basket Rimini` to `Rimini`, `Ueb Cividale` to
 `Fortaleza`. Football aliases also normalize `Paris SG`, `PSG`, and
 `Paris Saint-Germain`. Women-team aliases also account for Flashscore naming such as
 `Vasco W`, `America Mineiro W`, `America de Cali W`, and `Inter Palmira W`.
+Football knockout or cup matches can expose two valid scores: the regulation
+score used for a normal `Kampvinder`/match-winner market, and the decided-winner
+score after extra time or penalties. Flashscore feeds may publish the decided
+score in the primary final fields and the regulation score in separate fields.
+The result agent therefore grades normal football winner markets from regulation
+time when that score is available, while markets that explicitly include extra
+time, penalties, qualification, or advancement keep using the decided-winner
+score. Settlement notes record both score values and the `grading_score_basis`.
 If a row still returns `flashscore_discovery_no_match`, the next step is to add
 another source adapter or a sport-specific pagination path, not an operator
 prompt.
