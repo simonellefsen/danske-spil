@@ -232,6 +232,20 @@ pub fn render_index(base_path: &str) -> String {
                         }
                     }
                     section {
+                        h2 { title: "Load any Europe/Copenhagen local-day paper performance slice by date.", "Daily lookup" }
+                        div { class: "inline-controls",
+                            input { id: "daily-performance-date", r#type: "date", title: "Europe/Copenhagen local date to inspect." }
+                            button { id: "load-daily-performance", title: "Load paper performance for the selected local date.", "Load date" }
+                        }
+                        div { class: "operator-note", id: "daily-performance-window", "Select a date to load a daily report." }
+                        table {
+                            thead { tr {
+                                th { "Scope" } th { "Played" } th { "Settled" } th { "Open" } th { "P/L" } th { "Hit rate" }
+                            } }
+                            tbody { id: "daily-performance" }
+                        }
+                    }
+                    section {
                         h2 { "Risk flag performance" }
                         table {
                             thead { tr {
@@ -398,6 +412,11 @@ button {
 }
 button.primary { background: #1f6feb; color: #ffffff; border-color: #1f6feb; }
 button:disabled { opacity: .45; cursor: not-allowed; }
+input {
+  min-height: 34px; border: 1px solid #aeb8c6; border-radius: 6px;
+  padding: 0 10px; font: inherit; background: #ffffff; color: #17202a;
+}
+.inline-controls { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; margin-bottom: 10px; }
 .grid { display: grid; grid-template-columns: 1fr; gap: 16px; }
 @media (min-width: 920px) { .grid { grid-template-columns: 1.1fr .9fr; } }
 section { background: #ffffff; border: 1px solid #d9dee7; border-radius: 8px; padding: 16px; }
@@ -1134,6 +1153,9 @@ function renderTodayPerformance(report) {
 function renderYesterdayPerformance(report) {
   renderDailyPerformance(report, "yesterday-window", "yesterday-performance", "yesterday");
 }
+function renderSelectedDailyPerformance(report) {
+  renderDailyPerformance(report, "daily-performance-window", "daily-performance", report.local_date || "selected date");
+}
 function renderDailyPerformance(report, windowId, tableId, label) {
   const summary = report.summary || {};
   const observations = (report.settlement_observations || {}).items || [];
@@ -1179,6 +1201,17 @@ function renderDailyPerformance(report, windowId, tableId, label) {
   if (!Number(summary.placed_count || 0) && !(report.by_sport || []).length) {
     $(tableId).innerHTML = `<tr><td colspan="6" class="muted">No paper placements recorded for ${esc(label)}.</td></tr>`;
   }
+}
+async function loadDailyPerformanceForDate(value) {
+  const date = String(value || "").trim();
+  if (!date) {
+    $("daily-performance-window").textContent = "Select a date to load a daily report.";
+    $("daily-performance").innerHTML = `<tr><td colspan="6" class="muted">No date selected.</td></tr>`;
+    return;
+  }
+  $("daily-performance-window").textContent = `Loading ${date}...`;
+  const report = await json(api(`/api/performance/day?date=${encodeURIComponent(date)}`));
+  renderSelectedDailyPerformance(report);
 }
 function renderPerformanceHistory(history) {
   const items = history.items || [];
@@ -1508,6 +1541,10 @@ async function load() {
   renderTodayPerformance(todayPerformance);
   const yesterdayPerformance = await json(api("/api/performance/yesterday"));
   renderYesterdayPerformance(yesterdayPerformance);
+  if (!$("daily-performance-date").value && yesterdayPerformance.local_date) {
+    $("daily-performance-date").value = yesterdayPerformance.local_date;
+    renderSelectedDailyPerformance(yesterdayPerformance);
+  }
   const performanceHistory = await json(api("/api/performance/history"));
   renderPerformanceHistory(performanceHistory);
   const coverage = await json(api("/api/catalog/coverage"));
@@ -1560,6 +1597,21 @@ $("run-result-agent").addEventListener("click", async () => {
   $("run-result-agent").disabled = true;
   try { await json(api("/api/result-agent/run"), { method: "POST", body: "{}" }); await load(); }
   finally { $("run-result-agent").disabled = false; }
+});
+$("load-daily-performance").addEventListener("click", async () => {
+  $("load-daily-performance").disabled = true;
+  try { await loadDailyPerformanceForDate($("daily-performance-date").value); }
+  catch (error) {
+    $("daily-performance-window").textContent = `Daily report failed: ${error.message || error}`;
+    $("daily-performance").innerHTML = `<tr><td colspan="6" class="muted">Could not load daily report.</td></tr>`;
+  }
+  finally { $("load-daily-performance").disabled = false; }
+});
+$("daily-performance-date").addEventListener("change", async () => {
+  try { await loadDailyPerformanceForDate($("daily-performance-date").value); }
+  catch (error) {
+    $("daily-performance-window").textContent = `Daily report failed: ${error.message || error}`;
+  }
 });
 $("commit-settlements").addEventListener("click", async () => {
   const pending = Array.from(pendingSettlementReviews.values());
