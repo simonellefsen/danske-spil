@@ -221,6 +221,7 @@ Append-only timeline for project wiki maintenance. Use headings with the format 
 - Added latest lookup source and recommendation to selected-day placement rows to explain what settlement path was last attempted.
 - Added latest settlement observation result, source, confidence, and timestamp to selected-day placement rows so the daily report shows the recorded truth next to ledger status.
 - Added settlement-truth coverage counts to daily aggregate rows so the selected-day report shows how many placements have recorded settlement observations.
+- Added awaiting-result counts to daily aggregate rows so open exposure shows the settlement backlog separately.
 
 ## [2026-05-25] implementation | Candidate ranking and paper settlement POC
 
