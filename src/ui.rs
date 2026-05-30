@@ -454,6 +454,7 @@ const $ = (id) => document.getElementById(id);
 const appBase = document.body.dataset.basePath || "";
 const api = (path) => `${appBase}${path}`;
 const money = (value) => Number(value || 0).toFixed(2);
+const maybeMoney = (value) => value === null || value === undefined ? "-" : money(value);
 const pct = (value) => value === null || value === undefined ? "-" : `${(Number(value) * 100).toFixed(1)}%`;
 const num = (value) => value === null || value === undefined ? "-" : Number(value).toFixed(3);
 const mins = (value) => value === null || value === undefined ? "-" : `${Math.round(Number(value) / 60)}m`;
@@ -1222,7 +1223,7 @@ function renderDailyPerformanceRecent(items) {
         <td><span class="pill">${esc(item.item_type || "single")}</span></td>
         <td>${esc(selection)}<br><span class="label">${esc(context)}</span></td>
         <td>${money(item.stake)}<br><span class="muted">@ ${esc(item.observed_odds ?? "-")}</span></td>
-        <td>${esc(item.status || "-")}<br><span class="muted">P/L ${money(item.profit_loss)}</span></td>
+        <td>${esc(item.status || "-")}<br><span class="muted">P/L ${maybeMoney(item.profit_loss)}</span></td>
       </tr>
     `;
   }).join("");
