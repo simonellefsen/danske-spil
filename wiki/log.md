@@ -285,3 +285,8 @@ Append-only timeline for project wiki maintenance. Use headings with the format 
 
 - Renamed the broad racing sport key from `formula1` to `motorsports` across scanner config, service scope, and docs.
 - Added schema normalization so existing `formula1` sport-key rows are moved to `motorsports` where the local database stores sport keys directly.
+
+## [2026-05-30] implementation | Motorsports series context
+
+- Added a motorsports `sport_context` feature snapshot classifier for Formula 1, IndyCar, NASCAR, endurance, motorbike, rally, and unknown racing rows.
+- Added a `motorsports_series` missing-signal marker when feed text does not identify the series family.

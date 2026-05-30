@@ -91,7 +91,8 @@ Current POC status:
 - `ingestion_runs` records scanner runs, the snapshot id, covered sports, event count, and completion status.
 - The web UI surfaces recent ingestion runs so scanner completion history can be reviewed without querying Postgres directly.
 - `feature_snapshots` stores one `market_context_v1` row per observed event per snapshot.
-- The first feature set is intentionally limited to market-feed context: competition, start time, participant count, market count, outcome count, market kinds, external providers, live/result flags, and missing-signal markers.
+- The first feature set is intentionally limited to market-feed context: competition, start time, participant count, market count, outcome count, market kinds, external providers, live/result flags, sport-specific context, and missing-signal markers.
+- Motorsports feature snapshots include `sport_context` with a broad `series_family` classifier for Formula 1, IndyCar, NASCAR, endurance racing, motorbikes, rally, or `unknown`. Unknown series add a `motorsports_series` missing-signal marker so later source adapters can target the gap.
 - `coupon_rule_observations` stores observed provider accumulator bounds for markets that expose `minimum_accumulator` or `maximum_accumulator`.
 - `GET /api/odds/movement` derives latest-vs-previous odds drift from `outcome_observations` for decision-time monitoring.
 - Candidate feature snapshots embed `odds_movement` when the same event, market, and outcome had a prior observation before the current scan, and movement-derived risk flags are persisted for replay.

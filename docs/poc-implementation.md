@@ -41,6 +41,7 @@ The script normalizes:
 - Handicap and over/under line fields.
 - Live scoreboard facts such as score, cards, and corners when available.
 - Motorsports outright markets, currently observed through the Formula 1 competition feed.
+- Motorsports series context in feature snapshots, classifying observed racing rows as Formula 1, IndyCar, NASCAR, endurance, motorbike, rally, or unknown from feed text.
 
 By default the probe filters out started/live events and obvious virtual/eSports spillover. Add `--include-live` when the monitoring POC needs live clocks, scores, corners, cards, or in-play prices. Add `--date-days N` only when a specific upcoming date band is needed; the site may otherwise expose useful near-term events without a date band.
 

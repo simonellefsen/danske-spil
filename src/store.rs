@@ -8730,6 +8730,11 @@ fn event_feature_snapshot(sport_key: &str, event: &Value) -> Value {
             .iter()
             .filter_map(|external_id| text(external_id, "provider")),
     );
+    let motorsports_context = if sport_key == "motorsports" {
+        Some(motorsports_series_context(event))
+    } else {
+        None
+    };
 
     let mut missing = Vec::new();
     if text(event, "competition").is_none() {
@@ -8749,6 +8754,13 @@ fn event_feature_snapshot(sport_key: &str, event: &Value) -> Value {
     }
     if scoreboard_facts.is_empty() && bool_value(event, "live_now") {
         missing.push("live_scoreboard");
+    }
+    if motorsports_context
+        .as_ref()
+        .and_then(|context| text(context, "series_family"))
+        == Some("unknown")
+    {
+        missing.push("motorsports_series");
     }
     // Placeholders for the next ingestion layers. Keeping them explicit makes
     // candidate reasoning honest until those sources are wired in.
@@ -8785,6 +8797,15 @@ fn event_feature_snapshot(sport_key: &str, event: &Value) -> Value {
             0.04
         } else {
             0.0
+        }
+        + if motorsports_context
+            .as_ref()
+            .and_then(|context| text(context, "series_family"))
+            .is_some_and(|series| series != "unknown")
+        {
+            0.04
+        } else {
+            0.0
         })
     .clamp(0.1, 0.82);
 
@@ -8808,6 +8829,7 @@ fn event_feature_snapshot(sport_key: &str, event: &Value) -> Value {
         "scoreboard_fact_count": scoreboard_facts.len(),
         "external_provider_count": external_providers.len(),
         "external_providers": external_providers,
+        "sport_context": motorsports_context.unwrap_or(Value::Null),
         "missing_signals": missing,
         "confidence": confidence,
         "limits": {
@@ -8815,6 +8837,62 @@ fn event_feature_snapshot(sport_key: &str, event: &Value) -> Value {
             "not_settlement_grade": true,
             "uses_only_market_feed": true
         }
+    })
+}
+
+fn motorsports_series_context(event: &Value) -> Value {
+    let fields = [
+        text(event, "competition"),
+        text(event, "class_name"),
+        text(event, "name"),
+    ];
+    let haystack = fields
+        .into_iter()
+        .flatten()
+        .collect::<Vec<_>>()
+        .join(" ")
+        .to_ascii_lowercase();
+    let series_family = if haystack.contains("indycar") || haystack.contains("indy car") {
+        "indycar"
+    } else if haystack.contains("nascar") {
+        "nascar"
+    } else if haystack.contains("le mans")
+        || haystack.contains("wec")
+        || haystack.contains("endurance")
+        || haystack.contains("imsa")
+    {
+        "endurance"
+    } else if haystack.contains("motogp")
+        || haystack.contains("moto gp")
+        || haystack.contains("superbike")
+        || haystack.contains("motorbike")
+        || haystack.contains("motorcycle")
+    {
+        "motorbike"
+    } else if haystack.contains("formula 1")
+        || haystack.contains("formel 1")
+        || haystack == "f1"
+        || haystack.contains(" f1 ")
+        || haystack.starts_with("f1 ")
+        || haystack.ends_with(" f1")
+    {
+        "formula_1"
+    } else if haystack.contains("rally") || haystack.contains("wrc") {
+        "rally"
+    } else {
+        "unknown"
+    };
+    let vehicle_type = match series_family {
+        "motorbike" => "motorbike",
+        "unknown" => "unknown",
+        _ => "car",
+    };
+    json!({
+        "category": "motorsports",
+        "series_family": series_family,
+        "vehicle_type": vehicle_type,
+        "series_known": series_family != "unknown",
+        "source_fields": ["competition", "class_name", "event_name"]
     })
 }
 
@@ -10377,6 +10455,59 @@ mod tests {
                 &evidence
             ),
             Some("won")
+        );
+    }
+
+    #[test]
+    fn motorsports_context_detects_series_family() {
+        let context = motorsports_series_context(&json!({
+            "competition": "NASCAR Cup Series",
+            "class_name": "Motorsport",
+            "name": "Coca-Cola 600"
+        }));
+
+        assert_eq!(
+            context.get("series_family").and_then(Value::as_str),
+            Some("nascar")
+        );
+        assert_eq!(
+            context.get("vehicle_type").and_then(Value::as_str),
+            Some("car")
+        );
+        assert_eq!(
+            context.get("series_known").and_then(Value::as_bool),
+            Some(true)
+        );
+    }
+
+    #[test]
+    fn motorsports_feature_snapshot_marks_unknown_series_missing() {
+        let features = event_feature_snapshot(
+            "motorsports",
+            &json!({
+                "id": "event-1",
+                "name": "Racing Special",
+                "competition": "Motorsport",
+                "start_time": "2026-06-01T12:00:00Z",
+                "markets": [],
+                "external_ids": []
+            }),
+        );
+
+        let missing = features
+            .get("missing_signals")
+            .and_then(Value::as_array)
+            .cloned()
+            .unwrap_or_default();
+        assert!(missing
+            .iter()
+            .any(|item| item.as_str() == Some("motorsports_series")));
+        assert_eq!(
+            features
+                .get("sport_context")
+                .and_then(|context| context.get("series_family"))
+                .and_then(Value::as_str),
+            Some("unknown")
         );
     }
 }

@@ -33,6 +33,11 @@ sources:
 
 Feature snapshots are immutable and decision-time scoped. A simulated placement should be explainable from the stats, news, weather, seasonality, and trend data that existed at the simulated placement timestamp.
 
+Motorsports is intentionally broad. Feature snapshots classify racing rows into
+series families such as Formula 1, IndyCar, NASCAR, endurance, motorbike,
+rally, or unknown. Unknown series should be treated as a source-adapter gap,
+not as Formula 1 by default.
+
 ## Related
 
 - [simulation ledger](simulation-ledger.md)
