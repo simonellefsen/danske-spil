@@ -120,8 +120,10 @@ POST /api/result-agent/run
 
 Kubernetes enables this by default with
 `GAMBLER_RESULT_AGENT_ENABLED=true`, schedules the dedicated service with
-`GAMBLER_RESULT_AGENT_INTERVAL_SECONDS=900`, and limits each cycle with
-`GAMBLER_RESULT_AGENT_PER_CYCLE_LIMIT`. The scanner worker sets
+`GAMBLER_RESULT_AGENT_INTERVAL_SECONDS=900`, and caps each cycle with
+`GAMBLER_RESULT_AGENT_PER_CYCLE_LIMIT=25`. The cap is deliberately above the
+normal backlog size so stale rows at the end of the priority list are still
+rechecked during manual runs. The scanner worker sets
 `GAMBLER_RESULT_AGENT_ENABLED=false` so it advances settlement-review state
 without also running public result reconciliation. The web/API deployment sets
 `GAMBLER_RESULT_AGENT_URL=http://gambler-result-agent:8080`, so UI-triggered
@@ -173,9 +175,19 @@ The same rule is used for basketball rows where Flashscore may list the URL
 participants in the reverse order, for example `Fuenlabrada - Palencia`, or
 where a Flashscore match URL has no `mid` query and only exposes a page-title
 score such as `NSA - Antonine 77:84`.
+Basketball and football aliases also normalize sponsor-heavy or abbreviated
+names such as `Rinascita Basket Rimini` to `Rimini`, `Ueb Cividale` to
+`Cividale`, `Baskonia Vitoria-Gasteiz` to `Baskonia`, `Cb Malaga` to
+`Malaga`, `Næstved BK` to `Naestved`, and `Fortaleza C.E.I.F. FC` to
+`Fortaleza`. Women-team aliases also account for Flashscore naming such as
+`Vasco W`, `America Mineiro W`, `America de Cali W`, and `Inter Palmira W`.
 If a row still returns `flashscore_discovery_no_match`, the next step is to add
 another source adapter or a sport-specific pagination path, not an operator
 prompt.
+The current known gap is tennis doubles. Flashscore participant search exposes
+individual players well, but not every temporary doubles pairing as a stable
+team participant, so unresolved doubles rows should be handled by a dedicated
+ATP/ITF/TennisExplorer-style doubles-result adapter rather than manual prompts.
 
 ## Local Account-History Agent
 

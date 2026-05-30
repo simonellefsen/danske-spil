@@ -293,6 +293,32 @@ VALUES
           "result_status": "finished",
           "result_observed_from": "user_supplied_flashscore_result",
           "notes": "Flashscore page title reports NSA - Antonine 77:84. The URL has no mid query, so settlement uses this documented page-title result instead of a feed id."
+        },
+        {
+          "event_name": "CR Vasco da Gama (W) - America MG (k)",
+          "url": "https://www.flashscore.com/match/football/vasco-htf1ZG8n/america-mineiro-4xVVf8gB/?mid=jkrAljBU",
+          "sport_key": "football",
+          "gender_scope": "women",
+          "home_aliases": ["CR Vasco da Gama (W)", "Vasco W", "Vasco da Gama W"],
+          "away_aliases": ["America MG (k)", "America Mineiro W", "America MG"],
+          "home_score": 1,
+          "away_score": 0,
+          "result_status": "finished",
+          "result_observed_from": "flashscore_participant_feed",
+          "notes": "Flashscore lists the Copa do Brasil women match as Vasco W - America Mineiro W 1:0. Stored scores are oriented to the Danske Spil event order."
+        },
+        {
+          "event_name": "America De Cali SA (k) - Internacional de Palmira (W)",
+          "url": "https://www.flashscore.com/match/football/america-de-cali-Q9RoAthL/inter-palmira-IqOwC2N8/?mid=6m1Fnb8U",
+          "sport_key": "football",
+          "gender_scope": "women",
+          "home_aliases": ["America De Cali SA (k)", "America de Cali W", "America de Cali"],
+          "away_aliases": ["Internacional de Palmira (W)", "Inter Palmira W", "Inter Palmira"],
+          "home_score": 5,
+          "away_score": 0,
+          "result_status": "finished",
+          "result_observed_from": "flashscore_participant_feed",
+          "notes": "Flashscore lists the Liga Femenina match as America de Cali W - Inter Palmira W 5:0. Stored scores are oriented to the Danske Spil event order."
         }
       ]
     }'::jsonb

@@ -323,3 +323,10 @@ Append-only timeline for project wiki maintenance. Use headings with the format 
 - Seeded Flashscore result links for CD Maristas Palencia versus Cb Fuenlabrada and Nsa versus Club Antonin Sportif.
 - Stored provider-reversed or no-`mid` Flashscore basketball scores in Danske Spil event order so auto-settlement can reconcile the stale paper rows deterministically.
 - Added basketball alias expansions for Palencia, Fuenlabrada, NSA, and Antonine/Antonin naming drift.
+
+## [2026-05-30] implementation | Overdue result matching pass
+
+- Expanded Flashscore alias matching for remaining stale rows with sponsor-heavy basketball names, abbreviated Danish football names, Colombian women-team markers, and dotted Fortaleza C.E.I.F. naming.
+- Raised the dedicated result-agent per-cycle cap from 10 to 25 so manual and scheduled reconciliation cycles can cover the whole stale backlog instead of repeatedly retrying only the first ten rows.
+- Seeded Flashscore women-football links for Vasco W versus America Mineiro W and America de Cali W versus Inter Palmira W so those rows do not depend on Sofascore browser-only evidence.
+- Deployed the pass and ran live reconciliation: the overdue queue dropped from 11 rows to 3, leaving only ATP Challenger Little Rock doubles rows that still need a doubles-team result source adapter.

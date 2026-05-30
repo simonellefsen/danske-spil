@@ -2266,8 +2266,49 @@ fn flashscore_known_name_aliases(name: &str) -> Vec<String> {
             "Antonin".to_string(),
             "Club Antonine".to_string(),
         ],
+        "rinascita basket rimini" | "dole rimini" => {
+            vec!["Rimini".to_string(), "Basket Rimini".to_string()]
+        }
+        "ueb cividale" | "ueb gesteco cividale" | "cividale del friuli" => {
+            vec!["Cividale".to_string(), "UEB Cividale".to_string()]
+        }
+        "baskonia vitoria gasteiz" | "baskonia vitoria gasteiz sad" | "saski baskonia" => {
+            vec!["Baskonia".to_string(), "Saski Baskonia".to_string()]
+        }
+        "cb malaga" | "cb malaga 2002" | "unicaja malaga" => {
+            vec!["Malaga".to_string(), "Unicaja".to_string()]
+        }
+        "naestved bk" | "naestved if" => vec!["Naestved".to_string()],
+        "ab" | "akademisk boldklub" => vec!["AB Copenhagen".to_string(), "AB".to_string()],
+        "america de cali sa k" | "america de cali w" | "america de cali women" => {
+            vec![
+                "America de Cali W".to_string(),
+                "America de Cali".to_string(),
+            ]
+        }
+        "internacional de palmira w"
+        | "internacional de palmira k"
+        | "internacional de palmira women"
+        | "inter palmira w"
+        | "inter palmira k" => vec![
+            "Inter Palmira W".to_string(),
+            "Inter Palmira".to_string(),
+            "Internacional de Palmira W".to_string(),
+            "Internacional de Palmira".to_string(),
+        ],
+        "cucuta deportivo fc" | "cucuta deportivo" => {
+            vec!["Cucuta".to_string(), "Cucuta Deportivo".to_string()]
+        }
+        "fortaleza c e i f fc" | "fortaleza c e i f" | "fortaleza ceif fc" | "fortaleza ceif" => {
+            vec![
+                "Fortaleza".to_string(),
+                "Fortaleza C.E.I.F.".to_string(),
+                "Fortaleza FC".to_string(),
+            ]
+        }
         "cr vasco da gama w" | "cr vasco da gama k" | "vasco da gama w" | "vasco da gama k" => {
             vec![
+                "Vasco W".to_string(),
                 "Vasco da Gama W".to_string(),
                 "Vasco da Gama".to_string(),
                 "CR Vasco da Gama".to_string(),
@@ -2831,6 +2872,28 @@ mod tests {
             flashscore_name_variants("Club Antonin Sportif", "basketball")
                 .contains(&"Antonine".to_string())
         );
+        assert!(
+            flashscore_name_variants("Rinascita Basket Rimini", "basketball")
+                .contains(&"Rimini".to_string())
+        );
+        assert!(flashscore_name_variants("Ueb Cividale", "basketball")
+            .contains(&"Cividale".to_string()));
+        assert!(
+            flashscore_name_variants("Baskonia Vitoria-Gasteiz", "basketball")
+                .contains(&"Baskonia".to_string())
+        );
+        assert!(flashscore_name_variants("Cb Malaga", "basketball").contains(&"Malaga".to_string()));
+        assert!(
+            flashscore_name_variants("Næstved BK", "football").contains(&"Naestved".to_string())
+        );
+        assert!(
+            flashscore_name_variants("Fortaleza C.E.I.F. FC", "football")
+                .contains(&"Fortaleza".to_string())
+        );
+        assert!(
+            flashscore_name_variants("Internacional de Palmira (W)", "football")
+                .contains(&"Inter Palmira W".to_string())
+        );
         assert!(flashscore_name_variants("Derthona Basket", "basketball")
             .contains(&"Tortona".to_string()));
         assert!(flashscore_name_variants("Kamil Majchrzak", "tennis")
@@ -2838,7 +2901,7 @@ mod tests {
         assert!(flashscore_name_variants("Kolding IF (k)", "football")
             .contains(&"KoldingQ".to_string()));
         assert!(flashscore_name_variants("CR Vasco da Gama (W)", "football")
-            .contains(&"Vasco da Gama W".to_string()));
+            .contains(&"Vasco W".to_string()));
         assert!(flashscore_name_variants("America MG (k)", "football")
             .contains(&"America Mineiro W".to_string()));
     }
