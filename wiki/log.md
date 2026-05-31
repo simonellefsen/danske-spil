@@ -443,3 +443,8 @@ Append-only timeline for project wiki maintenance. Use headings with the format 
 ## [2026-05-31] implementation | Minimal Docker context
 
 - Tightened `.dockerignore` so image builds only receive `Cargo.toml`, `Cargo.lock`, and `src/`; host build output, docs, Kubernetes manifests, and local artifacts no longer participate in Docker context transfer.
+
+## [2026-05-31] implementation | Scoped Kubernetes deploys
+
+- Added `DEPLOY_SCOPE=auto|app|full` to the local Kubernetes deploy script so normal app iterations can skip CloudNativePG manifest apply and the Postgres readiness wait after the namespace is bootstrapped.
+- Added `rtk make k8s-deploy-app` and `rtk make k8s-deploy-full` convenience targets while keeping `rtk make k8s-deploy` on automatic scope detection.

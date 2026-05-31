@@ -51,6 +51,13 @@ then patches all deployments to that tag so Docker Desktop does not reuse stale
 to a different tag the script retags the already-built shared image instead of
 running a second Docker build.
 
+Deployment scope is controlled with `DEPLOY_SCOPE=auto|app|full`. The default
+`auto` mode uses a fast app-only apply when the namespace, Postgres cluster, and
+four app deployments already exist; otherwise it falls back to a full bootstrap.
+`app` applies only the app and Hermes manifests and skips the CloudNativePG
+manifest and Postgres readiness wait. `full` applies all manifests and waits for
+Postgres.
+
 `rtk make docker-build` builds the shared scratch-container image without
 applying Kubernetes manifests. `rtk make k8s-status` prints the current local
 namespace pods, deployments, services, and CNPG cluster state.
@@ -61,6 +68,8 @@ Useful build variants:
 rtk make docker-build
 BUILD_PROFILE=release rtk make docker-build
 rtk make docker-build-release
+rtk make k8s-deploy-app
+rtk make k8s-deploy-full
 ```
 
 ## Open The Web UI
