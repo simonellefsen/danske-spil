@@ -12,6 +12,10 @@ state, first building tiny stub targets from `Cargo.toml` and `Cargo.lock`, then
 copying the real source and rebuilding the application binaries. The legacy
 `Dockerfile.result-agent` remains available for isolated result-agent image
 experiments, but the normal Makefile and deploy script no longer use it.
+The Docker context is intentionally restricted by `.dockerignore` to Cargo
+metadata and `src/`, so local docs, Kubernetes manifests, test fixtures, and the
+large host `target/` directory cannot inflate context transfer or accidentally
+invalidate image builds.
 
 Local Makefile and deploy-script builds default to `BUILD_PROFILE=k8s-dev`.
 That Cargo profile keeps optimization off and strips debug info, which is much

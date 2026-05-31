@@ -439,3 +439,7 @@ Append-only timeline for project wiki maintenance. Use headings with the format 
 
 - Added a `k8s-dev` Cargo profile and made local Makefile/deploy Docker builds use it by default, keeping scratch containers but avoiding release optimization during normal Docker Desktop iteration.
 - Kept optimized image builds available through `BUILD_PROFILE=release` and `rtk make docker-build-release`.
+
+## [2026-05-31] implementation | Minimal Docker context
+
+- Tightened `.dockerignore` so image builds only receive `Cargo.toml`, `Cargo.lock`, and `src/`; host build output, docs, Kubernetes manifests, and local artifacts no longer participate in Docker context transfer.

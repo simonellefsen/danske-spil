@@ -1,7 +1,14 @@
+*
+
+!Cargo.lock
+!Cargo.toml
+!src/
+!src/**
+
 .git
 .env
 .env.*
-!.env.example
+target/
 tmp/
 __pycache__/
 *.py[cod]
