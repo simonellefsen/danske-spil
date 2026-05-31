@@ -243,8 +243,9 @@ spec:
           type: RuntimeDefault
       containers:
         - name: gambler-result-agent
-          image: danske-spil-result-agent:local
+          image: danske-spil-gambler:local
           imagePullPolicy: IfNotPresent
+          command: ["/result-agent"]
           ports:
             - name: http
               containerPort: 8080

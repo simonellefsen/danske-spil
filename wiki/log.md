@@ -429,3 +429,8 @@ Append-only timeline for project wiki maintenance. Use headings with the format 
 
 - Added explicit `tournament_name` context to result-agent selections, lookup prompts, external result links, and external result evidence while preserving the existing `competition` label.
 - Documented that unresolved UTR tennis rows should treat weather/scheduling suspension claims as leads until a public source is attached; the result lookup contract now asks workers to return postponed, suspended, refunded, or unknown status instead of inventing scores.
+
+## [2026-05-31] implementation | Shared Rust image build
+
+- Changed the normal Docker/Kubernetes build path to produce one scratch image containing both `/gambler` and `/result-agent`, with the result-agent deployment selecting `/result-agent` via its container command.
+- Added Docker BuildKit Cargo cache mounts and removed the second result-agent Docker compile from `make docker-build` and `scripts/deploy_local_k8s.sh`; separate result-agent runtime isolation is preserved at the Kubernetes deployment/service layer.

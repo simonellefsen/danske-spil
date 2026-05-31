@@ -2,7 +2,7 @@ KUBE_CONTEXT ?= docker-desktop
 NAMESPACE ?= danske-spil
 IMAGE_TAG ?= $(shell date +%Y%m%d%H%M%S)
 GAMBLER_IMAGE ?= danske-spil-gambler:$(IMAGE_TAG)
-RESULT_AGENT_IMAGE ?= danske-spil-result-agent:$(IMAGE_TAG)
+RESULT_AGENT_IMAGE ?= $(GAMBLER_IMAGE)
 GAMBLER_API ?= http://127.0.0.1:18083
 METRICS_NAMESPACE ?= kube-system
 METRICS_RELEASE ?= metrics-server
@@ -27,7 +27,7 @@ account-history-agent-test:
 
 docker-build:
 	rtk docker build -t $(GAMBLER_IMAGE) .
-	rtk docker build -f Dockerfile.result-agent -t $(RESULT_AGENT_IMAGE) .
+	if [ "$(RESULT_AGENT_IMAGE)" != "$(GAMBLER_IMAGE)" ]; then rtk docker tag $(GAMBLER_IMAGE) $(RESULT_AGENT_IMAGE); fi
 
 k8s-deploy:
 	KUBE_CONTEXT=$(KUBE_CONTEXT) NAMESPACE=$(NAMESPACE) IMAGE=$(GAMBLER_IMAGE) RESULT_AGENT_IMAGE=$(RESULT_AGENT_IMAGE) rtk bash scripts/deploy_local_k8s.sh
