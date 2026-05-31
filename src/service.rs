@@ -1222,6 +1222,18 @@ fn result_agent_task(item: &Value, account_agent: &Value) -> Option<Value> {
     } else {
         json!([])
     };
+    let selection = json!({
+        "event_name": item.get("event_name").cloned().unwrap_or(Value::Null),
+        "event_names": event_names,
+        "sport_key": item.get("sport_key").cloned().unwrap_or(Value::Null),
+        "competition": item.get("competition").cloned().unwrap_or(Value::Null),
+        "market_name": item.get("market_name").cloned().unwrap_or(Value::Null),
+        "market_kind": item.get("market_kind").cloned().unwrap_or(Value::Null),
+        "outcome_name": item.get("outcome_name").cloned().unwrap_or(Value::Null),
+        "start_time": item.get("start_time").cloned().unwrap_or(Value::Null),
+        "legs": legs
+    });
+    let result_lookup_prompt = result_lookup_prompt(item, &selection, &source_links);
 
     Some(json!({
         "item_type": item_type,
@@ -1241,16 +1253,7 @@ fn result_agent_task(item: &Value, account_agent: &Value) -> Option<Value> {
             "candidate_id": item.get("candidate_id").cloned().unwrap_or(Value::Null),
             "event_id": item.get("event_id").cloned().unwrap_or(Value::Null)
         },
-        "selection": {
-            "event_name": item.get("event_name").cloned().unwrap_or(Value::Null),
-            "event_names": event_names,
-            "sport_key": item.get("sport_key").cloned().unwrap_or(Value::Null),
-            "competition": item.get("competition").cloned().unwrap_or(Value::Null),
-            "market_name": item.get("market_name").cloned().unwrap_or(Value::Null),
-            "market_kind": item.get("market_kind").cloned().unwrap_or(Value::Null),
-            "outcome_name": item.get("outcome_name").cloned().unwrap_or(Value::Null),
-            "legs": legs
-        },
+        "selection": selection,
         "event_state": {
             "event_status": item.get("event_status").cloned().unwrap_or(Value::Null),
             "event_resulted": item.get("event_resulted").cloned().unwrap_or(Value::Null),
@@ -1258,6 +1261,7 @@ fn result_agent_task(item: &Value, account_agent: &Value) -> Option<Value> {
         },
         "source_links": source_links,
         "search_terms": search_terms,
+        "result_lookup_prompt": result_lookup_prompt,
         "candidate_sources": [
             "danskespil_account_history",
             "official_competition_results",
@@ -1319,6 +1323,7 @@ fn account_history_request(item: &Value) -> Option<Value> {
         "market_name": item.get("market_name").cloned().unwrap_or(Value::Null),
         "market_kind": item.get("market_kind").cloned().unwrap_or(Value::Null),
         "outcome_name": item.get("outcome_name").cloned().unwrap_or(Value::Null),
+        "start_time": item.get("start_time").cloned().unwrap_or(Value::Null),
         "legs": legs
     });
     let expected_truth = match recommendation {
@@ -1353,6 +1358,7 @@ fn account_history_request(item: &Value) -> Option<Value> {
             "event_settled": item.get("event_settled").cloned().unwrap_or(Value::Null)
         },
         "source_key": "danskespil_account_history",
+        "result_lookup_prompt": result_lookup_prompt(item, &selection, &[]),
         "evidence_endpoint": "/api/settlement/external-evidence",
         "evidence_template": {
             "source_key": "danskespil_account_history",
@@ -1375,6 +1381,120 @@ fn account_history_request(item: &Value) -> Option<Value> {
             "deposit_or_withdraw": false
         }
     }))
+}
+
+fn result_lookup_prompt(item: &Value, selection: &Value, source_links: &[Value]) -> Value {
+    let event_name = text(selection, "event_name").unwrap_or("unknown event");
+    let sport_key = text(selection, "sport_key").unwrap_or("unknown sport");
+    let competition = text(selection, "competition").unwrap_or("unknown competition");
+    let market_name = text(selection, "market_name").unwrap_or("unknown market");
+    let market_kind = text(selection, "market_kind").unwrap_or("unknown market kind");
+    let outcome_name = text(selection, "outcome_name").unwrap_or("unknown outcome");
+    let start_time = selection.get("start_time").cloned().unwrap_or(Value::Null);
+    let expected_result_check_after = item
+        .get("expected_result_check_after")
+        .cloned()
+        .unwrap_or(Value::Null);
+    let (home_name, away_name) = split_event_name(event_name)
+        .map(|(home, away)| (Value::String(home), Value::String(away)))
+        .unwrap_or((Value::Null, Value::Null));
+    let source_urls: Vec<Value> = source_links
+        .iter()
+        .filter_map(|link| {
+            link.get("source_url").and_then(Value::as_str).map(|url| {
+                json!({
+                    "source_key": link.get("source_key").cloned().unwrap_or(Value::Null),
+                    "source_url": url
+                })
+            })
+        })
+        .collect();
+    let prompt = format!(
+        "Resolve the final result for a paper-only simulated betting ledger row. \
+Use read-only public result evidence only. Do not sign in, do not use private account data, \
+do not place bets, and do not submit settlement directly. Event: {event_name}. \
+Sport: {sport_key}. Competition: {competition}. Market: {market_name} ({market_kind}). \
+Selected outcome: {outcome_name}. Event timestamps are ISO-8601; if a source omits timezone, \
+interpret the bookmaker-local event date in Europe/Copenhagen and explain any date ambiguity. \
+Return only JSON matching the supplied schema. Distinguish regulation/full-time score from \
+extra-time, overtime, penalty-shootout, qualification, or decided-winner scores. For cancelled, \
+postponed, abandoned, void, push, or refunded events, return result_status with that state and \
+do not invent a score. Include the exact source URL and a short non-sensitive excerpt."
+    );
+
+    json!({
+        "kind": "public_result_lookup_v1",
+        "prompt": prompt,
+        "input": {
+            "event_name": event_name,
+            "home_name": home_name,
+            "away_name": away_name,
+            "sport_key": sport_key,
+            "competition": competition,
+            "market_name": market_name,
+            "market_kind": market_kind,
+            "outcome_name": outcome_name,
+            "timezone_hint": "Europe/Copenhagen",
+            "start_time": start_time,
+            "expected_result_check_after": expected_result_check_after,
+            "source_urls": source_urls,
+            "event_names": selection.get("event_names").cloned().unwrap_or(Value::Null),
+            "legs": selection.get("legs").cloned().unwrap_or(Value::Null)
+        },
+        "expected_json_schema": {
+            "type": "object",
+            "required": [
+                "source_key",
+                "source_url",
+                "event_name",
+                "sport_key",
+                "result_status",
+                "confidence",
+                "raw_text_excerpt",
+                "settle"
+            ],
+            "properties": {
+                "source_key": {"type": "string"},
+                "source_url": {"type": "string"},
+                "event_name": {"type": "string"},
+                "sport_key": {"type": "string"},
+                "home_name": {"type": ["string", "null"]},
+                "away_name": {"type": ["string", "null"]},
+                "home_score": {"type": ["integer", "null"]},
+                "away_score": {"type": ["integer", "null"]},
+                "regulation_home_score": {"type": ["integer", "null"]},
+                "regulation_away_score": {"type": ["integer", "null"]},
+                "penalty_home_score": {"type": ["integer", "null"]},
+                "penalty_away_score": {"type": ["integer", "null"]},
+                "result_status": {
+                    "enum": [
+                        "finished",
+                        "cancelled",
+                        "postponed",
+                        "abandoned",
+                        "void",
+                        "push",
+                        "refunded",
+                        "unknown"
+                    ]
+                },
+                "confidence": {"type": "number", "minimum": 0.0, "maximum": 1.0},
+                "raw_text_excerpt": {"type": "string"},
+                "notes": {"type": ["string", "null"]},
+                "settle": {"const": false}
+            }
+        },
+        "safety": {
+            "paper_only": true,
+            "read_only_public_sources": true,
+            "operator_login_allowed": false,
+            "submit_bets": false,
+            "deposit_or_withdraw": false,
+            "post_settlement": false,
+            "store_credentials": false,
+            "store_cookies": false
+        }
+    })
 }
 
 fn danskespil_account_agent_status() -> Value {
@@ -3897,6 +4017,73 @@ mod tests {
         assert!(result_agent_task(&cooling_item, &account_agent).is_none());
         assert!(account_history_request(&stale_item).is_some());
         assert!(account_history_request(&cooling_item).is_none());
+    }
+
+    #[test]
+    fn result_agent_task_includes_public_result_lookup_prompt() {
+        let item = json!({
+            "item_type": "single",
+            "bet_id": "bet-1",
+            "recommendation": "external_result_required",
+            "lookup_stale": true,
+            "hypothetical_stake": 10.0,
+            "overdue_minutes": 180,
+            "event_name": "Portland Fire - Indiana Fever",
+            "sport_key": "basketball",
+            "competition": "WNBA",
+            "market_name": "Kampvinder (Inkl. OT)",
+            "market_kind": "handicap",
+            "outcome_name": "Indiana Fever",
+            "start_time": "2026-05-30T00:00:00Z",
+            "expected_result_check_after": "2026-05-30T02:30:00Z",
+            "external_result_links": [
+                {
+                    "source_key": "flashscore_results",
+                    "source_url": "https://www.flashscore.dk/kamp/basketball/indiana-fever-lzsyuNYf/portland-fire-M1S40uRI/?mid=MVXBkmR6"
+                }
+            ]
+        });
+        let task = result_agent_task(&item, &json!({"available": false})).unwrap();
+        let prompt = task.get("result_lookup_prompt").unwrap();
+
+        assert_eq!(
+            prompt.get("kind").and_then(Value::as_str),
+            Some("public_result_lookup_v1")
+        );
+        assert!(prompt
+            .get("prompt")
+            .and_then(Value::as_str)
+            .unwrap()
+            .contains("Europe/Copenhagen"));
+        assert_eq!(
+            prompt
+                .get("input")
+                .and_then(|input| input.get("home_name"))
+                .and_then(Value::as_str),
+            Some("Portland Fire")
+        );
+        assert_eq!(
+            prompt
+                .get("input")
+                .and_then(|input| input.get("away_name"))
+                .and_then(Value::as_str),
+            Some("Indiana Fever")
+        );
+        let required = prompt
+            .get("expected_json_schema")
+            .and_then(|schema| schema.get("required"))
+            .and_then(Value::as_array)
+            .unwrap();
+        assert!(required.contains(&json!("source_url")));
+        assert!(required.contains(&json!("result_status")));
+        assert!(required.contains(&json!("raw_text_excerpt")));
+        assert_eq!(
+            prompt
+                .get("safety")
+                .and_then(|safety| safety.get("submit_bets"))
+                .and_then(Value::as_bool),
+            Some(false)
+        );
     }
 
     #[test]

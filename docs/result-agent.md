@@ -23,10 +23,39 @@ grade, or require cancellation/refund review. Each task includes:
 - Expected result-check timestamp and overdue minutes.
 - Known public result links, when configured.
 - Deterministic search terms for a result-source discovery worker.
+- A `result_lookup_prompt` contract for LLM/browser-assisted public result lookup.
 - Recommended action for a read-only browser result agent.
 
 The queue deliberately avoids raw cookies, credentials, browser storage, and
 account payloads.
+
+## Result Lookup Prompt
+
+Every public result-agent queue task includes `result_lookup_prompt`. It is a
+paper-only prompt payload for an LLM/browser worker that needs to answer: given
+the teams or players, sport, event date, market, selected outcome, and optional
+source URLs, what public result truth can be verified?
+
+The prompt input includes the event name, parsed home/away names when possible,
+sport key, competition, market name/kind, selected outcome, event `start_time`,
+`expected_result_check_after`, and a `Europe/Copenhagen` timezone hint. If the
+provider result page has a different participant order, the worker must still
+orient the answer back to the Danske Spil event order.
+
+The expected response is JSON only. It must include `source_key`, `source_url`,
+`event_name`, `sport_key`, `result_status`, `confidence`,
+`raw_text_excerpt`, and `settle=false`. Score fields are explicit:
+`home_score`/`away_score`, optional regulation score, and optional
+penalty-shootout score. This is important for football knockout games where a
+normal full-time winner market can settle from a draw, while a qualification or
+penalty market settles from the decided-winner score. Cancelled, postponed,
+abandoned, void, push, or refunded states should be returned as statuses instead
+of invented scores.
+
+The prompt safety contract forbids signing in, using private account data,
+placing bets, posting settlement, storing credentials, or storing cookies. The
+result can be used as evidence input, but deterministic settlement remains in
+the API settlement code path.
 
 Tasks are ordered by priority score. The score is paper stake weighted by
 overdue age, which keeps the agent deterministic while making stale,

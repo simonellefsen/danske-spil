@@ -418,3 +418,9 @@ Append-only timeline for project wiki maintenance. Use headings with the format 
 
 - Added recommended next actions to Flashscore no-match summaries so failures now point toward alias fixes, gender/sport-scope checks, browser-backed evidence, or alternate source adapters.
 - Rendered those recommendations in the latest and recent result-agent cycle tables.
+
+## [2026-05-31] implementation | Backlog result links and lookup prompt
+
+- Added durable Flashscore known-match mappings for the latest unresolved basketball and football backlog rows, including reversed provider order aliases and Paranaense/Athletico-PR variants.
+- After inserting the supplied live result links, the settlement review backlog fell from 13 rows to 2 rows, and yesterday settlement progress improved from 19/34 to 27/34 paper positions.
+- Added a paper-only `result_lookup_prompt` contract to result-agent queue tasks so an LLM/browser worker can verify public result truth from teams or players, sport, event time, timezone, market context, and configured result URLs without signing in or posting settlement.

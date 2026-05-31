@@ -319,6 +319,86 @@ VALUES
           "result_status": "finished",
           "result_observed_from": "flashscore_participant_feed",
           "notes": "Flashscore lists the Liga Femenina match as America de Cali W - Inter Palmira W 5:0. Stored scores are oriented to the Danske Spil event order."
+        },
+        {
+          "event_name": "Portland Fire - Indiana Fever",
+          "url": "https://www.flashscore.dk/kamp/basketball/indiana-fever-lzsyuNYf/portland-fire-M1S40uRI/?mid=MVXBkmR6",
+          "sport_key": "basketball",
+          "gender_scope": "women",
+          "home_aliases": ["Portland Fire"],
+          "away_aliases": ["Indiana Fever"]
+        },
+        {
+          "event_name": "Ventura County FC - Vancouver Whitecaps FC II",
+          "url": "https://www.flashscore.dk/kamp/fodbold/vancouver-whitecaps-WMfe0dBA/ventura-county-WOJqY4Dg/?mid=d49fyUfK",
+          "sport_key": "football",
+          "home_aliases": ["Ventura County FC", "Ventura County"],
+          "away_aliases": ["Vancouver Whitecaps FC II", "Vancouver Whitecaps 2", "Vancouver Whitecaps II"]
+        },
+        {
+          "event_name": "Universidad De Chile - Deportes Concepcion",
+          "url": "https://www.flashscore.dk/kamp/fodbold/dep-concepcion-GKJrZE7I/u-de-chile-xW771C6U/?mid=lnfOlX2d",
+          "sport_key": "football",
+          "home_aliases": ["Universidad De Chile", "U. De Chile", "U de Chile"],
+          "away_aliases": ["Deportes Concepcion", "Dep. Concepcion"]
+        },
+        {
+          "event_name": "Santos FC - EC Vitoria BA",
+          "url": "https://www.flashscore.dk/kamp/fodbold/santos-n3QdnjFB/vitoria-8bSbHipn/?mid=C8XJVmQE",
+          "sport_key": "football",
+          "home_aliases": ["Santos FC", "Santos"],
+          "away_aliases": ["EC Vitoria BA", "Vitoria", "Vitória"]
+        },
+        {
+          "event_name": "Flamengo - Coritiba FC PR",
+          "url": "https://www.flashscore.dk/kamp/fodbold/coritiba-KGO4pUqO/flamengo-WjxY29qB/?mid=4hXP963e",
+          "sport_key": "football",
+          "home_aliases": ["Flamengo", "CR Flamengo"],
+          "away_aliases": ["Coritiba FC PR", "Coritiba"]
+        },
+        {
+          "event_name": "Asvel Lyon Villeurbanne - Cholet Basket",
+          "url": "https://www.flashscore.dk/kamp/basketball/cholet-6TSpW3Cb/lyon-villeurbanne-KrXB5aC1/?mid=EaVDNjTN",
+          "sport_key": "basketball",
+          "home_aliases": ["Asvel Lyon Villeurbanne", "Lyon Villeurbanne", "ASVEL"],
+          "away_aliases": ["Cholet Basket", "Cholet"],
+          "home_score": 75,
+          "away_score": 80,
+          "regulation_home_score": 66,
+          "regulation_away_score": 66,
+          "result_status": "finished",
+          "result_observed_from": "operator_supplied_flashscore_result",
+          "notes": "Flashscore URL was supplied with ordinary time 66:66 and final decided score 75:80. Stored scores are oriented to the Danske Spil event order."
+        },
+        {
+          "event_name": "Toronto Tempo - Seattle Storm",
+          "url": "https://www.flashscore.dk/kamp/basketball/seattle-storm-I13pnDkc/toronto-tempo-OIT4w1Hi/?mid=biLWmVIE",
+          "sport_key": "basketball",
+          "gender_scope": "women",
+          "home_aliases": ["Toronto Tempo"],
+          "away_aliases": ["Seattle Storm"]
+        },
+        {
+          "event_name": "Athletic Club - Fortaleza",
+          "url": "https://www.flashscore.dk/kamp/fodbold/athletic-club-INXlw5Bp/fortaleza-42FbPIs2/?mid=WdPfwcR6",
+          "sport_key": "football",
+          "home_aliases": ["Athletic Club", "Athletic Club MG", "Athletic Club Futebol"],
+          "away_aliases": ["Fortaleza", "Fortaleza EC", "Fortaleza C.E.I.F."]
+        },
+        {
+          "event_name": "Paranaense - Mirassol FC SP",
+          "url": "https://www.flashscore.dk/kamp/fodbold/athletico-pr-UoAxb1Tq/mirassol-pQ8ryEe7/?mid=EcehSZzK",
+          "sport_key": "football",
+          "home_aliases": ["Paranaense", "Athletico PR", "Athletico Paranaense", "Athletico-PR", "CA Paranaense"],
+          "away_aliases": ["Mirassol FC SP", "Mirassol"]
+        },
+        {
+          "event_name": "Connecticut Sun - Los Angeles Sparks",
+          "url": "https://www.flashscore.dk/kamp/basketball/connecticut-sun-6P2QciK9/los-angeles-sparks-Ia6UdBZF/?mid=E5U3i9df",
+          "sport_key": "basketball",
+          "gender_scope": "women",
+          "home_aliases": ["Connecticut Sun"],
+          "away_aliases": ["Los Angeles Sparks", "LA Sparks"]
         }
       ]
     }'::jsonb
