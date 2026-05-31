@@ -8,6 +8,19 @@ RESULT_AGENT_IMAGE="${RESULT_AGENT_IMAGE:-$IMAGE}"
 BUILD_PROFILE="${BUILD_PROFILE:-k8s-dev}"
 DEPLOY_SCOPE="${DEPLOY_SCOPE:-auto}"
 SECRET_NAME="danske-spil-postgres-app"
+TMP_DIR="$(mktemp -d)"
+
+cleanup() {
+  rm -rf "$TMP_DIR"
+}
+trap cleanup EXIT
+
+render_manifest() {
+  local source="$1"
+  local destination="$2"
+  local image="$3"
+  sed "s|image: danske-spil-gambler:local|image: $image|g" "$source" > "$destination"
+}
 
 kubectl --context "$CONTEXT" get namespace "$NAMESPACE" >/dev/null 2>&1 || \
   kubectl --context "$CONTEXT" create namespace "$NAMESPACE"
@@ -24,6 +37,9 @@ if [ "$RESULT_AGENT_IMAGE" != "$IMAGE" ]; then
   docker tag "$IMAGE" "$RESULT_AGENT_IMAGE"
 fi
 
+render_manifest k8s/base/20-gambler.yaml "$TMP_DIR/20-gambler.yaml" "$IMAGE"
+render_manifest k8s/base/30-hermes-poc.yaml "$TMP_DIR/30-hermes-poc.yaml" "$IMAGE"
+
 if [ "$DEPLOY_SCOPE" = "auto" ]; then
   if kubectl --context "$CONTEXT" -n "$NAMESPACE" get cluster/danske-spil-postgres >/dev/null 2>&1 \
     && kubectl --context "$CONTEXT" -n "$NAMESPACE" get deployment/gambler-api >/dev/null 2>&1 \
@@ -38,11 +54,14 @@ fi
 
 case "$DEPLOY_SCOPE" in
   app)
-    kubectl --context "$CONTEXT" apply -f k8s/base/20-gambler.yaml
-    kubectl --context "$CONTEXT" apply -f k8s/base/30-hermes-poc.yaml
+    kubectl --context "$CONTEXT" apply -f "$TMP_DIR/20-gambler.yaml"
+    kubectl --context "$CONTEXT" apply -f "$TMP_DIR/30-hermes-poc.yaml"
     ;;
   full)
-    kubectl --context "$CONTEXT" apply -f k8s/base
+    kubectl --context "$CONTEXT" apply -f k8s/base/00-namespace.yaml
+    kubectl --context "$CONTEXT" apply -f k8s/base/10-postgres-cluster.yaml
+    kubectl --context "$CONTEXT" apply -f "$TMP_DIR/20-gambler.yaml"
+    kubectl --context "$CONTEXT" apply -f "$TMP_DIR/30-hermes-poc.yaml"
     ;;
   *)
     echo "DEPLOY_SCOPE must be one of: auto, app, full" >&2
@@ -50,10 +69,9 @@ case "$DEPLOY_SCOPE" in
     ;;
 esac
 
-kubectl --context "$CONTEXT" -n "$NAMESPACE" set image deployment/gambler-api gambler-api="$IMAGE"
-kubectl --context "$CONTEXT" -n "$NAMESPACE" set image deployment/gambler-worker gambler-worker="$IMAGE"
-kubectl --context "$CONTEXT" -n "$NAMESPACE" set image deployment/gambler-result-agent gambler-result-agent="$RESULT_AGENT_IMAGE"
-kubectl --context "$CONTEXT" -n "$NAMESPACE" set image deployment/hermes-agent hermes-agent="$IMAGE"
+if [ "$RESULT_AGENT_IMAGE" != "$IMAGE" ]; then
+  kubectl --context "$CONTEXT" -n "$NAMESPACE" set image deployment/gambler-result-agent gambler-result-agent="$RESULT_AGENT_IMAGE"
+fi
 if [ "$DEPLOY_SCOPE" = "full" ]; then
   kubectl --context "$CONTEXT" -n "$NAMESPACE" wait --for=condition=Ready cluster/danske-spil-postgres --timeout=300s
 fi

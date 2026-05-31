@@ -56,7 +56,9 @@ Deployment scope is controlled with `DEPLOY_SCOPE=auto|app|full`. The default
 four app deployments already exist; otherwise it falls back to a full bootstrap.
 `app` applies only the app and Hermes manifests and skips the CloudNativePG
 manifest and Postgres readiness wait. `full` applies all manifests and waits for
-Postgres.
+Postgres. The deploy script renders the app image tag into temporary manifests
+before applying them, so app-only deploys do not first roll workloads to the
+checked-in `:local` image and then patch them to the built tag.
 
 `rtk make docker-build` builds the shared scratch-container image without
 applying Kubernetes manifests. `rtk make k8s-status` prints the current local

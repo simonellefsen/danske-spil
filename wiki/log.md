@@ -448,3 +448,7 @@ Append-only timeline for project wiki maintenance. Use headings with the format 
 
 - Added `DEPLOY_SCOPE=auto|app|full` to the local Kubernetes deploy script so normal app iterations can skip CloudNativePG manifest apply and the Postgres readiness wait after the namespace is bootstrapped.
 - Added `rtk make k8s-deploy-app` and `rtk make k8s-deploy-full` convenience targets while keeping `rtk make k8s-deploy` on automatic scope detection.
+
+## [2026-05-31] implementation | Rendered app deploy manifests
+
+- Changed the local deploy script to render the built image tag into temporary app/Hermes manifests before applying them, avoiding the previous intermediate rollout through the checked-in `:local` image.
