@@ -13,6 +13,12 @@ copying the real source and rebuilding the application binaries. The legacy
 `Dockerfile.result-agent` remains available for isolated result-agent image
 experiments, but the normal Makefile and deploy script no longer use it.
 
+Local Makefile and deploy-script builds default to `BUILD_PROFILE=k8s-dev`.
+That Cargo profile keeps optimization off and strips debug info, which is much
+faster for Docker Desktop iteration while still producing scratch-container
+binaries. Use `BUILD_PROFILE=release rtk make docker-build` or
+`rtk make docker-build-release` when an optimized release image is needed.
+
 ## Components
 
 - `danske-spil-postgres`: CloudNativePG cluster with two instances.
@@ -44,6 +50,14 @@ running a second Docker build.
 `rtk make docker-build` builds the shared scratch-container image without
 applying Kubernetes manifests. `rtk make k8s-status` prints the current local
 namespace pods, deployments, services, and CNPG cluster state.
+
+Useful build variants:
+
+```bash
+rtk make docker-build
+BUILD_PROFILE=release rtk make docker-build
+rtk make docker-build-release
+```
 
 ## Open The Web UI
 

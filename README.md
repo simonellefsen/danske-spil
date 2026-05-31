@@ -7,7 +7,7 @@ The initial project goal is to understand the site, maintain a durable LLM wiki,
 ## Current Status
 
 - Active POC implementation is Rust with a Dioxus-rendered web UI shell.
-- Runtime deployments use a multi-stage Docker build with a `scratch` final image. The normal local deploy builds one shared image containing both `/gambler` and `/result-agent` to avoid a second Rust compile while still running the result agent as a separate Kubernetes deployment.
+- Runtime deployments use a multi-stage Docker build with a `scratch` final image. The normal local deploy builds one shared image containing both `/gambler` and `/result-agent` to avoid a second Rust compile while still running the result agent as a separate Kubernetes deployment. Local Makefile deploys default to the fast `k8s-dev` Cargo profile; use `BUILD_PROFILE=release` or `rtk make docker-build-release` for optimized release images.
 - `.env.local` is ignored and must hold credentials locally.
 - The `gambler` agent may observe, model, and prepare candidate coupons.
 - `gambler` should scan and monitor markets, simulate bet placement, keep a ledger, and reconcile final outcomes.

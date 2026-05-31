@@ -5,6 +5,7 @@ CONTEXT="${KUBE_CONTEXT:-docker-desktop}"
 NAMESPACE="${NAMESPACE:-danske-spil}"
 IMAGE="${IMAGE:-danske-spil-gambler:$(date +%Y%m%d%H%M%S)}"
 RESULT_AGENT_IMAGE="${RESULT_AGENT_IMAGE:-$IMAGE}"
+BUILD_PROFILE="${BUILD_PROFILE:-k8s-dev}"
 SECRET_NAME="danske-spil-postgres-app"
 
 kubectl --context "$CONTEXT" get namespace "$NAMESPACE" >/dev/null 2>&1 || \
@@ -17,7 +18,7 @@ if ! kubectl --context "$CONTEXT" -n "$NAMESPACE" get secret "$SECRET_NAME" >/de
     --from-literal=password="$PASSWORD"
 fi
 
-docker build -t "$IMAGE" .
+docker build --build-arg "BUILD_PROFILE=$BUILD_PROFILE" -t "$IMAGE" .
 if [ "$RESULT_AGENT_IMAGE" != "$IMAGE" ]; then
   docker tag "$IMAGE" "$RESULT_AGENT_IMAGE"
 fi

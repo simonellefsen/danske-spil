@@ -434,3 +434,8 @@ Append-only timeline for project wiki maintenance. Use headings with the format 
 
 - Changed the normal Docker/Kubernetes build path to produce one scratch image containing both `/gambler` and `/result-agent`, with the result-agent deployment selecting `/result-agent` via its container command.
 - Added Docker BuildKit Cargo cache mounts and removed the second result-agent Docker compile from `make docker-build` and `scripts/deploy_local_k8s.sh`; separate result-agent runtime isolation is preserved at the Kubernetes deployment/service layer.
+
+## [2026-05-31] implementation | Fast local Docker profile
+
+- Added a `k8s-dev` Cargo profile and made local Makefile/deploy Docker builds use it by default, keeping scratch containers but avoiding release optimization during normal Docker Desktop iteration.
+- Kept optimized image builds available through `BUILD_PROFILE=release` and `rtk make docker-build-release`.
