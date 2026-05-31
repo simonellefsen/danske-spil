@@ -37,14 +37,15 @@ the teams or players, sport, event date, market, selected outcome, and optional
 source URLs, what public result truth can be verified?
 
 The prompt input includes the event name, parsed home/away names when possible,
-sport key, competition, market name/kind, selected outcome, event `start_time`,
-`expected_result_check_after`, and a `Europe/Copenhagen` timezone hint. If the
-provider result page has a different participant order, the worker must still
-orient the answer back to the Danske Spil event order.
+sport key, explicit `tournament_name`, competition, market name/kind, selected
+outcome, event `start_time`, `expected_result_check_after`, and a
+`Europe/Copenhagen` timezone hint. If the provider result page has a different
+participant order, the worker must still orient the answer back to the Danske
+Spil event order.
 
 The expected response is JSON only. It must include `source_key`, `source_url`,
 `event_name`, `sport_key`, `result_status`, `confidence`,
-`raw_text_excerpt`, and `settle=false`. Score fields are explicit:
+`tournament_name`, `raw_text_excerpt`, and `settle=false`. Score fields are explicit:
 `home_score`/`away_score`, optional regulation score, and optional
 penalty-shootout score. This is important for football knockout games where a
 normal full-time winner market can settle from a draw, while a qualification or
@@ -56,6 +57,13 @@ The prompt safety contract forbids signing in, using private account data,
 placing bets, posting settlement, storing credentials, or storing cookies. The
 result can be used as evidence input, but deterministic settlement remains in
 the API settlement code path.
+
+External result links and evidence also store `tournament_name` when available.
+For existing Danske Spil rows this is usually copied from the feed
+`competition` value, for example `UTR San Luis Obispo, herrer`. This is
+deliberately sport-neutral: football leagues, basketball competitions, tennis
+tournaments, motorsports series, and golf events all use the same field so
+result lookup can narrow ambiguous participant names.
 
 Tasks are ordered by priority score. The score is paper stake weighted by
 overdue age, which keeps the agent deterministic while making stale,

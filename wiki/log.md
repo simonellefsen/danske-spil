@@ -424,3 +424,8 @@ Append-only timeline for project wiki maintenance. Use headings with the format 
 - Added durable Flashscore known-match mappings for the latest unresolved basketball and football backlog rows, including reversed provider order aliases and Paranaense/Athletico-PR variants.
 - After inserting the supplied live result links, the settlement review backlog fell from 13 rows to 2 rows, and yesterday settlement progress improved from 19/34 to 27/34 paper positions.
 - Added a paper-only `result_lookup_prompt` contract to result-agent queue tasks so an LLM/browser worker can verify public result truth from teams or players, sport, event time, timezone, market context, and configured result URLs without signing in or posting settlement.
+
+## [2026-05-31] implementation | Tournament context for result lookup
+
+- Added explicit `tournament_name` context to result-agent selections, lookup prompts, external result links, and external result evidence while preserving the existing `competition` label.
+- Documented that unresolved UTR tennis rows should treat weather/scheduling suspension claims as leads until a public source is attached; the result lookup contract now asks workers to return postponed, suspended, refunded, or unknown status instead of inventing scores.

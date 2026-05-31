@@ -1227,6 +1227,7 @@ fn result_agent_task(item: &Value, account_agent: &Value) -> Option<Value> {
         "event_names": event_names,
         "sport_key": item.get("sport_key").cloned().unwrap_or(Value::Null),
         "competition": item.get("competition").cloned().unwrap_or(Value::Null),
+        "tournament_name": item.get("tournament_name").cloned().unwrap_or_else(|| item.get("competition").cloned().unwrap_or(Value::Null)),
         "market_name": item.get("market_name").cloned().unwrap_or(Value::Null),
         "market_kind": item.get("market_kind").cloned().unwrap_or(Value::Null),
         "outcome_name": item.get("outcome_name").cloned().unwrap_or(Value::Null),
@@ -1320,6 +1321,7 @@ fn account_history_request(item: &Value) -> Option<Value> {
         "event_names": event_names,
         "sport_key": item.get("sport_key").cloned().unwrap_or(Value::Null),
         "competition": item.get("competition").cloned().unwrap_or(Value::Null),
+        "tournament_name": item.get("tournament_name").cloned().unwrap_or_else(|| item.get("competition").cloned().unwrap_or(Value::Null)),
         "market_name": item.get("market_name").cloned().unwrap_or(Value::Null),
         "market_kind": item.get("market_kind").cloned().unwrap_or(Value::Null),
         "outcome_name": item.get("outcome_name").cloned().unwrap_or(Value::Null),
@@ -1387,6 +1389,9 @@ fn result_lookup_prompt(item: &Value, selection: &Value, source_links: &[Value])
     let event_name = text(selection, "event_name").unwrap_or("unknown event");
     let sport_key = text(selection, "sport_key").unwrap_or("unknown sport");
     let competition = text(selection, "competition").unwrap_or("unknown competition");
+    let tournament_name = text(selection, "tournament_name")
+        .or_else(|| text(selection, "competition"))
+        .unwrap_or("unknown tournament");
     let market_name = text(selection, "market_name").unwrap_or("unknown market");
     let market_kind = text(selection, "market_kind").unwrap_or("unknown market kind");
     let outcome_name = text(selection, "outcome_name").unwrap_or("unknown outcome");
@@ -1404,7 +1409,11 @@ fn result_lookup_prompt(item: &Value, selection: &Value, source_links: &[Value])
             link.get("source_url").and_then(Value::as_str).map(|url| {
                 json!({
                     "source_key": link.get("source_key").cloned().unwrap_or(Value::Null),
-                    "source_url": url
+                    "source_url": url,
+                    "tournament_name": link.get("tournament_name")
+                        .or_else(|| link.get("competition"))
+                        .cloned()
+                        .unwrap_or(Value::Null)
                 })
             })
         })
@@ -1413,7 +1422,7 @@ fn result_lookup_prompt(item: &Value, selection: &Value, source_links: &[Value])
         "Resolve the final result for a paper-only simulated betting ledger row. \
 Use read-only public result evidence only. Do not sign in, do not use private account data, \
 do not place bets, and do not submit settlement directly. Event: {event_name}. \
-Sport: {sport_key}. Competition: {competition}. Market: {market_name} ({market_kind}). \
+Sport: {sport_key}. Tournament/league: {tournament_name}. Competition: {competition}. Market: {market_name} ({market_kind}). \
 Selected outcome: {outcome_name}. Event timestamps are ISO-8601; if a source omits timezone, \
 interpret the bookmaker-local event date in Europe/Copenhagen and explain any date ambiguity. \
 Return only JSON matching the supplied schema. Distinguish regulation/full-time score from \
@@ -1431,6 +1440,7 @@ do not invent a score. Include the exact source URL and a short non-sensitive ex
             "away_name": away_name,
             "sport_key": sport_key,
             "competition": competition,
+            "tournament_name": tournament_name,
             "market_name": market_name,
             "market_kind": market_kind,
             "outcome_name": outcome_name,
@@ -1448,6 +1458,7 @@ do not invent a score. Include the exact source URL and a short non-sensitive ex
                 "source_url",
                 "event_name",
                 "sport_key",
+                "tournament_name",
                 "result_status",
                 "confidence",
                 "raw_text_excerpt",
@@ -1458,6 +1469,7 @@ do not invent a score. Include the exact source URL and a short non-sensitive ex
                 "source_url": {"type": "string"},
                 "event_name": {"type": "string"},
                 "sport_key": {"type": "string"},
+                "tournament_name": {"type": ["string", "null"]},
                 "home_name": {"type": ["string", "null"]},
                 "away_name": {"type": ["string", "null"]},
                 "home_score": {"type": ["integer", "null"]},
@@ -1562,12 +1574,21 @@ fn result_agent_search_terms(item: &Value, event_names: &[String]) -> Vec<String
         .get("competition")
         .and_then(Value::as_str)
         .unwrap_or_default();
+    let tournament_name = item
+        .get("tournament_name")
+        .or_else(|| item.get("competition"))
+        .and_then(Value::as_str)
+        .unwrap_or_default();
     let mut terms = Vec::new();
     for event_name in event_names {
         terms.push(event_name.to_string());
         if !competition.is_empty() {
             terms.push(format!("{event_name} {competition}"));
             terms.push(format!("{competition} {event_name} final result"));
+        }
+        if !tournament_name.is_empty() && tournament_name != competition {
+            terms.push(format!("{event_name} {tournament_name}"));
+            terms.push(format!("{tournament_name} {event_name} final result"));
         }
         if !sport.is_empty() {
             terms.push(format!("{event_name} {sport} result"));
@@ -1865,6 +1886,7 @@ struct FlashscoreParticipant {
 struct FlashscoreEvidence {
     source_url: String,
     sport_key: String,
+    tournament_name: Option<String>,
     gender_scope: Option<String>,
     event_name: String,
     home_name: String,
@@ -1891,6 +1913,7 @@ struct FlashscoreDiscovery {
 struct FlashscoreStatusEvidence {
     source_url: String,
     sport_key: String,
+    tournament_name: Option<String>,
     gender_scope: Option<String>,
     event_name: String,
     home_name: String,
@@ -1910,6 +1933,8 @@ impl FlashscoreEvidence {
             "source_key": FLASHSCORE_SOURCE_KEY,
             "source_url": self.source_url,
             "sport_key": self.sport_key,
+            "tournament_name": self.tournament_name.clone(),
+            "competition": self.tournament_name.clone(),
             "gender_scope": self.gender_scope,
             "event_name": self.event_name,
             "home_aliases": self.home_aliases,
@@ -1933,6 +1958,8 @@ impl FlashscoreEvidence {
             "source_title": format!("{} - {} {}:{}", self.home_name, self.away_name, self.home_score, self.away_score),
             "event_name": self.event_name,
             "sport_key": self.sport_key,
+            "tournament_name": self.tournament_name.clone(),
+            "competition": self.tournament_name.clone(),
             "gender_scope": self.gender_scope,
             "home_name": self.home_name,
             "away_name": self.away_name,
@@ -1959,6 +1986,8 @@ impl FlashscoreStatusEvidence {
             "source_key": FLASHSCORE_SOURCE_KEY,
             "source_url": self.source_url,
             "sport_key": self.sport_key,
+            "tournament_name": self.tournament_name.clone(),
+            "competition": self.tournament_name.clone(),
             "gender_scope": self.gender_scope,
             "event_name": self.event_name,
             "home_aliases": self.home_aliases,
@@ -1982,6 +2011,8 @@ impl FlashscoreStatusEvidence {
             "source_key": FLASHSCORE_SOURCE_KEY,
             "source_url": self.source_url,
             "event_name": self.event_name,
+            "tournament_name": self.tournament_name.clone(),
+            "competition": self.tournament_name.clone(),
             "home_name": self.home_name,
             "away_name": self.away_name,
             "event_id": self.event_id,
@@ -2052,6 +2083,13 @@ async fn flashscore_discover(
     };
     diagnostics.insert("home_name".to_string(), json!(home_name));
     diagnostics.insert("away_name".to_string(), json!(away_name));
+    let tournament_name = text(selection, "tournament_name")
+        .or_else(|| text(selection, "competition"))
+        .map(str::to_string);
+    diagnostics.insert(
+        "tournament_name".to_string(),
+        json!(tournament_name.clone()),
+    );
     let gender_scope = infer_selection_gender_scope(selection);
     diagnostics.insert("gender_scope".to_string(), json!(gender_scope));
     let expected_check_after = text(task, "expected_result_check_after")
@@ -2067,6 +2105,7 @@ async fn flashscore_discover(
             event_name,
             &home_name,
             &away_name,
+            tournament_name.clone(),
             gender_scope,
             expected_check_after,
             diagnostics,
@@ -2280,6 +2319,7 @@ async fn flashscore_discover(
     let evidence = FlashscoreEvidence {
         source_url,
         sport_key,
+        tournament_name,
         gender_scope,
         event_name: event_name.to_string(),
         home_name: feed_home.clone(),
@@ -2311,6 +2351,7 @@ async fn flashscore_discover_tennis_doubles(
     event_name: &str,
     home_name: &str,
     away_name: &str,
+    tournament_name: Option<String>,
     gender_scope: Option<String>,
     expected_check_after: Option<DateTime<Utc>>,
     mut diagnostics: serde_json::Map<String, Value>,
@@ -2500,6 +2541,7 @@ async fn flashscore_discover_tennis_doubles(
         let evidence = FlashscoreEvidence {
             source_url,
             sport_key,
+            tournament_name,
             gender_scope,
             event_name: event_name.to_string(),
             home_name: home_name.to_string(),
@@ -2530,6 +2572,7 @@ async fn flashscore_discover_tennis_doubles(
         let status_evidence = FlashscoreStatusEvidence {
             source_url,
             sport_key,
+            tournament_name,
             gender_scope,
             event_name: event_name.to_string(),
             home_name: home_name.to_string(),
@@ -4069,12 +4112,20 @@ mod tests {
                 .and_then(Value::as_str),
             Some("Indiana Fever")
         );
+        assert_eq!(
+            prompt
+                .get("input")
+                .and_then(|input| input.get("tournament_name"))
+                .and_then(Value::as_str),
+            Some("WNBA")
+        );
         let required = prompt
             .get("expected_json_schema")
             .and_then(|schema| schema.get("required"))
             .and_then(Value::as_array)
             .unwrap();
         assert!(required.contains(&json!("source_url")));
+        assert!(required.contains(&json!("tournament_name")));
         assert!(required.contains(&json!("result_status")));
         assert!(required.contains(&json!("raw_text_excerpt")));
         assert_eq!(

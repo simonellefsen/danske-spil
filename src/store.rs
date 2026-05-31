@@ -760,6 +760,8 @@ CREATE TABLE IF NOT EXISTS settlement_observations (
 );
 
 ALTER TABLE settlement_observations ADD COLUMN IF NOT EXISTS simulated_coupon_id text REFERENCES simulated_coupons(id) ON DELETE CASCADE;
+ALTER TABLE IF EXISTS external_result_links ADD COLUMN IF NOT EXISTS tournament_name text;
+ALTER TABLE IF EXISTS external_result_evidence ADD COLUMN IF NOT EXISTS tournament_name text;
 
 CREATE TABLE IF NOT EXISTS settlement_lookup_attempts (
   id text PRIMARY KEY,
@@ -781,6 +783,7 @@ CREATE TABLE IF NOT EXISTS external_result_evidence (
   created_at timestamptz NOT NULL DEFAULT now(),
   source_key text REFERENCES source_registry(source_key),
   source_url text,
+  tournament_name text,
   event_name text NOT NULL,
   home_name text NOT NULL,
   away_name text NOT NULL,
@@ -802,6 +805,7 @@ CREATE TABLE IF NOT EXISTS external_result_links (
   source_key text NOT NULL REFERENCES source_registry(source_key),
   event_name text NOT NULL,
   source_url text NOT NULL,
+  tournament_name text,
   home_aliases text[] NOT NULL DEFAULT '{}',
   away_aliases text[] NOT NULL DEFAULT '{}',
   requires_browser_automation boolean NOT NULL DEFAULT false,
@@ -3868,6 +3872,8 @@ impl Store {
             "source_key": evidence.source_key,
             "source_url": evidence.url,
             "source_title": evidence.title,
+            "tournament_name": link.tournament_name.clone(),
+            "competition": link.tournament_name.clone(),
             "event_name": event_name,
             "home_name": evidence.home_name,
             "away_name": evidence.away_name,
@@ -3910,15 +3916,16 @@ impl Store {
             .execute(
                 r#"
                 INSERT INTO external_result_evidence (
-                  id, source_key, source_url, event_name, home_name, away_name,
+                  id, source_key, source_url, tournament_name, event_name, home_name, away_name,
                   home_score, away_score, confidence, payload
                 )
-                VALUES ($1,$2,$3,$4,$5,$6,$7,$8,($9::float8)::numeric,$10)
+                VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,($10::float8)::numeric,$11)
                 "#,
                 &[
                     &evidence_id,
                     &evidence.source_key,
                     &source_url,
+                    &link.tournament_name,
                     &event_name,
                     &evidence.home_name,
                     &evidence.away_name,
@@ -3960,6 +3967,7 @@ impl Store {
             .or_else(|| payload.get("title"))
             .and_then(Value::as_str)
             .map(str::to_string);
+        let tournament_name = payload_tournament_name(payload);
         if source_key == "danskespil_account_history" {
             if let Some(settlement_result) = account_history_settlement_result(payload) {
                 return self
@@ -4051,6 +4059,8 @@ impl Store {
             "source_record": source_record,
             "source_url": source_url,
             "source_title": title,
+            "tournament_name": tournament_name.clone(),
+            "competition": tournament_name.clone(),
             "event_name": event_name,
             "home_name": home_name,
             "away_name": away_name,
@@ -4074,15 +4084,16 @@ impl Store {
             .execute(
                 r#"
                 INSERT INTO external_result_evidence (
-                  id, source_key, source_url, event_name, home_name, away_name,
+                  id, source_key, source_url, tournament_name, event_name, home_name, away_name,
                   home_score, away_score, confidence, payload
                 )
-                VALUES ($1,$2,$3,$4,$5,$6,$7,$8,($9::float8)::numeric,$10)
+                VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,($10::float8)::numeric,$11)
                 "#,
                 &[
                     &evidence_id,
                     &source_key,
                     &source_url,
+                    &tournament_name,
                     &event_name,
                     &home_name,
                     &away_name,
@@ -4170,6 +4181,7 @@ impl Store {
                     source_key: source_key.to_string(),
                     url: source_url.clone().unwrap_or_default(),
                     sport_key: sport_key.map(str::to_string),
+                    tournament_name: tournament_name.clone(),
                     gender_scope: gender_scope.clone(),
                     home_aliases: json_string_array(payload.get("home_aliases")),
                     away_aliases: json_string_array(payload.get("away_aliases")),
@@ -6951,6 +6963,7 @@ impl Store {
             .and_then(Value::as_str)
             .map(str::trim)
             .filter(|value| !value.is_empty());
+        let tournament_name = payload_tournament_name(payload);
         let gender_scope = payload_gender_scope(payload)?;
         let source_requires_browser = source_record
             .get("payload")
@@ -6965,6 +6978,8 @@ impl Store {
             "paper_only": true,
             "operator_configured": true,
             "sport_key": sport_key,
+            "tournament_name": tournament_name.clone(),
+            "competition": tournament_name.clone(),
             "gender_scope": gender_scope.as_deref(),
             "source_record": source_record,
             "notes": payload.get("notes").cloned().unwrap_or(Value::Null)
@@ -6974,12 +6989,13 @@ impl Store {
             .query_one(
                 r#"
                 INSERT INTO external_result_links (
-                  id, source_key, event_name, source_url, home_aliases, away_aliases,
+                  id, source_key, event_name, source_url, tournament_name, home_aliases, away_aliases,
                   requires_browser_automation, payload
                 )
-                VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
+                VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)
                 ON CONFLICT (source_key, event_name, source_url) DO UPDATE
-                SET home_aliases = EXCLUDED.home_aliases,
+                SET tournament_name = EXCLUDED.tournament_name,
+                    home_aliases = EXCLUDED.home_aliases,
                     away_aliases = EXCLUDED.away_aliases,
                     requires_browser_automation = EXCLUDED.requires_browser_automation,
                     payload = EXCLUDED.payload,
@@ -6991,6 +7007,7 @@ impl Store {
                     &source_key,
                     &event_name,
                     &source_url,
+                    &tournament_name,
                     &home_aliases,
                     &away_aliases,
                     &requires_browser_automation,
@@ -7077,6 +7094,7 @@ impl Store {
             source_key: source_key.to_string(),
             url: source_url.to_string(),
             sport_key: sport_key.map(str::to_string),
+            tournament_name: tournament_name.clone(),
             gender_scope: gender_scope.clone(),
             home_aliases: expanded_home_aliases,
             away_aliases: expanded_away_aliases,
@@ -7125,6 +7143,7 @@ impl Store {
                   sr.source_name,
                   erl.event_name,
                   erl.source_url,
+                  erl.tournament_name,
                   erl.home_aliases,
                   erl.away_aliases,
                   erl.requires_browser_automation,
@@ -7152,6 +7171,9 @@ impl Store {
                 .map(str::to_string);
             let gender_scope = payload_gender_scope(&payload).ok().flatten();
             let event_name = row.get::<_, String>("event_name");
+            let tournament_name = row
+                .get::<_, Option<String>>("tournament_name")
+                .or_else(|| payload_tournament_name(&payload));
             let home_aliases = row.get::<_, Vec<String>>("home_aliases");
             let away_aliases = row.get::<_, Vec<String>>("away_aliases");
             let use_alias_registry =
@@ -7187,6 +7209,8 @@ impl Store {
                 "event_name": event_name,
                 "source_url": row.get::<_, String>("source_url"),
                 "sport_key": sport_scope,
+                "tournament_name": tournament_name.clone(),
+                "competition": tournament_name,
                 "gender_scope": gender_scope,
                 "home_aliases": home_aliases,
                 "away_aliases": away_aliases,
@@ -7352,6 +7376,7 @@ impl Store {
                   created_at,
                   source_key,
                   source_url,
+                  tournament_name,
                   event_name,
                   home_name,
                   away_name,
@@ -7376,6 +7401,8 @@ impl Store {
                     "created_at": created_at,
                     "source_key": row.get::<_, Option<String>>("source_key"),
                     "source_url": row.get::<_, Option<String>>("source_url"),
+                    "tournament_name": row.get::<_, Option<String>>("tournament_name"),
+                    "competition": row.get::<_, Option<String>>("tournament_name"),
                     "event_name": row.get::<_, String>("event_name"),
                     "home_name": row.get::<_, String>("home_name"),
                     "away_name": row.get::<_, String>("away_name"),
@@ -9820,6 +9847,7 @@ struct ExternalResultLink {
     source_key: String,
     url: String,
     sport_key: Option<String>,
+    tournament_name: Option<String>,
     gender_scope: Option<String>,
     home_aliases: Vec<String>,
     away_aliases: Vec<String>,
@@ -10091,6 +10119,7 @@ fn external_result_links_for_event(
                             .map(str::trim)
                             .filter(|value| !value.is_empty())
                             .map(str::to_string),
+                        tournament_name: payload_tournament_name(item),
                         gender_scope: payload_gender_scope(item).ok().flatten(),
                         home_aliases: json_string_array(item.get("home_aliases")),
                         away_aliases: json_string_array(item.get("away_aliases")),
@@ -10142,6 +10171,8 @@ fn external_result_link_json(link: &ExternalResultLink) -> Value {
         "source_key": link.source_key.clone(),
         "source_url": link.url.clone(),
         "sport_key": link.sport_key.clone(),
+        "tournament_name": link.tournament_name.clone(),
+        "competition": link.tournament_name.clone(),
         "gender_scope": link.gender_scope.clone(),
         "home_aliases": link.home_aliases.clone(),
         "away_aliases": link.away_aliases.clone(),
@@ -10237,6 +10268,20 @@ fn payload_gender_scope(payload: &Value) -> anyhow::Result<Option<String>> {
     normalize_gender_scope(raw)
         .map(|value| Some(value.to_string()))
         .ok_or_else(|| anyhow!("unsupported gender_scope: {raw}"))
+}
+
+fn payload_tournament_name(payload: &Value) -> Option<String> {
+    payload
+        .get("tournament_name")
+        .or_else(|| payload.get("tournament"))
+        .or_else(|| payload.get("competition"))
+        .or_else(|| payload.get("competition_name"))
+        .or_else(|| payload.get("league_name"))
+        .or_else(|| payload.get("league"))
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(str::to_string)
 }
 
 fn normalize_gender_scope(value: &str) -> Option<&'static str> {
@@ -10361,6 +10406,7 @@ fn external_result_link_from_task_source(value: &Value) -> Option<ExternalResult
             .map(str::trim)
             .filter(|value| !value.is_empty())
             .map(str::to_string),
+        tournament_name: payload_tournament_name(value),
         gender_scope: payload_gender_scope(value).ok().flatten(),
         home_aliases: json_string_array(value.get("home_aliases")),
         away_aliases: json_string_array(value.get("away_aliases")),
@@ -11396,6 +11442,7 @@ mod tests {
             source_key: "flashscore_results".to_string(),
             url: "https://www.flashscore.com/match/football/notts-county-EwJVdqzn/salford-W4AadhN3/?mid=E3uvsQPP".to_string(),
             sport_key: Some("football".to_string()),
+            tournament_name: None,
             gender_scope: None,
             home_aliases: vec!["Notts Co".to_string(), "Notts County".to_string()],
             away_aliases: vec!["Salford".to_string(), "Salford City FC".to_string()],
@@ -11452,6 +11499,7 @@ mod tests {
             source_key: "xscores_results".to_string(),
             url: "https://www.xscores.com/tennis/match/brendan-loh-vs-marcus-schoeman/26-05-2026/2783346".to_string(),
             sport_key: Some("tennis".to_string()),
+            tournament_name: None,
             gender_scope: Some("men".to_string()),
             home_aliases: vec!["Brendan Loh".to_string()],
             away_aliases: vec!["Marcus Schoeman".to_string()],
@@ -11484,6 +11532,7 @@ mod tests {
             source_key: "xscores_results".to_string(),
             url: "https://www.xscores.com/soccer/match/international/paris-saint-germain-vs-arsenal/2025-2026/2684736".to_string(),
             sport_key: Some("football".to_string()),
+            tournament_name: None,
             gender_scope: None,
             home_aliases: vec![
                 "Paris SG".to_string(),
@@ -11734,6 +11783,7 @@ mod tests {
             url: "https://www.flashscore.dk/kamp/fodbold/andorra-dnO5z404/irak-K8aAGt6r/"
                 .to_string(),
             sport_key: Some("football".to_string()),
+            tournament_name: None,
             gender_scope: None,
             home_aliases: vec!["Andorra".to_string()],
             away_aliases: vec!["Irak".to_string(), "Iraq".to_string()],
@@ -11768,6 +11818,7 @@ mod tests {
             source_key: "flashscore_results".to_string(),
             url: "https://www.flashscore.dk/kamp/basketball/fuenlabrada-E1z0hlIr/palencia-hMgAw6Je/?mid=4UaIOcR6".to_string(),
             sport_key: Some("basketball".to_string()),
+            tournament_name: None,
             gender_scope: None,
             home_aliases: vec!["CD Maristas Palencia".to_string(), "Palencia".to_string()],
             away_aliases: vec!["Cb Fuenlabrada".to_string(), "Fuenlabrada".to_string()],
@@ -11802,6 +11853,7 @@ mod tests {
             url: "https://www.flashscore.com/match/basketball/antonine-xMbwy4Uk/nsa-xjRIpje7/"
                 .to_string(),
             sport_key: Some("basketball".to_string()),
+            tournament_name: None,
             gender_scope: None,
             home_aliases: vec!["Nsa".to_string(), "NSA".to_string()],
             away_aliases: vec![
@@ -11844,6 +11896,7 @@ mod tests {
             source_key: "flashscore_results".to_string(),
             url: "https://example.test/match".to_string(),
             sport_key: Some("football".to_string()),
+            tournament_name: None,
             gender_scope: None,
             home_aliases: vec!["Lyngby".to_string(), "Lyngby AC".to_string()],
             away_aliases: vec!["Horsens".to_string(), "AC Horsens".to_string()],
@@ -11895,6 +11948,7 @@ mod tests {
             url: "https://www.flashscore.dk/kamp/fodbold/andorra-dnO5z404/irak-K8aAGt6r/"
                 .to_string(),
             sport_key: Some("football".to_string()),
+            tournament_name: None,
             gender_scope: None,
             home_aliases: vec!["Andorra".to_string()],
             away_aliases: vec!["Irak".to_string(), "Iraq".to_string()],
@@ -11938,6 +11992,7 @@ mod tests {
             source_key: "flashscore_results".to_string(),
             url: "https://www.flashscore.dk/kamp/tennis/paul-tommy-pd3ye1BS/ruud-casper-zN9UpRqp/?mid=UHlr5dhM".to_string(),
             sport_key: Some("tennis".to_string()),
+            tournament_name: None,
             gender_scope: Some("men".to_string()),
             home_aliases: vec!["Casper Ruud".to_string()],
             away_aliases: vec!["Tommy Paul".to_string()],
@@ -11984,6 +12039,7 @@ mod tests {
             source_key: "flashscore_results".to_string(),
             url: "https://example.test/match".to_string(),
             sport_key: Some("football".to_string()),
+            tournament_name: None,
             gender_scope: None,
             home_aliases: vec!["Notts County".to_string()],
             away_aliases: vec!["Salford City".to_string()],
@@ -12030,6 +12086,7 @@ mod tests {
             source_key: "flashscore_results".to_string(),
             url: "https://www.flashscore.com/match/football/paris-sg-Sn7FHh3J/arsenal-pfchd3yB/?mid=EJZRaQ15".to_string(),
             sport_key: Some("football".to_string()),
+            tournament_name: None,
             gender_scope: None,
             home_aliases: vec![
                 "Paris SG".to_string(),
@@ -12126,6 +12183,7 @@ mod tests {
             source_key: "flashscore_results".to_string(),
             url: "https://example.test/match".to_string(),
             sport_key: Some("basketball".to_string()),
+            tournament_name: None,
             gender_scope: None,
             home_aliases: vec!["Team FOG Naestved".to_string()],
             away_aliases: vec!["Bakken Bears".to_string()],
